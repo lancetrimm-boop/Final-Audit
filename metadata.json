@@ -1,0 +1,8 @@
+{
+  "name": "Aura",
+  "description": "Aura Media Player / Aura Discovery OS with neural semantic search, MobileCLIP, and MiniLM on-device inference.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

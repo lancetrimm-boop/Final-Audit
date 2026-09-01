@@ -1,0 +1,152 @@
+package com.example.data.semantic
+
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Result of a top-K semantic candidate retrieval operation.
+ */
+data class SemanticRetrievalCandidate(
+    val mediaId: String,
+    val representationId: String,
+    val similarityScore: Float,
+    val type: SemanticRepresentationType,
+    val modelDescriptor: EmbeddingModelDescriptor,
+    val confidence: Float
+)
+
+/**
+ * High-level vector index contract supporting thread-safe insertion, removal, rebuild, and top-K query.
+ */
+interface VectorIndex {
+    val descriptor: EmbeddingModelDescriptor
+    val targetType: SemanticRepresentationType
+    val size: Int
+
+    fun add(representation: SemanticRepresentation)
+    fun addAll(representations: List<SemanticRepresentation>)
+    fun remove(representationId: String)
+    fun removeForMedia(mediaId: String)
+    fun clear()
+    fun rebuild(representations: List<SemanticRepresentation>)
+    fun query(queryVector: FloatArray, topK: Int = 20, minSimilarity: Float = -1.0f): List<SemanticRetrievalCandidate>
+}
+
+/**
+ * In-memory thread-safe candidate retrieval vector index.
+ *
+ * Implements exact cosine similarity with deterministic tie-breaking over normalized vectors.
+ * Architecture allows seamless replacement with HNSW/ScaNN without affecting downstream modules.
+ */
+class InMemoryVectorIndex(
+    override val descriptor: EmbeddingModelDescriptor,
+    override val targetType: SemanticRepresentationType = descriptor.primaryType
+) : VectorIndex {
+
+    // Map: representationId -> IndexedItem
+    private val entries = ConcurrentHashMap<String, IndexedItem>()
+
+    data class IndexedItem(
+        val representation: SemanticRepresentation,
+        val normalizedVector: FloatArray
+    )
+
+    override val size: Int
+        get() = entries.size
+
+    override fun add(representation: SemanticRepresentation) {
+        validateCompatibility(representation)
+        val normalized = VectorMath.l2Normalize(representation.vector)
+        entries[representation.id] = IndexedItem(representation, normalized)
+        android.util.Log.d("AuraSemanticTrace", "INDEX_INSERT mediaId=${representation.mediaId} dimension=${representation.dimensionality} success=true")
+    }
+
+    override fun addAll(representations: List<SemanticRepresentation>) {
+        for (rep in representations) {
+            add(rep)
+        }
+    }
+
+    override fun remove(representationId: String) {
+        entries.remove(representationId)
+    }
+
+    override fun removeForMedia(mediaId: String) {
+        val toRemove = entries.filterValues { it.representation.mediaId == mediaId }.keys
+        for (id in toRemove) {
+            entries.remove(id)
+        }
+    }
+
+    override fun clear() {
+        entries.clear()
+    }
+
+    override fun rebuild(representations: List<SemanticRepresentation>) {
+        entries.clear()
+        addAll(representations)
+    }
+
+    override fun query(
+        queryVector: FloatArray,
+        topK: Int,
+        minSimilarity: Float
+    ): List<SemanticRetrievalCandidate> {
+        android.util.Log.i("SEMANTIC_RETRIEVAL", "INDEX_QUERY: type=$targetType size=${entries.size} dim=${queryVector.size}")
+        if (queryVector.isEmpty() || entries.isEmpty() || topK <= 0) {
+            android.util.Log.w("SEMANTIC_RETRIEVAL", "INDEX_QUERY_ABORT: empty_query=${queryVector.isEmpty()} empty_index=${entries.isEmpty()}")
+            return emptyList()
+        }
+
+        VectorMath.validateVector(queryVector)
+        descriptor.validateVectorDimensionality(queryVector)
+
+        val normQuery = VectorMath.l2Normalize(queryVector)
+        
+        // FINGERPRINT: Deterministic hash of the first 8 elements of the query vector
+        val queryFingerprint = normQuery.take(8).joinToString(",") { String.format(java.util.Locale.US, "%.3f", it) }.hashCode()
+        android.util.Log.d("AuraSemanticTrace", "INDEX_QUERY queryDimension=${queryVector.size} indexSize=${entries.size} queryFingerprint=$queryFingerprint topK=$topK minSim=$minSimilarity")
+
+        // Track best score per mediaId to prevent duplicate media candidate records
+        val bestByMedia = mutableMapOf<String, SemanticRetrievalCandidate>()
+
+        for ((_, item) in entries) {
+            val rep = item.representation
+            val score = VectorMath.dotProduct(normQuery, item.normalizedVector)
+
+            if (score >= minSimilarity) {
+                val candidate = SemanticRetrievalCandidate(
+                    mediaId = rep.mediaId,
+                    representationId = rep.id,
+                    similarityScore = score,
+                    type = rep.type,
+                    modelDescriptor = rep.modelDescriptor,
+                    confidence = rep.confidence
+                )
+
+                val existing = bestByMedia[rep.mediaId]
+                if (existing == null || candidate.similarityScore > existing.similarityScore) {
+                    bestByMedia[rep.mediaId] = candidate
+                }
+            }
+        }
+
+        val results = bestByMedia.values
+            .sortedWith(
+                compareByDescending<SemanticRetrievalCandidate> { it.similarityScore }
+                    .thenBy { it.mediaId }
+            )
+            .take(topK)
+            
+        android.util.Log.d("AuraSemanticTrace", "INDEX_QUERY_COMPLETE found=${results.size} topScore=${results.firstOrNull()?.similarityScore}")
+        return results
+    }
+
+    private fun validateCompatibility(representation: SemanticRepresentation) {
+        require(representation.type == targetType) {
+            "Representation type mismatch for index. Expected $targetType, got ${representation.type}"
+        }
+        require(representation.modelDescriptor.isCompatibleWith(descriptor)) {
+            "Model descriptor incompatible with index. Expected $descriptor, got ${representation.modelDescriptor}"
+        }
+    }
+}
