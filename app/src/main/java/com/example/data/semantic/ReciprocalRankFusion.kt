@@ -44,6 +44,7 @@ object ReciprocalRankFusion {
             var totalRrfScore: Double = 0.0
             val channelRanks = mutableMapOf<SearchChannel, Int>()
             val channelScores = mutableMapOf<SearchChannel, Float>()
+            var isAuthoritativeLexical: Boolean = false
         }
 
         val accumulators = mutableMapOf<String, CandidateAccumulator>()
@@ -60,6 +61,10 @@ object ReciprocalRankFusion {
                 acc.totalRrfScore += contribution
                 acc.channelRanks[channel] = item.rank
                 acc.channelScores[channel] = item.rawScore
+                
+                if (item.metadata["is_authoritative"] == "true") {
+                    acc.isAuthoritativeLexical = true
+                }
             }
         }
 
@@ -76,16 +81,60 @@ object ReciprocalRankFusion {
             .take(config.topK)
             .map { acc ->
                 val explanation = buildExplanation(acc.channelRanks, acc.channelScores, acc.totalRrfScore)
+                val reasons = buildStructuredReasons(acc.channelRanks, acc.channelScores, acc.isAuthoritativeLexical)
+                
                 HybridCandidate(
                     mediaId = acc.mediaId,
                     rrfScore = acc.totalRrfScore,
                     channelRanks = acc.channelRanks.toMap(),
                     channelScores = acc.channelScores.toMap(),
+                    isAuthoritativeLexical = acc.isAuthoritativeLexical,
+                    matchReasons = reasons,
                     matchExplanation = explanation
                 )
             }
         android.util.Log.i("RANKING", "FUSE_COMPLETE: finalCandidates=${results.size} topId=${results.firstOrNull()?.mediaId}")
         return results
+    }
+
+    private fun buildStructuredReasons(
+        ranks: Map<SearchChannel, Int>,
+        scores: Map<SearchChannel, Float>,
+        isAuthoritative: Boolean
+    ): List<MatchReason> {
+        val reasons = mutableListOf<MatchReason>()
+        
+        if (isAuthoritative) {
+            reasons.add(MatchReason(MatchReasonType.EXACT_FILENAME, 1.0f, "Exact name match"))
+        }
+
+        ranks.forEach { (channel, rank) ->
+            val score = scores[channel] ?: 0f
+            when (channel) {
+                SearchChannel.KEYWORD -> {
+                    if (rank <= 3 && !isAuthoritative) {
+                        reasons.add(MatchReason(MatchReasonType.STRONG_FILENAME_MATCH, 0.9f, "Strong name match"))
+                    }
+                }
+                SearchChannel.SEMANTIC_CONTENT -> {
+                    if (score > 0.7f) {
+                        reasons.add(MatchReason(MatchReasonType.SEMANTIC_METADATA_MATCH, score, "Strong conceptual match"))
+                    }
+                }
+                SearchChannel.SEMANTIC_VISUAL -> {
+                    if (score > 0.6f) {
+                        reasons.add(MatchReason(MatchReasonType.VISUAL_CONTENT_MATCH, score, "Visual similarity"))
+                    }
+                }
+                SearchChannel.PERSONALIZED -> {
+                    if (rank <= 5) {
+                        reasons.add(MatchReason(MatchReasonType.PERSONALIZED_RELEVANCE, score, "Matches your preferences"))
+                    }
+                }
+            }
+        }
+
+        return reasons
     }
 
     private fun buildExplanation(

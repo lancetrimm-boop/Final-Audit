@@ -285,7 +285,7 @@ interface CreatorDao {
 @Dao
 interface PlaybackErrorLogDao {
     @Insert
-    suspend fun insert(error: PlaybackErrorLogEntity)
+    suspend fun insert(error: PlaybackErrorLogEntity): Long
 
     @Update
     suspend fun update(error: PlaybackErrorLogEntity)
@@ -311,6 +311,9 @@ interface PlaybackErrorLogDao {
     @Query("SELECT * FROM playback_error_logs ORDER BY timestamp DESC LIMIT :limit")
     fun getRecentErrorsBounded(limit: Int): Flow<List<PlaybackErrorLogEntity>>
     
+    @Query("UPDATE playback_error_logs SET recoveryAttempted = :attempted, recoverySuccessful = :successful WHERE id = :id")
+    suspend fun updateRecoveryStatus(id: Long, attempted: Boolean, successful: Boolean?)
+
     @Query("DELETE FROM playback_error_logs WHERE id NOT IN (SELECT id FROM playback_error_logs ORDER BY timestamp DESC LIMIT :limit)")
     suspend fun trimLog(limit: Int)
 }
@@ -352,5 +355,17 @@ interface ConversionJobDao {
 
     @Query("SELECT * FROM conversion_jobs WHERE cleanupStatus = 'WAITING_FOR_STABILITY' OR cleanupStatus = 'CLEANUP_ELIGIBLE'")
     suspend fun getCleanupPendingJobs(): List<ConversionJobEntity>
+}
+
+@Dao
+interface SearchFeedbackDao {
+    @Insert
+    suspend fun insert(feedback: SearchFeedbackEntity)
+
+    @Query("SELECT * FROM search_feedback ORDER BY timestamp DESC")
+    fun getAllFeedback(): kotlinx.coroutines.flow.Flow<List<SearchFeedbackEntity>>
+
+    @Query("DELETE FROM search_feedback")
+    suspend fun clearAll()
 }
 

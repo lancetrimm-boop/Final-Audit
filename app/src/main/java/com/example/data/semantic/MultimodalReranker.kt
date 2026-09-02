@@ -31,6 +31,13 @@ class VideoIntelligenceReranker : MultimodalReranker {
         private const val ALIGNMENT_BOOST = 1.15 
 
         /**
+         * Boost factor to protect authoritative exact textual matches from being
+         * displaced by merely aligned multimodal candidates (Step 1.2 Protection).
+         * Increased in Plan 1 to ensure exact lexical matches win convincingly.
+         */
+        private const val LEXICAL_PROTECTION_BOOST = 5.0
+
+        /**
          * Maximum boost factor for videos with a strongly matching individual frame.
          */
         private const val MAX_FRAME_SIMILARITY_BOOST = 1.25
@@ -52,6 +59,7 @@ class VideoIntelligenceReranker : MultimodalReranker {
         val results = candidates.map { candidate ->
             var boostedScore = candidate.rrfScore
             var explanation = candidate.matchExplanation
+            val reasons = candidate.matchReasons.toMutableList()
 
             // 1. Cross-Channel Alignment Boost (Stage 7 Logic preserved)
             val isAligned = candidate.channelRanks.containsKey(SearchChannel.SEMANTIC_CONTENT) && 
@@ -60,6 +68,15 @@ class VideoIntelligenceReranker : MultimodalReranker {
             if (isAligned) {
                 boostedScore *= ALIGNMENT_BOOST
                 explanation += " [Aligned Multi-Modal Boost]"
+                reasons.add(MatchReason(MatchReasonType.MULTI_CHANNEL_ALIGNMENT, 0.85f, "Matched by both text and visual appearance"))
+            }
+
+            // 1.1 Lexical Protection Boost (Plan 1 Step 1.2)
+            // Ensures authoritative exact matches remain prioritized over conceptual alignment.
+            if (candidate.isAuthoritativeLexical) {
+                boostedScore *= LEXICAL_PROTECTION_BOOST
+                explanation += " [Lexical Protection Boost]"
+                // Reason already added in RRF for EXACT_FILENAME
             }
 
             // 2. Max Frame Similarity Reranking (Stage 8 Phase 8.4)
@@ -79,14 +96,15 @@ class VideoIntelligenceReranker : MultimodalReranker {
                         val promotion = 1.0 + (gain * (MAX_FRAME_SIMILARITY_BOOST - 1.0) / 0.5)
                         boostedScore *= promotion.coerceAtMost(MAX_FRAME_SIMILARITY_BOOST.toDouble())
                         explanation += " [Max Frame Similarity: ${"%.3f".format(maxSim)}] [Max Frame Promotion]"
+                        reasons.add(MatchReason(MatchReasonType.DEEP_SCENE_MATCH, maxSim, "Strong match to a specific scene in this video"))
                     } else {
                         explanation += " [Max Frame Similarity: ${"%.3f".format(maxSim)}]"
                     }
                 }
             }
 
-            if (boostedScore != candidate.rrfScore) {
-                candidate.copy(rrfScore = boostedScore, matchExplanation = explanation)
+            if (boostedScore != candidate.rrfScore || reasons.size != candidate.matchReasons.size) {
+                candidate.copy(rrfScore = boostedScore, matchExplanation = explanation, matchReasons = reasons)
             } else {
                 candidate
             }

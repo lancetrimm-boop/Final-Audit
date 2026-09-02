@@ -229,6 +229,56 @@ class HybridSearchIntegrationTest {
     }
 
     @Test
+    fun `test regression 187886 - exact filename match priority over semantic neighbors`() = runTest(testDispatcher) {
+        // SCENARIO: 
+        // m1: Exact filename match for "187886" (TikTok long filename)
+        // m2: Strong semantic/visual match that previously might have outranked m1 due to alignment boosts or equal lexical ranking.
+        
+        val items = listOf(
+            createMediaItem("m1", "Some Title").copy(uriPath = "/storage/emulated/0/Movies/187886_video.mp4"),
+            createMediaItem("m2", "Unrelated Title but high semantic correlation")
+        )
+        repository.setMediaItemsForTesting(items)
+
+        val semanticRepo = repository.semanticRepresentationRepository!!
+        val semanticRetriever = repository.semanticCandidateRetriever!!
+        
+        // Add strong semantic match for m2
+        semanticRepo.saveRepresentation(SemanticRepresentation(
+            id = "sem_m2", mediaId = "m2", type = SemanticRepresentationType.CONTENT,
+            modelDescriptor = descriptor, dimensionality = 384,
+            vector = FloatArray(384) { 0.1f }, // Matches the mock query vector
+            sourceDataHash = "h2"
+        ))
+        
+        // Ensure m2 is also visually indexed to trigger Stage 7 alignment boost (1.15x)
+        val visualDescriptor = descriptor.copy(modelId = "mobileclip-s0", dimensionality = 512, primaryType = SemanticRepresentationType.VISUAL)
+        semanticRepo.saveRepresentation(SemanticRepresentation(
+            id = "vis_m2", mediaId = "m2", type = SemanticRepresentationType.VISUAL,
+            modelDescriptor = visualDescriptor, dimensionality = 512,
+            vector = FloatArray(512) { 0.1f }, sourceDataHash = "vh2"
+        ))
+        
+        // Update index
+        semanticRetriever.initializeIndex(SemanticRepresentationType.VISUAL, visualDescriptor)
+
+        val job = repository.latestAiSortRecommendation.onEach { }.launchIn(this)
+
+        // SEARCH: User enters the prefix of the filename
+        repository.librarySearchQuery = "187886"
+        testDispatcher.scheduler.advanceTimeBy(400)
+        testDispatcher.scheduler.runCurrent()
+
+        val results = repository.latestAiSortRecommendation.value
+        
+        assertFalse("Results should not be empty", results.isEmpty())
+        assertEquals("m1 should be the #1 result because it is an authoritative exact/prefix filename match", 
+            "m1", results[0].id)
+        
+        job.cancel()
+    }
+
+    @Test
     fun `test search fallback to legacy when hybrid returns zero`() = runTest(testDispatcher) {
         // Mock hybrid engine to return zero results (success=true, candidates=empty)
         val mockHybrid = object : HybridSearchEngine {
@@ -239,7 +289,8 @@ class HybridSearchIntegrationTest {
             override fun isSemanticReady() = true
         }
         
-        val field = MediaRepository::class.java.getDeclaredField("hybridSearchEngine")
+        val repoClass = MediaRepository::class.java
+        val field = repoClass.getDeclaredField("hybridSearchEngine")
         field.isAccessible = true
         field.set(repository, mockHybrid)
 

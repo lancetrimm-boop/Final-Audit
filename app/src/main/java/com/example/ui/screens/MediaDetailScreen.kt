@@ -24,6 +24,9 @@ import com.example.data.CompatibilityStatus
 import com.example.data.MediaRepository
 import com.example.data.db.MediaEntity
 import com.example.util.ClipExporter
+import com.example.playback.PlaybackErrorClassifier
+import com.example.playback.PlaybackErrorClassification
+import com.example.ui.components.PlaybackErrorOverlay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -167,6 +170,7 @@ fun MediaDetailScreen(
     var showClipsSheet by remember { mutableStateOf(false) }
     var generatedClips by remember { mutableStateOf<List<ClipCandidate>>(emptyList()) }
     var showDoubleTapHeart by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
     
     val tasteDNA by repository.tasteDNA.collectAsStateWithLifecycle()
     val isLoopEnabled by repository.libraryRepeatMode.collectAsStateWithLifecycle()
@@ -272,6 +276,32 @@ fun MediaDetailScreen(
     var deleteOriginalAfter by remember { mutableStateOf(false) }
     var conversionErrorMsg by remember(activeItem.id) { mutableStateOf<String?>(null) }
 
+    // Playback Error Integration State
+    var activePlaybackError by remember { mutableStateOf<PlaybackErrorClassification?>(null) }
+    var lastErrorLogId by remember { mutableLongStateOf(-1L) }
+    var deferredRecoveryUpdate by remember { mutableStateOf<Pair<Boolean, Boolean?>?>(null) }
+
+    LaunchedEffect(activeItem.id) {
+        activePlaybackError = null
+        lastErrorLogId = -1L
+        deferredRecoveryUpdate = null
+    }
+
+    fun recordRecovery(attempted: Boolean, successful: Boolean?) {
+        if (lastErrorLogId != -1L) {
+            repository.updatePlaybackErrorRecovery(lastErrorLogId, attempted, successful)
+        } else {
+            deferredRecoveryUpdate = attempted to successful
+        }
+    }
+
+    LaunchedEffect(lastErrorLogId) {
+        if (lastErrorLogId != -1L && deferredRecoveryUpdate != null) {
+            repository.updatePlaybackErrorRecovery(lastErrorLogId, deferredRecoveryUpdate!!.first, deferredRecoveryUpdate!!.second)
+            deferredRecoveryUpdate = null
+        }
+    }
+
     // Single ExoPlayer instance for the session with TRUE PLAYLIST ARCHITECTURE
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -319,13 +349,18 @@ fun MediaDetailScreen(
                 override fun onPlayerError(error: PlaybackException) {
                     Log.e("PlaylistTrace", "ExoPlayer Error: ${error.message}", error)
                     
-                    // Capture detailed diagnostics
-                    repository.recordPlaybackError(error, this@apply, activeItem)
+                    // Reset tracking IDs for the new error session
+                    lastErrorLogId = -1L
+                    deferredRecoveryUpdate = null
 
-                    // Only show toast if it's a real terminal error, not just a transition glitch
-                    if (error.errorCode != PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
-                        Toast.makeText(context, "Playback error: ${error.localizedMessage}", Toast.LENGTH_SHORT).show()
+                    // Capture detailed diagnostics
+                    repository.recordPlaybackError(error, this@apply, activeItem) { logId ->
+                        lastErrorLogId = logId
                     }
+
+                    // Classify error for specialized handling and recovery
+                    val classification = PlaybackErrorClassifier.classify(error)
+                    activePlaybackError = classification
                 }
             })
         }
@@ -563,9 +598,8 @@ fun MediaDetailScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
-            } else {
+            } else if (activePlaybackError == null) {
                 // Compatibility / Conversion Panel
-                val coroutineScope = rememberCoroutineScope()
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1073,7 +1107,55 @@ fun MediaDetailScreen(
                 }
             }
         }
+
+        // Playback Error Overlay (Update 1: PlaybackErrorIntegration)
+        activePlaybackError?.let { classification ->
+            PlaybackErrorOverlay(
+            classification = classification,
+            onRetry = {
+                recordRecovery(attempted = true, successful = null)
+                activePlaybackError = null
+                exoPlayer.prepare()
+                exoPlayer.play()
+            },
+            onConvert = {
+                recordRecovery(attempted = true, successful = null)
+                activePlaybackError = null
+                isConverting = true
+                conversionErrorMsg = null
+                coroutineScope.launch {
+                    val res = repository.convertMediaItem(
+                        context = context,
+                        itemId = activeItem.id,
+                        deleteOriginalAfter = deleteOriginalAfter,
+                        onProgress = { p -> conversionProgress = p }
+                    )
+                    isConverting = false
+                    if (!res.isSuccess) {
+                        recordRecovery(attempted = true, successful = false)
+                        conversionErrorMsg = res.errorMessage ?: "Conversion failed"
+                        Toast.makeText(context, conversionErrorMsg, Toast.LENGTH_LONG).show()
+                    } else {
+                        recordRecovery(attempted = true, successful = true)
+                        Toast.makeText(context, "Conversion complete! Playing media...", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onSkip = {
+                recordRecovery(attempted = true, successful = true)
+                activePlaybackError = null
+                if (playlistState?.hasNext == true) {
+                    onNext()
+                } else {
+                    onBack()
+                }
+            },
+            onDismiss = {
+                activePlaybackError = null
+            }
+        )
     }
+}
 
     // Player Menu Modal Sheet (Swipe Up or Info Button)
     if (showPlayerMenu) {

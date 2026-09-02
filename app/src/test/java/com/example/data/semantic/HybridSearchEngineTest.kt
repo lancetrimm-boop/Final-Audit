@@ -351,4 +351,92 @@ class HybridSearchEngineTest {
         assertTrue(result.candidates.isEmpty())
         assertEquals(0, result.totalCandidatesConsidered)
     }
+
+    @Test
+    fun testHybridSearchEngine_DecoupledThresholds_FiltersWeakCandidatesAfterFusion() = runBlocking {
+        val descriptor = EmbeddingModelDescriptor("test", 1, 128, SemanticRepresentationType.CONTENT)
+        
+        val config = HybridSearchConfig(
+            minSemanticSimilarity = 0.35f,
+            minNeuralRetrievalSimilarity = 0.15f
+        )
+        
+        val fakeLexical = object : LexicalCandidateRetriever {
+            override suspend fun retrieveKeywordCandidates(query: String, topK: Int): List<RankedChannelItem> = emptyList()
+        }
+        
+        val fakeSemantic = object : SemanticSearchService {
+            override suspend fun search(query: String, topK: Int, minSimilarity: Float, targetType: SemanticRepresentationType, expectedDescriptor: EmbeddingModelDescriptor?): SemanticSearchResult {
+                // Verify that retrieval uses the permissive threshold (0.15), not the strict one (0.35)
+                assertEquals(0.15f, minSimilarity)
+                
+                return SemanticSearchResult(
+                    query = query,
+                    candidates = listOf(
+                        // Above retrieval threshold (0.15) but below final threshold (0.35)
+                        SemanticRetrievalCandidate("item_weak", "rep_1", 0.25f, SemanticRepresentationType.CONTENT, descriptor, 1.0f),
+                        // Above final threshold
+                        SemanticRetrievalCandidate("item_strong", "rep_2", 0.45f, SemanticRepresentationType.CONTENT, descriptor, 1.0f)
+                    ),
+                    modelDescriptor = descriptor,
+                    representationType = targetType,
+                    latencyMs = 1L,
+                    totalIndexedCandidates = 10,
+                    isSuccess = true
+                )
+            }
+            override suspend fun search(qv: FloatArray, ql: String, k: Int, s: Float, tt: SemanticRepresentationType, ed: EmbeddingModelDescriptor?): SemanticSearchResult {
+                return SemanticSearchResult(ql, emptyList(), descriptor, tt, 1L, 0)
+            }
+            override fun isReady(): Boolean = true
+            override fun getIndexSize(targetType: SemanticRepresentationType, descriptor: EmbeddingModelDescriptor?): Int = 10
+        }
+        
+        val engine = DefaultHybridSearchEngine(fakeSemantic, fakeLexical)
+        val result = engine.search(SearchRequest.Text("query"), config)
+        
+        assertTrue(result.isSuccess)
+        // item_weak (0.25) should be filtered out by the final 0.35 gate in searchText
+        assertEquals(1, result.candidates.size)
+        assertEquals("item_strong", result.candidates[0].mediaId)
+    }
+
+    @Test
+    fun testHybridSearchEngine_BoostedCandidateSurvivesFinalFilter() = runBlocking {
+        val descriptor = EmbeddingModelDescriptor("test", 1, 128, SemanticRepresentationType.CONTENT)
+        val config = HybridSearchConfig(minSemanticSimilarity = 0.35f, minNeuralRetrievalSimilarity = 0.15f)
+        
+        val fakeLexical = object : LexicalCandidateRetriever {
+            override suspend fun retrieveKeywordCandidates(query: String, topK: Int) = emptyList<RankedChannelItem>()
+        }
+        
+        val fakeSemantic = object : SemanticSearchService {
+            override suspend fun search(q: String, k: Int, sim: Float, tt: SemanticRepresentationType, ed: EmbeddingModelDescriptor?) = SemanticSearchResult(
+                query = q,
+                candidates = listOf(SemanticRetrievalCandidate("item_boosted", "rep_1", 0.25f, SemanticRepresentationType.CONTENT, descriptor, 1.0f)),
+                modelDescriptor = descriptor, representationType = tt, latencyMs = 1L, totalIndexedCandidates = 1, isSuccess = true
+            )
+            override suspend fun search(qv: FloatArray, ql: String, k: Int, s: Float, tt: SemanticRepresentationType, ed: EmbeddingModelDescriptor?): SemanticSearchResult {
+                return SemanticSearchResult(ql, emptyList(), descriptor, tt, 1L, 0)
+            }
+            override fun isReady() = true
+            override fun getIndexSize(tt: SemanticRepresentationType, ed: EmbeddingModelDescriptor?) = 1
+        }
+        
+        // Custom reranker that adds a high-confidence reason to simulate a deep frame match
+        val boostingReranker = object : MultimodalReranker {
+            override fun rerank(candidates: List<HybridCandidate>, queryVector: FloatArray?, frameVectors: Map<String, List<VideoFrameRepresentation>>): List<HybridCandidate> {
+                return candidates.map { 
+                    it.copy(matchReasons = listOf(MatchReason(MatchReasonType.DEEP_SCENE_MATCH, 0.5f, "Found lamp in frame 42")))
+                }
+            }
+        }
+        
+        val engine = DefaultHybridSearchEngine(fakeSemantic, fakeLexical, reranker = boostingReranker)
+        val result = engine.search(SearchRequest.Text("lamp"), config)
+        
+        // item_boosted (initial 0.25) now has a reason with 0.5 confidence -> should survive final 0.35 filter
+        assertEquals(1, result.candidates.size)
+        assertEquals("item_boosted", result.candidates[0].mediaId)
+    }
 }

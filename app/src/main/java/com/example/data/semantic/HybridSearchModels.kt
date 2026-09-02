@@ -143,18 +143,20 @@ data class RankedChannelItem(
  * @property rrfConstantK Smoothing constant in RRF denominator (standard literature default = 60).
  * @property channelWeights Relative importance multipliers for each search channel (must be non-negative).
  * @property topK Maximum number of fused candidates to return.
- * @property minSemanticSimilarity Optional cosine similarity filter for the semantic channel before fusion.
+ * @property minSemanticSimilarity User-facing relevance gate for final results.
+ * @property minNeuralRetrievalSimilarity Recall/Retrieval gate for initial candidate selection.
  */
 data class HybridSearchConfig(
     val rrfConstantK: Int = 60,
     val channelWeights: Map<SearchChannel, Double> = mapOf(
-        SearchChannel.KEYWORD to 0.4,
+        SearchChannel.KEYWORD to 0.8,
         SearchChannel.SEMANTIC_CONTENT to 0.4,
-        SearchChannel.SEMANTIC_VISUAL to 0.2,
+        SearchChannel.SEMANTIC_VISUAL to 0.5,
         SearchChannel.PERSONALIZED to 0.1
     ),
-    val topK: Int = 20,
-    val minSemanticSimilarity: Float = -1.0f
+    val topK: Int = 40,
+    val minSemanticSimilarity: Float = 0.35f,
+    val minNeuralRetrievalSimilarity: Float = 0.15f
 ) {
     init {
         require(rrfConstantK > 0) { "rrfConstantK must be positive (got $rrfConstantK)" }
@@ -174,12 +176,33 @@ data class HybridSearchConfig(
 }
 
 /**
+ * Structured explanation of why a specific media item was ranked for a query.
+ */
+enum class MatchReasonType {
+    EXACT_FILENAME,
+    STRONG_FILENAME_MATCH,
+    SEMANTIC_METADATA_MATCH,
+    VISUAL_CONTENT_MATCH,
+    CROSS_MODAL_MATCH,
+    PERSONALIZED_RELEVANCE,
+    MULTI_CHANNEL_ALIGNMENT,
+    DEEP_SCENE_MATCH
+}
+
+data class MatchReason(
+    val type: MatchReasonType,
+    val confidence: Float,
+    val description: String
+)
+
+/**
  * Fused candidate item produced by Reciprocal Rank Fusion.
  *
  * @property mediaId Unique media item identifier.
  * @property rrfScore Aggregated Reciprocal Rank Fusion score.
  * @property channelRanks Map of 1-based rank positions per contributing channel.
  * @property channelScores Map of raw channel scores per contributing channel.
+ * @property matchReasons Structured evidence for the ranking.
  * @property matchExplanation Human-readable provenance explanation of the hybrid ranking.
  */
 data class HybridCandidate(
@@ -187,6 +210,8 @@ data class HybridCandidate(
     val rrfScore: Double,
     val channelRanks: Map<SearchChannel, Int>,
     val channelScores: Map<SearchChannel, Float>,
+    val isAuthoritativeLexical: Boolean = false,
+    val matchReasons: List<MatchReason> = emptyList(),
     val matchExplanation: String = ""
 ) {
     init {

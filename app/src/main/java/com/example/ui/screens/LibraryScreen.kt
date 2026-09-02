@@ -65,13 +65,22 @@ fun LibraryScreen(
     var searchQuery by remember { mutableStateOf(repository.librarySearchQuery) }
     var isSearchActive by remember { mutableStateOf(false) }
 
-    // Sync searchQuery with searchRequest when it changes from other sources
+    // Sync searchQuery with searchRequest when it changes from other sources (Plan 1 Step 3/5 isolation)
     LaunchedEffect(searchRequest) {
-        if (searchRequest is SearchRequest.Text) {
-            searchQuery = (searchRequest as SearchRequest.Text).query
-        }
-        if (searchRequest !is SearchRequest.Text || (searchRequest as SearchRequest.Text).query.isNotEmpty()) {
-            isSearchActive = true
+        when (searchRequest) {
+            is SearchRequest.Text -> {
+                searchQuery = searchRequest.query ?: ""
+                if (searchQuery.isNotEmpty()) isSearchActive = true
+            }
+            is SearchRequest.Visual -> {
+                // Independent visual search clears any existing text constraint
+                searchQuery = ""
+                isSearchActive = true
+            }
+            is SearchRequest.Compound -> {
+                searchQuery = searchRequest.query ?: ""
+                isSearchActive = true
+            }
         }
     }
 

@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -38,8 +39,9 @@ class PlaybackErrorLogRepository(
 
     /**
      * Insert a new diagnostic record with deduplication.
+     * Returns the ID of the record.
      */
-    suspend fun recordError(error: PlaybackErrorLogEntity) {
+    suspend fun recordError(error: PlaybackErrorLogEntity): Long {
         val existing = dao.findExistingError(
             mediaItemId = error.mediaItemId,
             errorCode = error.errorCode,
@@ -47,7 +49,7 @@ class PlaybackErrorLogRepository(
             sessionId = error.sessionId
         )
 
-        if (existing != null) {
+        return if (existing != null) {
             // If it's an identical error in the same session, update the existing record
             val updated = existing.copy(
                 occurrenceCount = existing.occurrenceCount + 1,
@@ -57,11 +59,19 @@ class PlaybackErrorLogRepository(
                 playWhenReady = error.playWhenReady
             )
             dao.update(updated)
+            existing.id
         } else {
-            dao.insert(error)
-            // Maintain log size limit
+            val insertedId = dao.insert(error)
             dao.trimLog(MAX_ERROR_LOG_SIZE)
+            insertedId
         }
+    }
+
+    /**
+     * Update the recovery status for an error record.
+     */
+    suspend fun updateRecoveryStatus(id: Long, attempted: Boolean, successful: Boolean?) {
+        dao.updateRecoveryStatus(id, attempted, successful)
     }
 
     /**

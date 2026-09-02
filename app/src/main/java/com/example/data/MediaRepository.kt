@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
@@ -224,6 +225,10 @@ class MediaRepository(
 
     @Volatile
     var playbackErrorLogRepository: PlaybackErrorLogRepository? = null
+        private set
+
+    @Volatile
+    var searchFeedbackRepository: SearchFeedbackRepository? = null
         private set
 
     @Volatile
@@ -530,20 +535,14 @@ class MediaRepository(
 
                 if (result is EmbeddingResult.Success) {
                     val vector = result.representation.vector
-                    val currentText = _librarySearchRequest.value.query ?: ""
                     
-                    _librarySearchRequest.value = if (currentText.isNotBlank()) {
-                        com.example.data.semantic.SearchRequest.Compound(
-                            query = currentText,
-                            visualVector = vector,
-                            referenceUri = uri
-                        )
-                    } else {
-                        com.example.data.semantic.SearchRequest.Visual(
-                            visualVector = vector,
-                            referenceUri = uri
-                        )
-                    }
+                    // AURA SEARCH FIX 3.1: Visual search is independent by default.
+                    // It does NOT inherit stale text state. 
+                    // To perform a compound search, the user must explicitly add a text constraint after the image anchor is set.
+                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Visual(
+                        visualVector = vector,
+                        referenceUri = uri
+                    )
                 }
             } catch (e: Exception) {
                 Log.e("MediaRepository", "Failed to encode reference image for search.", e)
@@ -751,17 +750,31 @@ class MediaRepository(
                         emit(results)
                     } else {
                         val fallbackQuery = searchRequest.query ?: ""
-                        android.util.Log.w("AURA_SEARCH_FLOW", "Hybrid search failed: ${searchResult.errorMessage}. Falling back to legacy.")
-                        emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
+                        if (fallbackQuery.isNotBlank()) {
+                            android.util.Log.w("AURA_SEARCH_FLOW", "Hybrid search failed: ${searchResult.errorMessage}. Falling back to legacy.")
+                            emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
+                        } else {
+                            // Plan 1 Step 3/5: Independent visual search must not leak all items on failure
+                            android.util.Log.w("AURA_SEARCH_FLOW", "Visual search failed: ${searchResult.errorMessage}. No fallback available.")
+                            emit(emptyList())
+                        }
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("AURA_SEARCH_FLOW", "CRITICAL: Hybrid search engine threw exception. Falling back to legacy.", e)
                     val fallbackQuery = searchRequest.query ?: ""
-                    emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
+                    if (fallbackQuery.isNotBlank()) {
+                        emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
+                    } else {
+                        emit(emptyList())
+                    }
                 }
             } else {
                 val fallbackQuery = searchRequest.query ?: ""
-                emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
+                if (fallbackQuery.isNotBlank()) {
+                    emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
+                } else {
+                    emit(emptyList())
+                }
             }
         }
     }
@@ -916,6 +929,7 @@ class MediaRepository(
 
                     intelligenceRepository = IntelligenceRepository(db.intelligenceDao(), this@MediaRepository, moshi, scope, db)
                     playbackErrorLogRepository = PlaybackErrorLogRepository(db.playbackErrorLogDao(), scope)
+                    searchFeedbackRepository = SearchFeedbackRepository(db.searchFeedbackDao(), scope)
                     conversionQueueRepository = ConversionQueueRepository(
                         db.conversionJobDao(), 
                         db.userPreferenceDao(),
@@ -1663,7 +1677,18 @@ class MediaRepository(
         val creators = _creatorProfiles.value
         val now = System.currentTimeMillis()
         
-        val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
+        // Step 8: Placeholder for persistent search feedback scores.
+        // In a full implementation, this would be periodically aggregated from the search_feedback table.
+        val searchFeedbackScore = 0f 
+
+        val evidence = ExplorationEngine.calculateEvidence(
+            item = item, 
+            tasteDNA = tasteDNA, 
+            stats = stats, 
+            creatorProfiles = creators, 
+            now = now,
+            searchFeedbackScore = searchFeedbackScore
+        )
         
         val systemState = ConfidenceEngine.calculateDiscoveryState(_mediaItems.value, stats)
         val strategy = DiscoveryPolicyManager.resolveStrategy(
@@ -2667,7 +2692,8 @@ class MediaRepository(
     fun recordPlaybackError(
         error: androidx.media3.common.PlaybackException,
         player: androidx.media3.common.Player,
-        mediaItem: MediaItem?
+        mediaItem: MediaItem?,
+        onRecordComplete: ((Long) -> Unit)? = null
     ) {
         val repo = playbackErrorLogRepository ?: return
         
@@ -2686,11 +2712,21 @@ class MediaRepository(
                 )
                 
                 Log.e("AuraPlaybackDiagnostics", "Recording playback error: ${diagnosticRecord.diagnosticSummary} (Session: ${_playbackSessionId})")
-                repo.recordError(diagnosticRecord)
+                val logId = repo.recordError(diagnosticRecord)
+                withContext(Dispatchers.Main) {
+                    onRecordComplete?.invoke(logId)
+                }
             } catch (t: Throwable) {
                 Log.e("AuraPlaybackDiagnostics", "Critical failure in diagnostic collector: ${t.message}", t)
                 // Fail-safe: do not crash the player
             }
+        }
+    }
+
+    fun updatePlaybackErrorRecovery(logId: Long, attempted: Boolean, successful: Boolean?) {
+        val repo = playbackErrorLogRepository ?: return
+        scope.launch {
+            repo.updateRecoveryStatus(logId, attempted, successful)
         }
     }
 
@@ -3282,13 +3318,13 @@ class MediaRepository(
             // 3. Genre matching (+10 for matching genre)
             val otherGenre = other.genre.lowercase().trim()
             if (itemGenre.isNotEmpty() && itemGenre == otherGenre) {
-                contentScore += if (itemGenre != "media") 10f else 2f
+                contentScore += if (itemGenre != "media") 10f else 1f
             }
 
-            // 4. Category matching (+8 for matching category)
+            // 4. Category matching (+1 for matching category - weakened in Step 2.1)
             val otherCategory = other.category.lowercase().trim()
             if (itemCategory.isNotEmpty() && itemCategory == otherCategory) {
-                contentScore += if (itemCategory != "for you") 8f else 2f
+                contentScore += 1f
             }
 
             // 5. Title token overlap (+15 per matching token)
@@ -3303,13 +3339,15 @@ class MediaRepository(
             val isOtherVideo = other.mediaType.equals("VIDEO", ignoreCase = true) || other.mediaType.equals("Movie", ignoreCase = true)
             val isSameType = (isOtherVideo == isItemVideo)
 
-            val totalScore = contentScore + (if (isSameType && contentScore > 0) 2f else 0f)
+            val totalScore = contentScore + (if (isSameType && contentScore > 0) 1f else 0f)
 
-            // Jitter for variety
-            val jitter = ((other.id.hashCode() xor item.id.hashCode()).toFloat() / Int.MAX_VALUE.toFloat()).let { if (it < 0) -it else it } * 0.1f
+            // Jitter for variety (Reduced in Step 2 to prioritize pure relevance)
+            val jitter = ((other.id.hashCode() xor item.id.hashCode()).toFloat() / Int.MAX_VALUE.toFloat()).let { if (it < 0) -it else it } * 0.02f
             val finalScore = totalScore + jitter
 
-            if (finalScore >= 4f) {
+            // Step 2: Use a more principled relevance threshold (18.0)
+            // This ensures results have at least one strong signal or multiple weak signals.
+            if (finalScore >= 18f) {
                 Pair(other, finalScore)
             } else {
                 null
@@ -3324,7 +3362,8 @@ class MediaRepository(
             Log.d("SeeSimilarTrace", "rank=${i+1} id=${m.id} score=$s title=\"${m.title}\"")
         }
 
-        return sortedMatches.take(30)
+        // Plan 1 Step 2: Removed forced 30-result take to allow zero or few results if relevance is low
+        return sortedMatches
     }
 
     fun setMediaItemsForTesting(items: List<MediaItem>) {
@@ -4126,6 +4165,7 @@ stats ->
 
     /**
      * Production bridge between Aura's legacy metadata search and the Hybrid Search Engine.
+     * Evolved in Step 1.1 to support relevance-based scoring.
      */
     private inner class ProductionLexicalRetriever : LexicalCandidateRetriever {
         override suspend fun retrieveKeywordCandidates(query: String, topK: Int): List<RankedChannelItem> {
@@ -4135,18 +4175,68 @@ stats ->
             // Search across all locally known media items
             val allItems = _mediaItems.value
             
-            return allItems.filter { item ->
-                item.title.lowercase().contains(q) ||
-                item.genre.lowercase().contains(q) ||
-                item.moodTags.any { it.lowercase().contains(q) } ||
-                item.year.toString().contains(q)
-            }.mapIndexed { index, item ->
-                RankedChannelItem(
-                    mediaId = item.id,
-                    rawScore = 1.0f, // Boolean match for legacy bridge
-                    rank = index + 1
+            val scored = allItems.mapNotNull { item ->
+                val title = item.title.lowercase()
+                val filename = item.uriPath.substringAfterLast('/').lowercase()
+                val filenameNoExt = filename.substringBeforeLast('.')
+                
+                var score = 0f
+                var isAuthoritative = false
+                
+                // 1. Authoritative Exact Matches (Priority 1)
+                // We check both with and without extension for maximum responsiveness to file exports.
+                if (filename == q || title == q) {
+                    score = 100f
+                    isAuthoritative = true
+                } else if (filenameNoExt == q) {
+                    score = 98f
+                    isAuthoritative = true
+                }
+                // 2. High-Confidence Prefix Matches (Priority 2)
+                else if (filename.startsWith(q) || title.startsWith(q)) {
+                    score = 85f
+                }
+                // 3. Substring / Token matches (Priority 3)
+                else if (title.contains(q) || filename.contains(q)) {
+                    score = 70f
+                }
+                // 4. Metadata Fallback (Priority 4)
+                else {
+                    val genreMatch = item.genre.lowercase().contains(q)
+                    val tagMatch = item.moodTags.any { it.lowercase().contains(q) }
+                    if (genreMatch || tagMatch) {
+                        score = 40f
+                    }
+                }
+
+                if (score > 0f) {
+                    val meta = mutableMapOf<String, String>()
+                    if (isAuthoritative) meta["is_authoritative"] = "true"
+                    meta["match_type"] = when {
+                        score >= 98f -> "EXACT"
+                        score >= 85f -> "PREFIX"
+                        score >= 70f -> "SUBSTRING"
+                        else -> "METADATA"
+                    }
+                    item to (score to meta)
+                } else null
+            }
+
+            return scored
+                .sortedWith(
+                    compareByDescending<Pair<MediaItem, Pair<Float, Map<String, String>>>> { it.second.first }
+                        .thenByDescending { it.first.dateAdded }
                 )
-            }.take(topK)
+                .take(topK)
+                .mapIndexed { index, (item, data) ->
+                    val (score, meta) = data
+                    RankedChannelItem(
+                        mediaId = item.id,
+                        rawScore = score,
+                        rank = index + 1,
+                        metadata = meta
+                    )
+                }
         }
     }
 

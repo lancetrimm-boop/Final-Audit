@@ -273,4 +273,18 @@ data class ConversionJobEntity(
     val lastCleanupError: String? = null
 )
 
+@Entity(tableName = "search_feedback")
+data class SearchFeedbackEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val mediaId: String,
+    val query: String,
+    val queryType: String,
+    val rankingPosition: Int,
+    val rrfScore: Double,
+    val feedback: String, // "GOOD", "BAD"
+    val timestamp: Long = System.currentTimeMillis(),
+    val matchExplanation: String = "",
+    val modelDescriptorJson: String? = null
+)
+
 

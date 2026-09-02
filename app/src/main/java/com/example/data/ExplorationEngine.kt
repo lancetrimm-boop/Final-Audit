@@ -27,7 +27,8 @@ object ExplorationEngine {
         tasteDNA: TasteDNA,
         stats: IntelligenceStats = IntelligenceStats(),
         creatorProfiles: Map<String, CreatorProfile> = emptyMap(),
-        now: Long = System.currentTimeMillis()
+        now: Long = System.currentTimeMillis(),
+        searchFeedbackScore: Float = 0f
     ): CandidateEvidence {
         // 1. Predicted Enjoyment (Exploitation component)
         val traits = PersonalizationTraitMapper.getTraitAdjustments(item.moodTags)
@@ -53,7 +54,11 @@ object ExplorationEngine {
         // Incorporate ELO rating as a relative enjoyment signal
         val eloSignal = ((item.eloRating.toFloat() - 1500f) / 500f).coerceIn(-0.5f, 0.5f)
         
-        val enjoyment = (alignmentScore.toFloat() * 0.2f) + explicitSignal + (creatorAffinity * 0.5f) + eloSignal
+        // Step 8: Search Feedback Foundation integration
+        // Positive search feedback (GOOD result) boosts enjoyment, negative (BAD) penalizes it.
+        val feedbackSignal = (searchFeedbackScore * 0.15f).coerceIn(-0.3f, 0.3f)
+        
+        val enjoyment = (alignmentScore.toFloat() * 0.2f) + explicitSignal + (creatorAffinity * 0.5f) + eloSignal + feedbackSignal
 
         // 2. Familiarity (Inverse of exploration)
         // Strong familiarity comes from rating or multiple views

@@ -170,7 +170,7 @@ class DefaultHybridSearchEngine(
                     semanticService.search(
                         query = trimmedQuery,
                         topK = config.topK * 2,
-                        minSimilarity = config.minSemanticSimilarity,
+                        minSimilarity = config.minNeuralRetrievalSimilarity,
                         targetType = SemanticRepresentationType.CONTENT
                     )
                 } catch (e: Exception) {
@@ -185,7 +185,7 @@ class DefaultHybridSearchEngine(
                         visualRetriever.retrieveVisualCandidates(
                             query = trimmedQuery,
                             topK = config.topK * 2,
-                            minSimilarity = config.minSemanticSimilarity
+                            minSimilarity = config.minNeuralRetrievalSimilarity
                         )
                     } catch (e: Exception) {
                         android.util.Log.e("AuraSemanticTrace", "Visual search failed for query \"$trimmedQuery\"", e)
@@ -282,13 +282,29 @@ class DefaultHybridSearchEngine(
             frameVectors = frameVectors
         )
 
+        // AURA SEARCH FIX 1.3: Decouple retrieval from final relevance.
+        // Apply strict relevance gate after deep reranking has had a chance to surface diluted signals.
+        val finalCandidates = rerankedCandidates.filter { candidate ->
+            val isKeywordMatch = candidate.channelRanks.containsKey(SearchChannel.KEYWORD)
+            
+            // Neural channels (Content/Visual) must meet the strict user-facing threshold
+            val maxNeuralScore = candidate.channelScores.filter { (channel, _) ->
+                channel == SearchChannel.SEMANTIC_CONTENT || channel == SearchChannel.SEMANTIC_VISUAL
+            }.values.maxOrNull() ?: 0f
+            
+            // Deep scene matches (from reranker) are also valid evidence
+            val maxReasonConfidence = candidate.matchReasons.maxOfOrNull { it.confidence } ?: 0f
+            
+            isKeywordMatch || maxNeuralScore >= config.minSemanticSimilarity || maxReasonConfidence >= config.minSemanticSimilarity
+        }
+
         val elapsed = System.currentTimeMillis() - startTime
 
         val finalResult = HybridSearchResult(
             query = query,
             queryType = SearchQueryType.TEXT,
             requestId = request.requestId,
-            candidates = rerankedCandidates,
+            candidates = finalCandidates,
             latencyMs = elapsed,
             totalCandidatesConsidered = totalUniqueCandidates,
             channelCandidateCounts = channelCounts.toMap(),
@@ -351,7 +367,7 @@ class DefaultHybridSearchEngine(
                 visualRetriever.retrieveVisualCandidates(
                     queryVector = queryVector,
                     topK = config.topK * 2,
-                    minSimilarity = config.minSemanticSimilarity
+                    minSimilarity = config.minNeuralRetrievalSimilarity
                 )
             } catch (e: Exception) {
                 android.util.Log.e("AuraSemanticTrace", "Visual retrieval failed", e)
@@ -407,11 +423,18 @@ class DefaultHybridSearchEngine(
             frameVectors = frameVectors
         )
 
+        // Final Filter for Visual Search
+        val finalCandidates = rerankedCandidates.filter { candidate ->
+            val maxNeuralScore = candidate.channelScores[SearchChannel.SEMANTIC_VISUAL] ?: 0f
+            val maxReasonConfidence = candidate.matchReasons.maxOfOrNull { it.confidence } ?: 0f
+            maxNeuralScore >= config.minSemanticSimilarity || maxReasonConfidence >= config.minSemanticSimilarity
+        }
+
         val finalResult = HybridSearchResult(
             query = "Visual Reference [${request.requestId}]",
             queryType = SearchQueryType.VISUAL,
             requestId = request.requestId,
-            candidates = rerankedCandidates,
+            candidates = finalCandidates,
             latencyMs = System.currentTimeMillis() - startTime,
             totalCandidatesConsidered = totalUniqueCandidates,
             channelCandidateCounts = channelCounts.toMap(),
@@ -474,7 +497,7 @@ class DefaultHybridSearchEngine(
                     semanticService.search(
                         query = textQuery,
                         topK = config.topK * 2,
-                        minSimilarity = config.minSemanticSimilarity,
+                        minSimilarity = config.minNeuralRetrievalSimilarity,
                         targetType = SemanticRepresentationType.CONTENT
                     )
                 } catch (e: Exception) {
@@ -501,7 +524,7 @@ class DefaultHybridSearchEngine(
                     visualRetriever.retrieveVisualCandidates(
                         queryVector = compoundVector!!,
                         topK = config.topK * 2,
-                        minSimilarity = config.minSemanticSimilarity
+                        minSimilarity = config.minNeuralRetrievalSimilarity
                     )
                 } catch (e: Exception) {
                     android.util.Log.e("AuraSemanticTrace", "Visual retrieval failed in compound search", e)
@@ -584,11 +607,22 @@ class DefaultHybridSearchEngine(
             frameVectors = frameVectors
         )
 
+        // Final Filter for Compound Search
+        val finalCandidates = rerankedCandidates.filter { candidate ->
+            val isKeywordMatch = candidate.channelRanks.containsKey(SearchChannel.KEYWORD)
+            val maxNeuralScore = candidate.channelScores.filter { (channel, _) ->
+                channel == SearchChannel.SEMANTIC_CONTENT || channel == SearchChannel.SEMANTIC_VISUAL
+            }.values.maxOrNull() ?: 0f
+            val maxReasonConfidence = candidate.matchReasons.maxOfOrNull { it.confidence } ?: 0f
+            
+            isKeywordMatch || maxNeuralScore >= config.minSemanticSimilarity || maxReasonConfidence >= config.minSemanticSimilarity
+        }
+
         val finalResult = HybridSearchResult(
             query = textQuery,
             queryType = SearchQueryType.COMPOUND,
             requestId = request.requestId,
-            candidates = rerankedCandidates,
+            candidates = finalCandidates,
             latencyMs = System.currentTimeMillis() - startTime,
             totalCandidatesConsidered = totalUniqueCandidates,
             channelCandidateCounts = channelCounts.toMap(),
