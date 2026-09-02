@@ -136,6 +136,90 @@ object AuraPlaybackDiagnostics {
         )
     }
 
+    /**
+     * Captures a diagnostic record for a pre-playback router rejection (e.g. Corrupt, Unsupported, NeedsConversion).
+     */
+    fun captureRouterFailure(
+        route: com.example.compatibility.PlaybackRouteResult,
+        mediaItem: MediaItem,
+        sessionId: String?,
+        appVersion: String = "1.0.0"
+    ): PlaybackErrorLogEntity {
+        val timestamp = System.currentTimeMillis()
+
+        val (exceptionClass, errorCodeName, errorCode, reason) = when (route) {
+            is com.example.compatibility.PlaybackRouteResult.NeedsConversion -> Quartet(
+                "PlaybackRouteResult.NeedsConversion",
+                "ROUTER_NEEDS_CONVERSION",
+                PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+                route.reason
+            )
+            is com.example.compatibility.PlaybackRouteResult.Unsupported -> Quartet(
+                "PlaybackRouteResult.Unsupported",
+                "ROUTER_UNSUPPORTED",
+                PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+                route.reason
+            )
+            is com.example.compatibility.PlaybackRouteResult.Corrupt -> Quartet(
+                "PlaybackRouteResult.Corrupt",
+                "ROUTER_CORRUPT",
+                PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+                route.reason
+            )
+            is com.example.compatibility.PlaybackRouteResult.Playable -> Quartet(
+                "PlaybackRouteResult.Playable",
+                "ROUTER_PLAYABLE",
+                PlaybackException.ERROR_CODE_UNSPECIFIED,
+                "Media is playable"
+            )
+        }
+
+        val mUri = mediaItem.uriPath
+        val isLocal = when {
+            mUri.isBlank() -> true
+            mUri.startsWith("http://", ignoreCase = true) -> false
+            mUri.startsWith("https://", ignoreCase = true) -> false
+            else -> true
+        }
+
+        return PlaybackErrorLogEntity(
+            timestamp = timestamp,
+            mediaItemId = mediaItem.id,
+            mediaUri = mUri,
+            mediaTitle = mediaItem.title,
+            fileName = extractFileName(mUri),
+            mimeType = mediaItem.mediaType,
+            durationMs = mediaItem.durationMs,
+            playbackPositionMs = 0L,
+            playbackState = "PRE_PLAYBACK",
+            playWhenReady = false,
+            errorCode = errorCode,
+            errorCodeName = errorCodeName,
+            errorMessage = reason,
+            exceptionClass = exceptionClass,
+            causeChain = "AuraPlaybackRouter: $reason",
+            stackTrace = "Pre-playback compatibility route failure: $reason",
+            rendererName = "NONE",
+            rendererIndex = -1,
+            codecName = mediaItem.videoCodec,
+            codecMimeType = mediaItem.containerFormat,
+            deviceManufacturer = Build.MANUFACTURER,
+            deviceModel = Build.MODEL,
+            androidVersion = Build.VERSION.RELEASE,
+            sdkInt = Build.VERSION.SDK_INT,
+            appVersion = appVersion,
+            media3Version = "1.3.1",
+            networkState = "UNKNOWN",
+            isLocalFile = isLocal,
+            sessionId = sessionId,
+            recoveryAttempted = false,
+            recoverySuccessful = null,
+            diagnosticSummary = "Router: $reason"
+        )
+    }
+
+    private data class Quartet<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
     private fun extractCausalChain(throwable: Throwable?): String {
         if (throwable == null) return ""
         val sb = StringBuilder()

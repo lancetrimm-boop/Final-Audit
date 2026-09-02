@@ -28,7 +28,7 @@ class ProtectedBaselineVerificationTest {
         // APPLICATION_ID must remain constant for compatibility with existing device installations
         assertEquals(
             "CRITICAL: Application ID has changed. This will break existing library access.",
-            "com.aistudio.auramediaplayer.v3.bowjhi",
+            "com.aistudio.auramediaplayer.v3.ppqtdt",
             BuildConfig.APPLICATION_ID
         )
     }

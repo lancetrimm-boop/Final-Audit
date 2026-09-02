@@ -302,6 +302,18 @@ fun MediaDetailScreen(
         }
     }
 
+    // Record pre-playback router failure (e.g. Corrupt, Unsupported, NeedsConversion) exactly once per viewing session
+    var recordedRouterFailureId by remember(activeItem.id) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(activeItem.id, playbackRoute) {
+        if (playbackRoute !is com.example.compatibility.PlaybackRouteResult.Playable && recordedRouterFailureId != activeItem.id) {
+            recordedRouterFailureId = activeItem.id
+            repository.recordRouterFailure(activeItem, playbackRoute) { logId ->
+                lastErrorLogId = logId
+            }
+        }
+    }
+
     // Single ExoPlayer instance for the session with TRUE PLAYLIST ARCHITECTURE
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {

@@ -790,11 +790,11 @@ abstract class AuraDatabase : RoomDatabase() {
                     // 1. Ensure SQLCipher libraries are loaded (centralized)
                     SQLCipherInitializer.initialize(context)
                     
-                    // 2. Retrieve the persistent passphrase in hex format for SQLCipher raw usage
-                    val hexKey = PassphraseManager.getPassphraseAsHex(context)
+                    // 2. Retrieve the canonical 32-byte raw passphrase
+                    val rawKey = PassphraseManager.getPassphrase(context)
                     
-                    // 3. Build Room with encryption SupportOpenHelperFactory using the raw hex key
-                    val factory = SupportOpenHelperFactory(hexKey.toByteArray())
+                    // 3. Build Room with encryption SupportOpenHelperFactory using the exact raw 32-byte key
+                    val factory = SupportOpenHelperFactory(rawKey)
                     val instance = Room.databaseBuilder(
                         context.applicationContext,
                         AuraDatabase::class.java,

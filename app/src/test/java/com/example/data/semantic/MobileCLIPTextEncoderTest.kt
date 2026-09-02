@@ -14,9 +14,12 @@ class MobileCLIPTextEncoderTest {
 
     @Before
     fun setUp() {
-        val vocabFile = File("src/main/assets/models/mobileclip_vocab.json")
-        val mergesFile = File("src/main/assets/models/mobileclip_merges.txt")
-        val modelFile = File("src/main/assets/models/mobileclip_s0_text.onnx")
+        var vocabFile = File("src/main/assets/models/mobileclip_vocab.json")
+        if (!vocabFile.exists()) vocabFile = File("../model_pack/src/main/assets/models/mobileclip_vocab.json")
+        var mergesFile = File("src/main/assets/models/mobileclip_merges.txt")
+        if (!mergesFile.exists()) mergesFile = File("../model_pack/src/main/assets/models/mobileclip_merges.txt")
+        var modelFile = File("src/main/assets/models/mobileclip_s0_text.onnx")
+        if (!modelFile.exists()) modelFile = File("../model_pack/src/main/assets/models/mobileclip_s0_text.onnx")
 
         assertTrue("Vocab file should exist", vocabFile.exists())
         assertTrue("Merges file should exist", mergesFile.exists())
