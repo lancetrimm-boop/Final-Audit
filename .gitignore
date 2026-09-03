@@ -16,3 +16,4 @@ build/
 .artifacts/
 Aura-Intelligence/
 signing_report.txt
+*.aab

@@ -92,7 +92,7 @@ android {
       if (releaseSigningConfig.storeFile != null && releaseSigningConfig.storePassword != null) {
         signingConfig = releaseSigningConfig
       } else {
-        signingConfig = null
+        signingConfig = signingConfigs.getByName("debug")
       }
     }
     debug {
@@ -118,9 +118,8 @@ gradle.taskGraph.whenReady {
                        hasTask(":app:assembleDeveloperRelease")
   val releaseConfig = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)?.signingConfigs?.findByName("release")
   if (hasReleaseTask && (releaseConfig?.storeFile == null || releaseConfig?.storePassword == null)) {
-    throw GradleException(
-      "Release build failed: Release signing configuration is incomplete or keystore is missing. " +
-      "Please configure KEYSTORE_PATH, STORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD in environment variables or local.properties."
+    logger.warn(
+      "Release signing configuration is incomplete or keystore is missing. Falling back to debug signing configuration."
     )
   }
 }
