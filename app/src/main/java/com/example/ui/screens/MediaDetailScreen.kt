@@ -395,7 +395,9 @@ fun MediaDetailScreen(
                     if (repository.isResumingFromBackground) {
                         // Restore position but do not autoplay
                         if (isVideo) {
+                            Log.d("AuraLifecycle", "Resuming video: seeking to ${repository.lastPlaybackPositionMs}ms")
                             exoPlayer.seekTo(repository.lastPlaybackPositionMs)
+                            exoPlayer.prepare() // Ensure player is prepared for the potentially new surface
                             exoPlayer.playWhenReady = false // Explicitly ensure paused state on return
                         }
                         // Clear the resuming flag after successful restoration to prevent unwanted behavior on next internal navigations

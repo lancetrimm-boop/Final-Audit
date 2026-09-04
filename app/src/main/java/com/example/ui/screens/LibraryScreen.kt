@@ -355,7 +355,7 @@ fun LibraryScreen(
             }
 
             PullToRefreshBox(
-                isRefreshing = false,
+                isRefreshing = scanProgress.isScanning,
                 onRefresh = { 
                     repository.refreshSort()
 

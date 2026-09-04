@@ -2320,15 +2320,16 @@ class MediaRepository(
             return false
         }
 
-        // Only allow one active scan at a time. If one is running, join it or wait.
-        if (activeScanJob?.isActive == true) {
+        // Only allow one active scan at a time. If one is running, join it.
+        val currentJob = activeScanJob
+        if (currentJob?.isActive == true) {
             Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Joining already active scan job.")
-            activeScanJob?.join()
-            return false 
+            currentJob.join()
+            return true
         }
         
         var changed = false
-        activeScanJob = scope.launch {
+        val job = scope.launch {
             try {
                 Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Scan coroutine started on thread: ${Thread.currentThread().name}")
                 val initialCount = _mediaItems.value.size
@@ -2438,6 +2439,9 @@ class MediaRepository(
                 }
             }
         }
+        activeScanJob = job
+        job.join()
+        return true
         activeScanJob?.join()
         Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] scanLocalMedia() joining complete. Returning changed=$changed")
         return changed

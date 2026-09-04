@@ -8,20 +8,25 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.util.LruCache
+import android.util.Size
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
+import kotlin.math.min
 
 object MediaThumbnailFetcher {
     private const val TAG = "MediaThumbnailFetcher"
     private const val THUMBNAIL_DIR = "thumbnails"
     private const val MAX_CONCURRENT_EXTRACTIONS = 4
-    private const val TARGET_THUMBNAIL_SIZE = 320
+    private const val TARGET_THUMBNAIL_SIZE = 512
+    private const val BLACK_FRAME_LUMINANCE_THRESHOLD = 15.0
+    private const val BLACK_FRAME_PERCENTAGE_THRESHOLD = 0.98f
 
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     private val cacheSize = maxMemory / 8
@@ -34,7 +39,43 @@ object MediaThumbnailFetcher {
     // Bounded concurrency for expensive extraction
     private val extractionSemaphore = Semaphore(MAX_CONCURRENT_EXTRACTIONS)
 
-    suspend fun getThumbnail(context: Context, uriString: String): Bitmap? = getFrameAtTime(context, uriString, 1_000_000L)
+    /**
+     * Authoritative entry point for thumbnail acquisition.
+     * Established Decoder Priority:
+     * 1. ContentResolver.loadThumbnail (API 29+)
+     * 2. MediaMetadataRetriever (with black-frame retry)
+     * 3. Coil VideoFrameDecoder (via UI layer fallback)
+     */
+    suspend fun getThumbnail(context: Context, uriString: String): Bitmap? = withContext(Dispatchers.IO) {
+        if (uriString.isBlank()) return@withContext null
+
+        // 1. Preferred Path: loadThumbnail (API 29+) for system-cached thumbnails
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uriString.startsWith("content://")) {
+            val cacheKey = generateCacheKey(uriString, -1L, TARGET_THUMBNAIL_SIZE)
+            val cacheFile = getCacheFile(context, cacheKey)
+            
+            if (cacheFile.exists()) {
+                try {
+                    val bitmap = BitmapFactory.decodeFile(cacheFile.absolutePath)
+                    if (isValidBitmap(bitmap)) return@withContext bitmap
+                } catch (_: Exception) {}
+            }
+
+            try {
+                val uri = Uri.parse(uriString)
+                val bitmap = context.contentResolver.loadThumbnail(uri, Size(TARGET_THUMBNAIL_SIZE, TARGET_THUMBNAIL_SIZE), null)
+                if (isValidBitmap(bitmap)) {
+                    saveToDiskCache(cacheFile, bitmap)
+                    return@withContext bitmap
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "loadThumbnail failed for $uriString, falling back to extractor: ${e.message}")
+            }
+        }
+
+        // 2. Secondary Path: MediaMetadataRetriever with retries for bad representative frames
+        return@withContext getFrameAtTime(context, uriString, 1_000_000L)
+    }
 
     /**
      * Extracts a frame at a specific timestamp (in microseconds).
@@ -43,14 +84,14 @@ object MediaThumbnailFetcher {
     suspend fun getFrameAtTime(context: Context, uriString: String, timeUs: Long): Bitmap? = withContext(Dispatchers.IO) {
         if (uriString.isBlank()) return@withContext null
         
-        val cacheKey = generateCacheKey("${uriString}_$timeUs")
+        val cacheKey = generateCacheKey(uriString, timeUs, TARGET_THUMBNAIL_SIZE)
         val cacheFile = getCacheFile(context, cacheKey)
 
-        // 1. Disk Cache lookup
+        // Disk Cache lookup
         if (cacheFile.exists()) {
             try {
                 val bitmap = BitmapFactory.decodeFile(cacheFile.absolutePath)
-                if (bitmap != null) return@withContext bitmap
+                if (isValidBitmap(bitmap)) return@withContext bitmap
             } catch (_: Exception) {}
         }
 
@@ -58,25 +99,57 @@ object MediaThumbnailFetcher {
         ensureActive()
         
         return@withContext try {
+            // AURA REPAIR: Check isActive BEFORE acquiring semaphore to drop obsolete scrolling requests immediately
+            if (!isActive) return@withContext null
+
             extractionSemaphore.withPermit {
                 ensureActive()
-                val bitmap = extractFrame(context, uriString, timeUs)
-                if (bitmap != null) {
-                    saveToDiskCache(cacheFile, bitmap)
+                var bitmap = extractFrame(context, uriString, timeUs)
+                
+                // Black frame recovery logic (Retriever path only)
+                if (isValidBitmap(bitmap) && isBlackFrame(bitmap!!)) {
+                    val durationMs = getDuration(context, uriString)
+                    if (durationMs > 0) {
+                        Log.d(TAG, "Detected black frame at 1s for $uriString. Retrying at midpoint...")
+                        // Attempt 2: Midpoint (clamped to 5s to avoid deep seeks in long videos)
+                        val retry1Us = min(durationMs * 500L, 5_000_000L)
+                        if (retry1Us > timeUs) {
+                            val retryBitmap = extractFrame(context, uriString, retry1Us)
+                            if (isValidBitmap(retryBitmap)) {
+                                if (isBlackFrame(retryBitmap!!)) {
+                                    Log.d(TAG, "Midpoint frame also black for $uriString. Final retry at 80%...")
+                                    // Attempt 3: 80% (clamped to 10s)
+                                    val retry2Us = min(durationMs * 800L, 10_000_000L)
+                                    if (retry2Us > retry1Us) {
+                                        val finalBitmap = extractFrame(context, uriString, retry2Us)
+                                        if (isValidBitmap(finalBitmap)) {
+                                            bitmap = finalBitmap
+                                        }
+                                    }
+                                } else {
+                                    bitmap = retryBitmap
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (isValidBitmap(bitmap)) {
+                    saveToDiskCache(cacheFile, bitmap!!)
                 }
                 bitmap
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Frame extraction failed for $uriString at $timeUs: ${e.message}")
+            Log.e(TAG, "Frame extraction failed for $uriString: ${e.message}")
             null
         }
     }
 
     private fun extractFrame(context: Context, uriString: String, timeUs: Long): Bitmap? {
         val uri = Uri.parse(uriString)
-        val mimeType = context.contentResolver.getType(uri)
+        val mimeType = try { context.contentResolver.getType(uri) } catch (_: Exception) { null }
         
-        // Use optimized path for photos
+        // Optimized path for photos
         if (MediaCompatibility.isSupportedPhoto(mimeType, uriString)) {
             return try {
                 context.contentResolver.openInputStream(uri)?.use { 
@@ -88,7 +161,7 @@ object MediaThumbnailFetcher {
             }
         }
 
-        // Standard path for videos/others
+        // Standard path for videos using MediaMetadataRetriever
         val retriever = MediaMetadataRetriever()
         return try {
             if (uriString.startsWith("content://") || uriString.startsWith("file://")) {
@@ -108,15 +181,58 @@ object MediaThumbnailFetcher {
                 retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
             } ?: retriever.frameAtTime
         } catch (e: Exception) {
-            Log.w(TAG, "MediaMetadataRetriever failed: ${e.message}")
+            Log.w(TAG, "MediaMetadataRetriever failed for $uriString: ${e.message}")
             null
         } finally {
             try { retriever.release() } catch (_: Exception) {}
         }
     }
 
-    private fun extractThumbnail(context: Context, uriString: String): Bitmap? {
-        return extractFrame(context, uriString, 1000000L)
+    private fun isBlackFrame(bitmap: Bitmap): Boolean {
+        val width = bitmap.width
+        val height = bitmap.height
+        val sampleStep = 24 // Fast sampling for efficiency
+        var darkPixels = 0
+        var totalSamples = 0
+        
+        for (x in 0 until width step sampleStep) {
+            for (y in 0 until height step sampleStep) {
+                val pixel = bitmap.getPixel(x, y)
+                val r = (pixel shr 16) and 0xFF
+                val g = (pixel shr 8) and 0xFF
+                val b = pixel and 0xFF
+                // Standard Luminance Formula
+                val luminance = (0.299 * r + 0.587 * g + 0.114 * b)
+                if (luminance < BLACK_FRAME_LUMINANCE_THRESHOLD) {
+                    darkPixels++
+                }
+                totalSamples++
+            }
+        }
+        
+        return if (totalSamples > 0) {
+            (darkPixels.toFloat() / totalSamples) > BLACK_FRAME_PERCENTAGE_THRESHOLD
+        } else false
+    }
+
+    private fun getDuration(context: Context, uriString: String): Long {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            if (uriString.startsWith("content://") || uriString.startsWith("file://")) {
+                retriever.setDataSource(context, Uri.parse(uriString))
+            } else {
+                retriever.setDataSource(uriString)
+            }
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
+        } catch (_: Exception) {
+            0L
+        } finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
+    }
+
+    private fun isValidBitmap(bitmap: Bitmap?): Boolean {
+        return bitmap != null && !bitmap.isRecycled && bitmap.width > 0 && bitmap.height > 0
     }
 
     private fun saveToDiskCache(file: File, bitmap: Bitmap) {
@@ -126,7 +242,6 @@ object MediaThumbnailFetcher {
             FileOutputStream(tempFile).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
             }
-            // Atomic rename to avoid partial files
             if (!tempFile.renameTo(file)) {
                 tempFile.delete()
             }
@@ -141,14 +256,14 @@ object MediaThumbnailFetcher {
         return File(dir, "$key.jpg")
     }
 
-    private fun generateCacheKey(uriString: String): String {
+    private fun generateCacheKey(uriString: String, timeUs: Long, size: Int): String {
+        val input = "${uriString}_${timeUs}_${size}"
         return try {
             val digest = MessageDigest.getInstance("SHA-256")
-            val bytes = digest.digest(uriString.toByteArray())
+            val bytes = digest.digest(input.toByteArray())
             bytes.joinToString("") { "%02x".format(it) }
         } catch (e: Exception) {
-            // Fallback to hashcode string if digest fails
-            uriString.hashCode().toString()
+            input.hashCode().toString()
         }
     }
 

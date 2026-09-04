@@ -10,9 +10,9 @@ import java.util.UUID
  * Manages Layer 1 (Cluster generation) and Layer 2 (Batch realization).
  */
 class DiscoverSessionManager {
-    private val sessionSeenIds = mutableSetOf<String>()
-    private val sessionSeenContentIds = mutableSetOf<String>()
-    private var currentSessionId: String = java.util.UUID.randomUUID().toString()
+    private val sessionSeenIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val sessionSeenContentIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    @Volatile private var currentSessionId: String = java.util.UUID.randomUUID().toString()
 
     /**
      * LAYER 1: Generates the vertically scrolling obsession clusters and wraps them in a snapshot.

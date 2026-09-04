@@ -47,6 +47,8 @@ class DiscoverViewModel(
 ) : ViewModel() {
 
     private val sessionManager = DiscoverSessionManager()
+    private var refreshJob: kotlinx.coroutines.Job? = null
+    private var isRefreshing = false
     
     private val _feedState = MutableStateFlow<DiscoverFeedState>(DiscoverFeedState.Loading)
     val feedState: StateFlow<DiscoverFeedState> = _feedState.asStateFlow()
@@ -117,7 +119,7 @@ class DiscoverViewModel(
             combine(repository.discoveryPolicy, repository.userIntent) { p, i -> p to i }
                 .collect {
                     // If policy or intent changes while we have a success state, force a refresh
-                    if (_feedState.value is DiscoverFeedState.Success) {
+                    if (_feedState.value is DiscoverFeedState.Success && !isRefreshing) {
                         refresh(forceNewSession = false)
                     }
                 }
@@ -148,10 +150,12 @@ class DiscoverViewModel(
     }
 
     fun refresh(forceNewSession: Boolean = false) {
-        viewModelScope.launch {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             // If already loading and not forced, skip
             if (_feedState.value is DiscoverFeedState.Loading && !forceNewSession) return@launch
             
+            isRefreshing = true
             // Set Loading state if forced or if we don't have a snapshot yet
             if (forceNewSession || repository.discoverSnapshot.value == null) {
                 _feedState.value = DiscoverFeedState.Loading
@@ -188,6 +192,8 @@ class DiscoverViewModel(
                 }
             } catch (e: Exception) {
                 _feedState.value = DiscoverFeedState.Error(e.message ?: "Failed to generate recommendations")
+            } finally {
+                isRefreshing = false
             }
         }
     }

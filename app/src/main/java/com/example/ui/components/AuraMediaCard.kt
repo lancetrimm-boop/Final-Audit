@@ -42,6 +42,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -77,8 +79,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.isActive
 import com.example.util.MediaThumbnailFetcher
 import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
 import com.example.data.MediaItem
 import com.example.ui.models.LibraryItemUi
@@ -94,9 +98,16 @@ import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraStarGold
 import com.example.ui.theme.AuraSubtleBorder
+import com.example.ui.theme.AuraSubtleSurface
 import com.example.ui.theme.AuraSurface
 import com.example.ui.theme.DiscoveryGradient
 import com.example.ui.theme.DiscoveryViolet
+
+private data class ThumbnailResult(
+    val itemId: String,
+    val bitmap: Bitmap?,
+    val isFailure: Boolean = false
+)
 
 @Composable
 fun AuraMediaThumbnail(
@@ -109,82 +120,95 @@ fun AuraMediaThumbnail(
     locationTag: String = "generic"
 ) {
     val isVideo = mediaType.equals("VIDEO", ignoreCase = true) || mediaType.equals("Movie", ignoreCase = true)
-    val imageModel = if (imageUrl.isNotEmpty()) imageUrl else uriPath
     val context = LocalContext.current
-    var thumbnailBitmap by remember(itemId, uriPath, imageUrl) { mutableStateOf<Bitmap?>(null) }
+    
+    // AURA REPAIR: Identity-safe state to prevent recycled cards from showing stale thumbnails
+    var thumbnailResult by remember(itemId) { mutableStateOf<ThumbnailResult?>(null) }
 
     LaunchedEffect(itemId, uriPath, imageUrl) {
         val targetUri = if (imageUrl.isNotEmpty()) imageUrl else uriPath
-        if (targetUri.isNotEmpty() && isVideo) {
-            thumbnailBitmap = MediaThumbnailFetcher.getThumbnail(context, targetUri)
+        if (targetUri.isNotEmpty()) {
+            val bitmap = MediaThumbnailFetcher.getThumbnail(context, targetUri)
+            
+            // Invariant: only apply if itemId still matches the requested one
+            if (isActive) {
+                thumbnailResult = ThumbnailResult(itemId, bitmap, isFailure = bitmap == null)
+            }
+        } else {
+            thumbnailResult = ThumbnailResult(itemId, null, isFailure = true)
         }
     }
 
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(AuraCrispWhite)
-            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(12.dp))
+            .background(AuraSubtleSurface)
+            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
     ) {
-        if (thumbnailBitmap != null || imageModel.isNotEmpty()) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Single Blurred Background (Optimization: reduced quality for blur)
-                val backgroundModifier = Modifier
-                    .fillMaxSize()
-                    .blur(30.dp)
-                    .graphicsLayer(alpha = 0.5f)
-
-                if (thumbnailBitmap != null) {
-                    // MEMORY OPTIMIZATION: Create a tiny bitmap for the blur layer to avoid processing full resolution
-                    val tinyBitmap = remember(thumbnailBitmap) {
-                        try {
-                            Bitmap.createScaledBitmap(thumbnailBitmap!!, 100, 100, true)
-                        } catch (e: Exception) {
-                            thumbnailBitmap
-                        }
-                    }
+        val result = thumbnailResult
+        
+        when {
+            result == null -> {
+                // State 1: Loading (Subtle gradient shimmer)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            brush = Brush.linearGradient(
+                                colors = listOf(AuraSubtleSurface, AuraSubtleBorder, AuraSubtleSurface)
+                            )
+                        )
+                )
+            }
+            result.bitmap != null && result.itemId == itemId -> {
+                // State 2: Success (Identity Verified)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Blurred Background
                     Image(
-                        bitmap = tinyBitmap!!.asImageBitmap(),
+                        bitmap = result.bitmap.asImageBitmap(),
                         contentDescription = null,
-                        modifier = backgroundModifier,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .blur(30.dp)
+                            .graphicsLayer(alpha = 0.5f),
                         contentScale = ContentScale.Crop
                     )
-                } else {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(imageModel)
-                            .crossfade(false)
-                            .size(100) // Much lower res for blurred layer
-                            .build(),
-                        contentDescription = null,
-                        modifier = backgroundModifier,
-                        contentScale = ContentScale.Crop
-                    )
-                }
-
-                // Single Aspect-Fit Foreground
-                if (thumbnailBitmap != null) {
+                    // Aspect-Fit Foreground
                     Image(
-                        bitmap = thumbnailBitmap!!.asImageBitmap(),
-                        contentDescription = title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
-                } else {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(imageModel)
-                            .crossfade(false)
-                            .build(),
+                        bitmap = result.bitmap.asImageBitmap(),
                         contentDescription = title,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Fit
                     )
                 }
             }
+            else -> {
+                // State 3: Failure (Deliberate Themed Fallback)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = if (isVideo) Icons.Outlined.Movie else Icons.Outlined.Image,
+                        contentDescription = "Preview Unavailable",
+                        tint = AuraMutedSlate.copy(alpha = 0.4f),
+                        modifier = Modifier.size(32.dp)
+                    )
+                    if (title.isNotEmpty()) {
+                        Text(
+                            text = "NO PREVIEW",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Black,
+                            color = AuraMutedSlate.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
         }
 
-        if (isVideo) {
+        if (isVideo && thumbnailResult?.bitmap != null && thumbnailResult?.itemId == itemId) {
             VideoTilePreview(
                 itemId = itemId,
                 videoUri = uriPath,

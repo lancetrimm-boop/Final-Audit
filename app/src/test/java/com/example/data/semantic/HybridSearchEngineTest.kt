@@ -425,7 +425,12 @@ class HybridSearchEngineTest {
         
         // Custom reranker that adds a high-confidence reason to simulate a deep frame match
         val boostingReranker = object : MultimodalReranker {
-            override fun rerank(candidates: List<HybridCandidate>, queryVector: FloatArray?, frameVectors: Map<String, List<VideoFrameRepresentation>>): List<HybridCandidate> {
+            override fun rerank(
+                candidates: List<HybridCandidate>,
+                queryVector: FloatArray?,
+                queryVectors: List<FloatArray>?,
+                frameVectors: Map<String, List<VideoFrameRepresentation>>
+            ): List<HybridCandidate> {
                 return candidates.map { 
                     it.copy(matchReasons = listOf(MatchReason(MatchReasonType.DEEP_SCENE_MATCH, 0.5f, "Found lamp in frame 42")))
                 }

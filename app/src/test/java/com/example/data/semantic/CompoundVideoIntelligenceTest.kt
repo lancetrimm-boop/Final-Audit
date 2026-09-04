@@ -59,7 +59,11 @@ class CompoundVideoIntelligenceTest {
         )
 
         val frameVectors = mapOf("video_a" to framesA, "video_b" to framesB)
-        val result = reranker.rerank(listOf(candidateA, candidateB), compoundVector, frameVectors)
+        val result = reranker.rerank(
+            candidates = listOf(candidateA, candidateB),
+            queryVector = compoundVector,
+            frameVectors = frameVectors
+        )
 
         // Video B should be promoted above A because its frame matches the COMPOUND query better
         assertEquals("video_b", result[0].mediaId)
@@ -85,7 +89,11 @@ class CompoundVideoIntelligenceTest {
             channelScores = mapOf(SearchChannel.SEMANTIC_VISUAL to 0.2f) // Weak aggregate
         )
         
-        val result = reranker.rerank(listOf(candidate), compoundVector, mapOf("video_1" to frames))
+        val result = reranker.rerank(
+            candidates = listOf(candidate),
+            queryVector = compoundVector,
+            frameVectors = mapOf("video_1" to frames)
+        )
         
         assertTrue(result[0].rrfScore > 0.01)
         assertTrue(result[0].matchExplanation.contains("Max Frame Similarity: 0.980"))

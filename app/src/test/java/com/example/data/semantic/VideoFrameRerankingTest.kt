@@ -54,7 +54,11 @@ class VideoFrameRerankingTest {
         val candidates = listOf(candidateB, candidateA)
         val frameVectors = mapOf("video_a" to framesA, "video_b" to framesB)
 
-        val result = reranker.rerank(candidates, queryVector, frameVectors)
+        val result = reranker.rerank(
+            candidates = candidates,
+            queryVector = queryVector,
+            frameVectors = frameVectors
+        )
 
         // video_a should have received a significant boost and overtaken video_b
         assertEquals("video_a", result[0].mediaId)
@@ -70,7 +74,11 @@ class VideoFrameRerankingTest {
             channelScores = mapOf(SearchChannel.KEYWORD to 1.0f)
         )
         
-        val result = reranker.rerank(listOf(candidate), null, emptyMap())
+        val result = reranker.rerank(
+            candidates = listOf(candidate),
+            queryVector = null,
+            frameVectors = emptyMap()
+        )
         
         assertEquals(1, result.size)
         assertEquals(0.1, result[0].rrfScore, 1e-6)
@@ -89,7 +97,11 @@ class VideoFrameRerankingTest {
             channelScores = emptyMap()
         )
 
-        val result = reranker.rerank(listOf(candidate), null, emptyMap())
+        val result = reranker.rerank(
+            candidates = listOf(candidate),
+            queryVector = null,
+            frameVectors = emptyMap()
+        )
         
         // 1.0 * 1.15 boost
         assertEquals(1.15, result[0].rrfScore, 1e-6)

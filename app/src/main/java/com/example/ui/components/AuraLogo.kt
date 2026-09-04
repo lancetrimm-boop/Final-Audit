@@ -16,9 +16,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import coil.compose.AsyncImage
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material3.Icon
 import com.example.R
 import com.example.ui.theme.AuraMidnight
 import com.example.ui.theme.DiscoveryGradient
+import com.example.ui.theme.DiscoveryViolet
 
 /**
  * Authoritative Brand Name.
@@ -68,10 +73,17 @@ fun AuraLogoMark(
         modifier = modifier.size(size),
         contentAlignment = Alignment.Center
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.aura_logo_mark),
+        // AURA REPAIR: Use AsyncImage (Coil) for the brand logo mark.
+        // The 1.8MB PNG resource has been observed to cause ResourceResolutionException 
+        // during direct painterResource() loading on high-density physical devices.
+        // Coil handles decoding off-thread. We provide a Vector fallback to prevent crashes.
+        AsyncImage(
+            model = R.drawable.aura_logo_mark,
             contentDescription = "Aura Logo",
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            // DO NOT use painterResource with layer-list drawables here as it causes IllegalArgumentException in Compose
+            error = androidx.compose.ui.graphics.vector.rememberVectorPainter(image = Icons.Outlined.AutoAwesome),
+            fallback = androidx.compose.ui.graphics.vector.rememberVectorPainter(image = Icons.Outlined.AutoAwesome)
         )
     }
 }
