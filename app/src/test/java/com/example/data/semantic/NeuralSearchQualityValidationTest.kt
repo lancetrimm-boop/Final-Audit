@@ -27,8 +27,8 @@ class NeuralSearchQualityValidationTest {
     private lateinit var repository: MediaRepository
     private val testDispatcher = kotlinx.coroutines.test.UnconfinedTestDispatcher()
 
-    private val modelPath = "C:/Users/lance/Downloads/semantic search/app/src/main/assets/models/all-minilm-l6-v2.onnx"
-    private val vocabPath = "C:/Users/lance/Downloads/semantic search/app/src/main/assets/models/vocab.txt"
+    private val modelPath = if (File("src/main/assets/models/all-minilm-l6-v2.onnx").exists()) "src/main/assets/models/all-minilm-l6-v2.onnx" else "../model_pack/src/main/assets/models/all-minilm-l6-v2.onnx"
+    private val vocabPath = if (File("src/main/assets/models/vocab.txt").exists()) "src/main/assets/models/vocab.txt" else "../model_pack/src/main/assets/models/vocab.txt"
 
     private lateinit var engine: OnnxRuntimeMiniLMInferenceEngine
     private lateinit var tokenizer: BertWordPieceTokenizer

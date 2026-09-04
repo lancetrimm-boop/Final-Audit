@@ -50,8 +50,8 @@ object LegacyDatabaseEncryptionMigrator {
         if (isDatabaseEncrypted(dbPath)) {
             Log.i(TAG, "Database is already encrypted. Validating access...")
             return try {
-                val hexKey = PassphraseManager.getPassphraseAsHex(context)
-                EncryptedSQLiteDatabase.openDatabase(dbPath.absolutePath, hexKey.toByteArray(), null, EncryptedSQLiteDatabase.OPEN_READONLY, null).use { 
+                val rawKey = PassphraseManager.getPassphrase(context)
+                EncryptedSQLiteDatabase.openDatabase(dbPath.absolutePath, rawKey, null, EncryptedSQLiteDatabase.OPEN_READONLY, null).use { 
                     Log.i(TAG, "Encryption validation successful.")
                 }
                 TransitionResult.AlreadyEncrypted
@@ -71,8 +71,8 @@ object LegacyDatabaseEncryptionMigrator {
         }
 
         return try {
-            val hexKey = PassphraseManager.getPassphraseAsHex(context)
-            performTransition(context, dbPath, hexKey)
+            val rawKey = PassphraseManager.getPassphrase(context)
+            performTransition(context, dbPath, rawKey)
             TransitionResult.Success
         } catch (t: Throwable) {
             Log.e(TAG, "Transition failed: ${t.message}", t)
@@ -98,7 +98,7 @@ object LegacyDatabaseEncryptionMigrator {
         }
     }
 
-    private fun performTransition(context: Context, originalDbPath: File, hexKey: String) {
+    private fun performTransition(context: Context, originalDbPath: File, rawKey: ByteArray) {
         val tempDbPath = File(originalDbPath.parent, "${DATABASE_NAME}.tmp")
         val backupDbPath = File(originalDbPath.parent, "${DATABASE_NAME}.legacy_bak")
 
@@ -130,16 +130,16 @@ object LegacyDatabaseEncryptionMigrator {
 
         // 1. Pre-initialize the encrypted destination (Approach B)
         // This ensures SQLCipher initializes headers and confirms the key is working.
-        EncryptedSQLiteDatabase.openOrCreateDatabase(tempDbPath, hexKey.toByteArray(), null, null).use { db ->
+        EncryptedSQLiteDatabase.openOrCreateDatabase(tempDbPath, rawKey, null, null).use { db ->
             db.version = legacyVersion // Preserve the version pragma for Room migration logic
         }
 
         // 2. Open the plaintext database using SQLCipher with an empty key
         val plaintextDb = EncryptedSQLiteDatabase.openDatabase(originalDbPath.absolutePath, "".toByteArray(), null, EncryptedSQLiteDatabase.OPEN_READWRITE, null)
         try {
-            // 3. Attach the new encrypted database
-            // Note: Wrap the key in double quotes for SQL compatibility
-            plaintextDb.execSQL("ATTACH DATABASE '${tempDbPath.absolutePath}' AS encrypted KEY \"$hexKey\"")
+            // 3. Attach the new encrypted database using SQLCipher's x'HEX' literal syntax for ATTACH
+            val hexKeyLiteral = "x'${bytesToHex(rawKey)}'"
+            plaintextDb.execSQL("ATTACH DATABASE '${tempDbPath.absolutePath}' AS encrypted KEY \"$hexKeyLiteral\"")
             
             try {
                 // 4. Export data
@@ -157,8 +157,8 @@ object LegacyDatabaseEncryptionMigrator {
 
         // 6. Comprehensive Verification
         Log.i(TAG, "Verifying encrypted database integrity...")
-        // Use raw hex key for verification open
-        val encryptedDb = EncryptedSQLiteDatabase.openDatabase(tempDbPath.absolutePath, hexKey.toByteArray(), null, EncryptedSQLiteDatabase.OPEN_READONLY, null)
+        // Use raw key for verification open
+        val encryptedDb = EncryptedSQLiteDatabase.openDatabase(tempDbPath.absolutePath, rawKey, null, EncryptedSQLiteDatabase.OPEN_READONLY, null)
         try {
             // A. Check SQLCipher is actually active (Standard SQLite should fail on this file)
             if (!isDatabaseEncrypted(tempDbPath)) {

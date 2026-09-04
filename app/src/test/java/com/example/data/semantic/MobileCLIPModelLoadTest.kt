@@ -17,7 +17,10 @@ class MobileCLIPModelLoadTest {
 
     @Test
     fun testLoadMobileCLIPImageEncoder() {
-        val modelFile = File("src/main/assets/models/mobileclip_s0_image.onnx")
+        var modelFile = File("src/main/assets/models/mobileclip_s0_image.onnx")
+        if (!modelFile.exists()) {
+            modelFile = File("../model_pack/src/main/assets/models/mobileclip_s0_image.onnx")
+        }
         assertTrue("Model file should exist at ${modelFile.absolutePath}", modelFile.exists())
         
         val env = OrtEnvironment.getEnvironment()

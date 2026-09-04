@@ -978,8 +978,8 @@ class MediaRepository(
                     val dbPath = context.getDatabasePath("aura_intelligence.db")
                     if (dbPath.exists()) {
                         try {
-                            val hexKey = com.example.data.db.PassphraseManager.getPassphraseAsHex(context)
-                            net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(dbPath.absolutePath, hexKey.toByteArray(), null, net.zetetic.database.sqlcipher.SQLiteDatabase.OPEN_READWRITE, null).use { rawDb ->
+                            val rawKey = com.example.data.db.PassphraseManager.getPassphrase(context)
+                            net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(dbPath.absolutePath, rawKey, null, net.zetetic.database.sqlcipher.SQLiteDatabase.OPEN_READWRITE, null).use { rawDb ->
                                 Log.d("AURA_INIT", "Current raw DB version: ${rawDb.version}")
                                 if (rawDb.version == 0) {
                                     // RECOVERY: If version is 0 (likely due to export without version preservation), 
@@ -1006,6 +1006,9 @@ class MediaRepository(
                                 else -> DatabaseState.TRANSITION_FAILED
                             }
                             _databaseState.value = state
+                            synchronized(this@MediaRepository) {
+                                pendingErrorLogs.clear()
+                            }
                             Log.e("AURA_INIT", "Transition failed: ${transitionResult.reason}")
                             return@launch
                         }
@@ -1033,7 +1036,10 @@ class MediaRepository(
                     }
 
                     intelligenceRepository = IntelligenceRepository(db.intelligenceDao(), this@MediaRepository, moshi, scope, db)
-                    playbackErrorLogRepository = PlaybackErrorLogRepository(db.playbackErrorLogDao(), scope)
+                    val errorRepo = PlaybackErrorLogRepository(db.playbackErrorLogDao(), scope)
+                    playbackErrorLogRepository = errorRepo
+                    flushPendingErrorLogs(errorRepo)
+
                     searchFeedbackRepository = SearchFeedbackRepository(db.searchFeedbackDao(), scope)
                     conversionQueueRepository = ConversionQueueRepository(
                         db.conversionJobDao(), 
@@ -2814,14 +2820,54 @@ class MediaRepository(
         }
     }
 
+    private val pendingErrorLogs = java.util.concurrent.ConcurrentLinkedQueue<com.example.data.db.PlaybackErrorLogEntity>()
+    private val MAX_PENDING_ERROR_LOGS = 50
+
+    @Synchronized
+    private fun recordOrBufferError(entity: com.example.data.db.PlaybackErrorLogEntity) {
+        val repo = playbackErrorLogRepository
+        if (repo != null) {
+            scope.launch {
+                try {
+                    repo.recordError(entity)
+                } catch (t: Throwable) {
+                    Log.e("AuraPlaybackDiagnostics", "Error writing to repository", t)
+                }
+            }
+        } else {
+            if (pendingErrorLogs.size < MAX_PENDING_ERROR_LOGS) {
+                pendingErrorLogs.add(entity)
+                Log.i("AuraPlaybackDiagnostics", "Buffered pending playback error record (queue size: ${pendingErrorLogs.size})")
+            } else {
+                Log.w("AuraPlaybackDiagnostics", "Pending error log buffer full; dropping error record")
+            }
+        }
+    }
+
+    @Synchronized
+    private fun flushPendingErrorLogs(repo: PlaybackErrorLogRepository) {
+        val count = pendingErrorLogs.size
+        if (count > 0) {
+            Log.i("AuraPlaybackDiagnostics", "Flushing $count pending error log records...")
+            while (pendingErrorLogs.isNotEmpty()) {
+                val entity = pendingErrorLogs.poll() ?: break
+                scope.launch {
+                    try {
+                        repo.recordError(entity)
+                    } catch (t: Throwable) {
+                        Log.e("AuraPlaybackDiagnostics", "Error flushing pending error record", t)
+                    }
+                }
+            }
+        }
+    }
+
     fun recordPlaybackError(
         error: androidx.media3.common.PlaybackException,
         player: androidx.media3.common.Player,
         mediaItem: MediaItem?,
         onRecordComplete: ((Long) -> Unit)? = null
     ) {
-        val repo = playbackErrorLogRepository ?: return
-        
         scope.launch {
             try {
                 val appVer = try {
@@ -2837,14 +2883,60 @@ class MediaRepository(
                 )
                 
                 Log.e("AuraPlaybackDiagnostics", "Recording playback error: ${diagnosticRecord.diagnosticSummary} (Session: ${_playbackSessionId})")
-                val logId = repo.recordError(diagnosticRecord)
+                recordOrBufferError(diagnosticRecord)
+
                 withContext(Dispatchers.Main) {
-                    onRecordComplete?.invoke(logId)
+                    onRecordComplete?.invoke(diagnosticRecord.id)
                 }
             } catch (t: Throwable) {
                 Log.e("AuraPlaybackDiagnostics", "Critical failure in diagnostic collector: ${t.message}", t)
                 // Fail-safe: do not crash the player
             }
+        }
+    }
+
+    fun recordRouterFailure(
+        mediaItem: MediaItem,
+        route: com.example.compatibility.PlaybackRouteResult,
+        onRecordComplete: ((Long) -> Unit)? = null
+    ) {
+        scope.launch {
+            try {
+                val appVer = try {
+                    applicationContext?.packageManager?.getPackageInfo(applicationContext?.packageName ?: "", 0)?.versionName ?: "1.0.0"
+                } catch (e: Exception) { "1.0.0" }
+
+                val diagnosticRecord = com.example.util.AuraPlaybackDiagnostics.captureRouterFailure(
+                    route = route,
+                    mediaItem = mediaItem,
+                    sessionId = _playbackSessionId,
+                    appVersion = appVer
+                )
+
+                Log.w("AuraPlaybackDiagnostics", "Recording router playback failure: ${diagnosticRecord.diagnosticSummary} (Session: ${_playbackSessionId})")
+                recordOrBufferError(diagnosticRecord)
+
+                withContext(Dispatchers.Main) {
+                    onRecordComplete?.invoke(diagnosticRecord.id)
+                }
+            } catch (t: Throwable) {
+                Log.e("AuraPlaybackDiagnostics", "Critical failure recording router diagnostic: ${t.message}", t)
+            }
+        }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    fun setPlaybackErrorLogRepositoryForTesting(repo: PlaybackErrorLogRepository?) {
+        playbackErrorLogRepository = repo
+    }
+
+    @androidx.annotation.VisibleForTesting
+    fun resetTestingState() {
+        _databaseState.value = DatabaseState.NOT_INITIALIZED
+        database = null
+        playbackErrorLogRepository = null
+        synchronized(this) {
+            pendingErrorLogs.clear()
         }
     }
 

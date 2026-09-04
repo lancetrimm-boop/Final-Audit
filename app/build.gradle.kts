@@ -57,7 +57,7 @@ android {
       val keystorePath = System.getenv("KEYSTORE_PATH")
         ?: (project.findProperty("KEYSTORE_PATH") as? String)
         ?: localProps.getProperty("KEYSTORE_PATH")
-        ?: "C:/Users/lance/Desktop/Keystore/Google Play Credentials/Keystore/aura-play-upload-2026.jks"
+        ?: "${rootDir}/aura-play-upload-2026.jks"
 
       val storePass = System.getenv("STORE_PASSWORD")
         ?: (project.findProperty("STORE_PASSWORD") as? String)
@@ -88,7 +88,12 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       
-      signingConfig = signingConfigs.getByName("release")
+      val releaseSigningConfig = signingConfigs.getByName("release")
+      if (releaseSigningConfig.storeFile != null && releaseSigningConfig.storePassword != null) {
+        signingConfig = releaseSigningConfig
+      } else {
+        signingConfig = signingConfigs.getByName("debug")
+      }
     }
     debug {
       isMinifyEnabled = false
@@ -177,6 +182,7 @@ dependencies {
   implementation(libs.google.play.asset.delivery.ktx)
   testImplementation(libs.onnxruntime)
   implementation(libs.coil.compose)
+  implementation(libs.coil.video)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
