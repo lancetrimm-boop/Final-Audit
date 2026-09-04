@@ -2,6 +2,7 @@ package com.example.data.semantic
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
@@ -105,11 +106,12 @@ class DefaultHybridSearchEngine(
         request: SearchRequest,
         config: HybridSearchConfig
     ): HybridSearchResult {
-        android.util.Log.i("SEARCH_REQUEST", "START_SEARCH: type=${request.javaClass.simpleName} query=\"${request.query}\" requestId=${request.requestId}")
+        android.util.Log.i("SEARCH_REQUEST", "START_SEARCH: type=${request.javaClass.simpleName} requestId=${request.requestId}")
         val result = when (request) {
             is SearchRequest.Text -> searchText(request, config)
             is SearchRequest.Visual -> searchVisual(request, config)
             is SearchRequest.Compound -> searchCompound(request, config)
+            is SearchRequest.MultiVisual -> searchMultiVisual(request, config)
         }
         android.util.Log.i("SEARCH_REQUEST", "FINISH_SEARCH: success=${result.isSuccess} candidates=${result.candidates.size} latency=${result.latencyMs}ms")
         return result
@@ -438,6 +440,121 @@ class DefaultHybridSearchEngine(
             latencyMs = System.currentTimeMillis() - startTime,
             totalCandidatesConsidered = totalUniqueCandidates,
             channelCandidateCounts = channelCounts.toMap(),
+            deepRerankCount = topForRerank.size,
+            frameVectorsLoaded = framesLoadedCount,
+            isSuccess = true
+        )
+
+        com.example.util.AuraSearchDiagnostics.logSearchResult(finalResult)
+        finalResult
+    }
+
+    /**
+     * Implementation for Multi-Visual Intersection search (Phase 2).
+     */
+    private suspend fun searchMultiVisual(
+        request: SearchRequest.MultiVisual,
+        @Suppress("UNUSED_PARAMETER") config: HybridSearchConfig
+    ): HybridSearchResult = withContext(Dispatchers.Default) {
+        val startTime = System.currentTimeMillis()
+        val queryVectors = request.visualVectors
+
+        if (queryVectors.isEmpty()) {
+            return@withContext HybridSearchResult(
+                query = "Multi-Visual Query",
+                queryType = SearchQueryType.MULTI_VISUAL,
+                requestId = request.requestId,
+                candidates = emptyList(),
+                latencyMs = 0L,
+                totalCandidatesConsidered = 0,
+                channelCandidateCounts = emptyMap(),
+                isSuccess = false,
+                errorMessage = "No visual vectors provided."
+            )
+        }
+
+        if (visualRetriever == null || !visualRetriever.isReady() || repository == null) {
+            return@withContext HybridSearchResult(
+                query = "Multi-Visual Query",
+                queryType = SearchQueryType.MULTI_VISUAL,
+                requestId = request.requestId,
+                candidates = emptyList(),
+                latencyMs = 0L,
+                totalCandidatesConsidered = 0,
+                channelCandidateCounts = emptyMap(),
+                isSuccess = false,
+                errorMessage = "Visual search engine or repository not ready."
+            )
+        }
+
+        // 1. Candidate Recall: Union of top-150 per reference
+        val recallTopK = 150
+        val allRecallCandidates = coroutineScope {
+            queryVectors.map { vector ->
+                async {
+                    try {
+                        visualRetriever.retrieveVisualCandidates(
+                            queryVector = vector,
+                            topK = recallTopK,
+                            minSimilarity = SoftIntersectionScorer.RECALL_FLOOR
+                        )
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+            }.awaitAll().flatten()
+        }
+
+        val uniqueMediaIds = allRecallCandidates.map { it.mediaId }.distinct()
+
+        val scoredCandidates = mutableListOf<HybridCandidate>()
+        for (mediaId in uniqueMediaIds) {
+            val reps = repository.getForMedia(mediaId)
+            val visualRep = reps.find { it.type == SemanticRepresentationType.VISUAL } ?: continue
+            
+            val intersectionResult = SoftIntersectionScorer.score(visualRep.vector, queryVectors)
+            
+            if (intersectionResult.survives) {
+                scoredCandidates.add(HybridCandidate(
+                    mediaId = mediaId,
+                    rrfScore = intersectionResult.score.toDouble(),
+                    channelRanks = emptyMap(),
+                    channelScores = mapOf(SearchChannel.SEMANTIC_VISUAL to intersectionResult.score),
+                    matchExplanation = "Intersection: ${"%.3f".format(intersectionResult.score)}",
+                    matchReasons = listOf(MatchReason(MatchReasonType.VISUAL_CONTENT_MATCH, intersectionResult.score, "Visual shared characteristics"))
+                ))
+            }
+        }
+        scoredCandidates.sortByDescending { it.rrfScore }
+
+        // --- DEEP VIDEO RERANKING ---
+        val topForRerank = scoredCandidates.take(RERANK_TOP_N)
+        var framesLoadedCount = 0
+        val frameVectors = if (topForRerank.isNotEmpty()) {
+            val mediaIds = topForRerank.map { it.mediaId }
+            val frames = repository.getFramesForBatch(mediaIds)
+            framesLoadedCount = frames.size
+            frames.groupBy { it.mediaId }
+        } else {
+            emptyMap()
+        }
+
+        val rerankedCandidates = reranker.rerank(
+            candidates = scoredCandidates,
+            queryVector = null,
+            queryVectors = queryVectors,
+            frameVectors = frameVectors
+        )
+
+        val elapsed = System.currentTimeMillis() - startTime
+        val finalResult = HybridSearchResult(
+            query = "Multi-Visual [${queryVectors.size} refs]",
+            queryType = SearchQueryType.MULTI_VISUAL,
+            requestId = request.requestId,
+            candidates = rerankedCandidates,
+            latencyMs = elapsed,
+            totalCandidatesConsidered = uniqueMediaIds.size,
+            channelCandidateCounts = mapOf(SearchChannel.SEMANTIC_VISUAL to uniqueMediaIds.size),
             deepRerankCount = topForRerank.size,
             frameVectorsLoaded = framesLoadedCount,
             isSuccess = true

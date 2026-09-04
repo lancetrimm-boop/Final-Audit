@@ -556,6 +556,109 @@ class MediaRepository(
     }
 
     /**
+     * Triggers a multi-reference visual search (Phase 2 Soft Intersection).
+     * Reuses existing embeddings to minimize redundant ONNX inference.
+     */
+    fun searchByMultipleImages(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        
+        android.util.Log.i("SEARCH_REQUEST", "UPDATE_MULTI_IMAGE: count=${items.size}")
+        
+        scope.launch(Dispatchers.Default) {
+            try {
+                val provider = mobileCLIPProvider ?: return@launch
+                val repo = semanticRepresentationRepository ?: return@launch
+                
+                val vectors = mutableListOf<FloatArray>()
+                val uris = mutableListOf<String>()
+                
+                for (item in items) {
+                    uris.add(item.uriPath)
+                    
+                    // 1. Try to reuse existing visual embedding
+                    val existing = repo.getSpecificRepresentation(
+                        item.id, 
+                        com.example.data.semantic.SemanticRepresentationType.VISUAL, 
+                        provider.descriptor
+                    )
+                    
+                    if (existing != null) {
+                        vectors.add(existing.vector)
+                        continue
+                    }
+                    
+                    // 2. Fallback to encoding if missing (e.g. newly imported)
+                    val ctx = applicationContext ?: return@launch
+                    val bitmap = com.example.util.MediaThumbnailFetcher.getThumbnail(ctx, item.uriPath)
+                    if (bitmap != null) {
+                        val result = provider.generateEmbedding(
+                            mediaId = item.id,
+                            input = com.example.data.semantic.SemanticInput.ExplicitBitmap(bitmap),
+                            sourceDataHash = "multi_query_temp"
+                        )
+                        if (result is com.example.data.semantic.EmbeddingResult.Success) {
+                            vectors.add(result.representation.vector)
+                        }
+                        bitmap.recycle()
+                    }
+                }
+                
+                if (vectors.size >= 2) {
+                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.MultiVisual(
+                        visualVectors = vectors,
+                        referenceUris = uris
+                    )
+                } else if (vectors.size == 1) {
+                    // Fallback to single visual search path
+                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Visual(
+                        visualVector = vectors[0],
+                        referenceUri = uris[0]
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("MediaRepository", "Failed to encode multiple images for search.", e)
+            }
+        }
+    }
+    /**
+     * Removes a specific visual reference from the active search.
+     * Fallbacks to single-reference search or text-only search as appropriate.
+     */
+    fun removeVisualReference(index: Int) {
+        val current = _librarySearchRequest.value
+        when (current) {
+            is com.example.data.semantic.SearchRequest.MultiVisual -> {
+                if (index < 0 || index >= current.visualVectors.size) return
+                
+                val nextVectors = current.visualVectors.toMutableList().apply { removeAt(index) }
+                val nextUris = current.referenceUris.toMutableList().apply { removeAt(index) }
+                
+                if (nextVectors.size >= 2) {
+                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.MultiVisual(
+                        visualVectors = nextVectors,
+                        referenceUris = nextUris
+                    )
+                } else if (nextVectors.size == 1) {
+                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Visual(
+                        visualVector = nextVectors[0],
+                        referenceUri = nextUris[0]
+                    )
+                } else {
+                    clearSearch()
+                }
+            }
+            is com.example.data.semantic.SearchRequest.Visual -> {
+                clearSearch()
+            }
+            is com.example.data.semantic.SearchRequest.Compound -> {
+                // If compound, removing the visual anchor leaves only the text query
+                _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Text(current.query ?: "")
+            }
+            else -> { /* No visual anchor to remove */ }
+        }
+    }
+
+    /**
      * Removes the visual anchor while preserving any existing text constraint.
      */
     fun removeVisualAnchor() {
@@ -709,6 +812,7 @@ class MediaRepository(
             is com.example.data.semantic.SearchRequest.Text -> searchRequest.query.isBlank()
             is com.example.data.semantic.SearchRequest.Visual -> false
             is com.example.data.semantic.SearchRequest.Compound -> false
+            is com.example.data.semantic.SearchRequest.MultiVisual -> false
         }
 
         if (isSearchBlank) {
@@ -745,6 +849,7 @@ class MediaRepository(
                             is com.example.data.semantic.SearchRequest.Text -> searchRequest.query
                             is com.example.data.semantic.SearchRequest.Visual -> "[Visual]"
                             is com.example.data.semantic.SearchRequest.Compound -> "[Visual] + ${searchRequest.query}"
+                            is com.example.data.semantic.SearchRequest.MultiVisual -> "[Multi-Visual]"
                         }
                         android.util.Log.i("AURA_SEARCH_FLOW", "Hybrid search [${searchResult.requestId}]: Query=\"$queryLabel\", Candidates=${searchResult.candidates.size}, Displayed=${results.size}")
                         emit(results)
@@ -959,7 +1064,10 @@ class MediaRepository(
 
                     embeddingProvider = MiniLMEmbeddingProvider(engine = realEngine, tokenizer = realTokenizer)
                     
-                    val retriever = DefaultSemanticCandidateRetriever(semanticRepresentationRepository!!)
+                    val retriever = DefaultSemanticCandidateRetriever(
+                        repository = semanticRepresentationRepository!!,
+                        scope = scope
+                    )
                     semanticCandidateRetriever = retriever
 
                     semanticSearchService = DefaultSemanticSearchService(embeddingProvider!!, retriever)
@@ -994,13 +1102,23 @@ class MediaRepository(
                         personalizationScorer = personalizationScorer
                     )
 
-                    // PHASE 7: MobileCLIP Activation
+                    // PHASE 7: MobileCLIP Activation (Hardened and Decoupled)
+                    var mClipTextProvider: MobileCLIPTextEmbeddingProvider? = null
+                    var mClipVisualRetriever: MobileCLIPVisualRetriever? = null
+                    
                     try {
+                        // 1. Image Encoder (Primary for See Similar / Multi-Visual)
                         val mobileClipPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_image.onnx")
                         val mobileClipEngine = OnnxRuntimeMobileCLIPInferenceEngine(modelPath = mobileClipPath)
                         mobileCLIPProvider = MobileCLIPEmbeddingProvider(engine = mobileClipEngine)
-                        
-                        // Text Provider for query embedding (Hardened PAD resolution)
+                        Log.i("MediaRepository", "MobileCLIP image engine initialized SUCCESSFULLY.")
+                    } catch (e: Exception) {
+                        Log.e("MediaRepository", "Failed to load MobileCLIP image model. Using fallback for indexing/similarity.", e)
+                        mobileCLIPProvider = MobileCLIPEmbeddingProvider(engine = LocalMobileCLIPInferenceEngine())
+                    }
+
+                    // 2. Text Encoder & Visual Retriever (Secondary for Cross-modal search)
+                    try {
                         val clipVocabPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_vocab.json")
                         val clipVocab = java.io.File(clipVocabPath).readText()
                         val clipMergesPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_merges.txt")
@@ -1009,49 +1127,51 @@ class MediaRepository(
                         
                         val mobileClipTextPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_text.onnx")
                         val mobileClipTextEngine = OnnxRuntimeMobileCLIPTextInferenceEngine(modelPath = mobileClipTextPath)
-                        val mobileClipTextProvider = MobileCLIPTextEmbeddingProvider(mobileClipTextEngine, clipTokenizer)
+                        mClipTextProvider = MobileCLIPTextEmbeddingProvider(mobileClipTextEngine, clipTokenizer)
                         
-                        visualIndexingService = DefaultVisualIndexingService(
-                            visualProvider = mobileCLIPProvider!!,
-                            candidateRetriever = retriever,
-                            repository = semanticRepresentationRepository!!
-                        )
-
-                        // AURA SEARCH: Proactively reconstruct visual index from persistence
-                        launch {
-                            try {
-                                visualIndexingService?.initializeIndex()
-                                Log.i("MediaRepository", "Visual index reconstructed from persistence.")
-                            } catch (e: Exception) {
-                                Log.e("MediaRepository", "Failed to reconstruct visual index", e)
-                            }
-                        }
-
-                        val mobileClipVisualSearchService = DefaultSemanticSearchService(mobileClipTextProvider, retriever)
-                        val mobileClipVisualRetriever = DefaultMobileCLIPVisualRetriever(mobileClipVisualSearchService)
-
-                        // Re-initialize VisualContextEngine with the neural provider, repository, and retriever
-                        visualContextEngine = com.example.data.visual.VisualContextEngine(
-                            this@MediaRepository, 
-                            mobileCLIPProvider,
-                            semanticRepresentationRepository,
-                            semanticCandidateRetriever
-                        )
-                        Log.i("MediaRepository", "MobileCLIP image encoder and visual retriever activated.")
-                        
-                        // Update hybrid engine with visual channel and Stage 8 video intelligence
-                        hybridSearchEngine = DefaultHybridSearchEngine(
-                            semanticService = semanticSearchService!!,
-                            lexicalRetriever = lexicalRetriever,
-                            repository = semanticRepresentationRepository,
-                            visualTextProvider = mobileClipTextProvider,
-                            visualImageProvider = mobileCLIPProvider,
-                            visualRetriever = mobileClipVisualRetriever,
-                            personalizationScorer = personalizationScorer
-                        )
+                        val mobileClipVisualSearchService = DefaultSemanticSearchService(mClipTextProvider!!, retriever)
+                        mClipVisualRetriever = DefaultMobileCLIPVisualRetriever(mobileClipVisualSearchService)
+                        Log.i("MediaRepository", "MobileCLIP text engine and visual retriever initialized SUCCESSFULLY.")
                     } catch (e: Exception) {
-                        Log.e("MediaRepository", "Failed to load MobileCLIP model from assets.", e)
+                        Log.e("MediaRepository", "Failed to load MobileCLIP text components. Cross-modal visual search will be unavailable.", e)
                     }
+
+                    // 3. Visual Indexing Service (MANDATORY DECOUPLED INITIALIZATION)
+                    val vIndexingService = DefaultVisualIndexingService(
+                        visualProvider = mobileCLIPProvider!!,
+                        candidateRetriever = retriever,
+                        repository = semanticRepresentationRepository!!
+                    )
+                    visualIndexingService = vIndexingService
+
+                    // AURA SEARCH: Reconstruct visual index from persistence (DECOUPLED)
+                    launch {
+                        try {
+                            vIndexingService.initializeIndex()
+                            Log.i("MediaRepository", "Visual index reconstructed from persistence.")
+                        } catch (e: Exception) {
+                            Log.e("MediaRepository", "Failed to reconstruct visual index", e)
+                        }
+                    }
+
+                    // 4. Component Updates
+                    visualContextEngine = com.example.data.visual.VisualContextEngine(
+                        this@MediaRepository, 
+                        mobileCLIPProvider,
+                        semanticRepresentationRepository,
+                        semanticCandidateRetriever
+                    )
+                    
+                    // Update hybrid engine with visual channel and Stage 8 video intelligence
+                    hybridSearchEngine = DefaultHybridSearchEngine(
+                        semanticService = semanticSearchService!!,
+                        lexicalRetriever = lexicalRetriever,
+                        repository = semanticRepresentationRepository,
+                        visualTextProvider = mClipTextProvider,
+                        visualImageProvider = mobileCLIPProvider,
+                        visualRetriever = mClipVisualRetriever,
+                        personalizationScorer = personalizationScorer
+                    )
 
                     // AURA STABILITY: Ensure all mandatory repositories are initialized before marking READY
                     checkNotNull(intelligenceRepository) { "intelligenceRepository failed to initialize" }

@@ -42,7 +42,12 @@ enum class SearchQueryType {
     /**
      * Combined visual and textual query (Stage 11 Context Expansion).
      */
-    COMPOUND
+    COMPOUND,
+
+    /**
+     * Multiple visual reference intersection (Phase 2).
+     */
+    MULTI_VISUAL
 }
 
 /**
@@ -104,9 +109,6 @@ sealed interface SearchRequest {
         override val queryType: SearchQueryType = SearchQueryType.VISUAL
     }
 
-    /**
-     * Combined visual and textual query (Stage 11 Context Expansion).
-     */
     data class Compound(
         override val query: String,
         override val visualVector: FloatArray,
@@ -114,6 +116,20 @@ sealed interface SearchRequest {
         override val requestId: String = java.util.UUID.randomUUID().toString().take(8)
     ) : SearchRequest {
         override val queryType: SearchQueryType = SearchQueryType.COMPOUND
+    }
+
+    /**
+     * Multiple visual reference intersection (Phase 2).
+     */
+    data class MultiVisual(
+        val visualVectors: List<FloatArray>,
+        val referenceUris: List<String>,
+        override val requestId: String = java.util.UUID.randomUUID().toString().take(8)
+    ) : SearchRequest {
+        override val query: String? = null
+        override val visualVector: FloatArray? = visualVectors.firstOrNull()
+        override val referenceUri: String? = referenceUris.firstOrNull()
+        override val queryType: SearchQueryType = SearchQueryType.MULTI_VISUAL
     }
 }
 

@@ -1,6 +1,10 @@
 package com.example.data.semantic
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
@@ -34,11 +38,15 @@ interface SemanticCandidateRetriever {
  * Production implementation of [SemanticCandidateRetriever] with concurrent typed index registry.
  */
 class DefaultSemanticCandidateRetriever(
-    private val repository: SemanticRepresentationRepository
+    private val repository: SemanticRepresentationRepository,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : SemanticCandidateRetriever {
 
     // Index key: "$type:${descriptor.modelId}:${descriptor.modelVersion}:${descriptor.dimensionality}"
     private val indices = ConcurrentHashMap<String, VectorIndex>()
+    
+    // Tracks ongoing initialization jobs to prevent redundant concurrent reconstructions
+    private val initializationJobs = ConcurrentHashMap<String, Deferred<Unit>>()
 
     private fun getIndexKey(type: SemanticRepresentationType, descriptor: EmbeddingModelDescriptor): String {
         return "${type.name}:${descriptor.modelId}:${descriptor.modelVersion}:${descriptor.dimensionality}"
@@ -49,17 +57,23 @@ class DefaultSemanticCandidateRetriever(
         descriptor: EmbeddingModelDescriptor
     ) = withContext(Dispatchers.IO) {
         val key = getIndexKey(type, descriptor)
-        val representations = repository.getCompatibleRepresentations(type, descriptor)
-        val index = InMemoryVectorIndex(descriptor, type)
-        index.rebuild(representations)
-        indices[key] = index
         
-        // Forensics: Aggregate loading statistics
-        val typeCount = representations.size
-        val distinctMedia = representations.map { it.mediaId }.distinct().size
+        // AURA SYNC: Atomically check/create the initialization job in the persistent scope
+        val deferred = initializationJobs.computeIfAbsent(key) {
+            scope.async {
+                android.util.Log.d("AuraSemanticTrace", "INDEX_INIT_START key=$key")
+                val representations = repository.getCompatibleRepresentations(type, descriptor)
+                val index = InMemoryVectorIndex(descriptor, type)
+                index.rebuild(representations)
+                indices[key] = index
+                
+                val typeCount = representations.size
+                val distinctMedia = representations.map { it.mediaId }.distinct().size
+                android.util.Log.i("AuraSemanticTrace", "INDEX_INIT_COMPLETE key=$key persisted=$typeCount distinctMedia=$distinctMedia indexed=${index.size}")
+            }
+        }
         
-        android.util.Log.i("AuraSemanticTrace", "INDEX_INIT type=$type model=${descriptor.modelId} dimensionality=${descriptor.dimensionality} persistedEmbeddings=$typeCount distinctMedia=$distinctMedia indexedVectors=${index.size}")
-        Unit
+        deferred.await()
     }
 
     override suspend fun retrieveCandidates(
@@ -73,7 +87,7 @@ class DefaultSemanticCandidateRetriever(
         var index = indices[key]
 
         if (index == null) {
-            // Lazy initialize if not yet loaded
+            // Lazy initialize if not yet loaded - will wait for any existing background job
             initializeIndex(type, descriptor)
             index = indices[key] ?: return@withContext emptyList()
         }

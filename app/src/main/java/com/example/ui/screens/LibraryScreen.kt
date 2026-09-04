@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -79,6 +80,10 @@ fun LibraryScreen(
             }
             is SearchRequest.Compound -> {
                 searchQuery = searchRequest.query ?: ""
+                isSearchActive = true
+            }
+            is SearchRequest.MultiVisual -> {
+                searchQuery = ""
                 isSearchActive = true
             }
         }
@@ -212,18 +217,22 @@ fun LibraryScreen(
                         }
                     },
                     onSearchSimilar = {
-                        val mediaId = selectedIds.firstOrNull()
-                        val mediaItem = mediaItemsMap[mediaId]
-                        if (mediaItem != null) {
-                            coroutineScope.launch {
-                                val bitmap = MediaThumbnailFetcher.getThumbnail(context, mediaItem.uriPath)
-                                if (bitmap != null) {
-                                    repository.searchByImage(bitmap, mediaItem.uriPath)
-                                    isSelectionMode = false
-                                    selectedIds = emptySet()
-                                    isSearchActive = true
+                        val selectedItems = selectedIds.mapNotNull { mediaItemsMap[it] }
+                        if (selectedItems.isNotEmpty()) {
+                            if (selectedItems.size >= 2) {
+                                repository.searchByMultipleImages(selectedItems)
+                            } else {
+                                val mediaItem = selectedItems[0]
+                                coroutineScope.launch {
+                                    val bitmap = MediaThumbnailFetcher.getThumbnail(context, mediaItem.uriPath)
+                                    if (bitmap != null) {
+                                        repository.searchByImage(bitmap, mediaItem.uriPath)
+                                    }
                                 }
                             }
+                            isSelectionMode = false
+                            selectedIds = emptySet()
+                            isSearchActive = true
                         }
                     },
                     onCancel = {
@@ -244,6 +253,9 @@ fun LibraryScreen(
                     },
                     onRemoveAnchor = {
                         repository.removeVisualAnchor()
+                    },
+                    onRemoveReference = {
+                        repository.removeVisualReference(it)
                     },
                     onExit = { 
                         isSearchActive = false
@@ -449,12 +461,36 @@ private fun SelectionHeader(
         }
         
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // SEARCH SIMILAR (Phase 10.5)
+            // SEARCH SIMILAR / FIND COMMON (Phase 2)
             if (selectedCount == 1) {
                 IconButton(onClick = onSearchSimilar) {
                     Icon(Icons.Default.ImageSearch, contentDescription = "Search Similar", tint = Color.White)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
+            } else if (selectedCount >= 2) {
+                Surface(
+                    onClick = onSearchSimilar,
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AutoAwesomeMotion, contentDescription = null, tint = DiscoveryViolet, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "FIND COMMON",
+                                color = DiscoveryViolet,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
             }
 
             // COMPARE ACTION
@@ -494,6 +530,7 @@ private fun SearchHeader(
     onQueryChange: (String) -> Unit,
     onImageSearchClick: () -> Unit,
     onRemoveAnchor: () -> Unit,
+    onRemoveReference: (Int) -> Unit,
     onExit: () -> Unit
 ) {
     Row(
@@ -509,8 +546,36 @@ private fun SearchHeader(
             Icon(Icons.Default.Close, contentDescription = "Exit Search", tint = AuraMidnight)
         }
         
-        // Visual Anchor (Stage 11.5)
-        if (searchRequest.visualVector != null) {
+        // Visual Anchor (Stage 11.5 / Multi-Visual Phase 2)
+        if (searchRequest is SearchRequest.MultiVisual) {
+            LazyRow(
+                modifier = Modifier.padding(start = 4.dp, end = 4.dp).widthIn(max = 200.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                contentPadding = PaddingValues(end = 4.dp)
+            ) {
+                itemsIndexed(searchRequest.referenceUris) { index, uri ->
+                    Box(modifier = Modifier.padding(end = 4.dp)) {
+                        Surface(
+                            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)),
+                            color = AuraSubtleBorder,
+                            onClick = { onRemoveReference(index) }
+                        ) {
+                            AsyncImage(
+                                model = uri,
+                                contentDescription = "Reference $index",
+                                contentScale = ContentScale.Crop
+                            )
+                            Box(
+                                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (searchRequest.visualVector != null) {
             Box(modifier = Modifier.padding(start = 4.dp, end = 8.dp)) {
                 Surface(
                     modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)),
