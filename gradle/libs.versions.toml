@@ -47,6 +47,7 @@ sqlcipher = "4.6.1"
 mockito = "5.23.0"
 mockitoKotlin = "6.3.0"
 onnxruntime = "1.20.0"
+assetDelivery = "2.2.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -113,6 +114,8 @@ mockito-core = { group = "org.mockito", name = "mockito-core", version.ref = "mo
 mockito-kotlin = { group = "org.mockito.kotlin", name = "mockito-kotlin", version.ref = "mockitoKotlin" }
 onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
 onnxruntime = { group = "com.microsoft.onnxruntime", name = "onnxruntime", version.ref = "onnxruntime" }
+google-play-asset-delivery = { group = "com.google.android.play", name = "asset-delivery", version.ref = "assetDelivery" }
+google-play-asset-delivery-ktx = { group = "com.google.android.play", name = "asset-delivery-ktx", version.ref = "assetDelivery" }
 
 
 [plugins]

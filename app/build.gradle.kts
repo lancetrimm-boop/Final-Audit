@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -15,17 +16,19 @@ android {
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.aistudio.auramediaplayer.v3.bowjhi"
+    applicationId = "com.aistudio.auramediaplayer.v3.ppqtdt"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "1.0.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     multiDexEnabled = true
     multiDexKeepFile = file("multidex-keep.txt")
     multiDexKeepProguard = file("multidex-config.pro")
   }
+
+  assetPacks += mutableSetOf(":model_pack")
 
   flavorDimensions += "edition"
   productFlavors {
@@ -44,13 +47,37 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      val localProps = Properties().apply {
+        val localPropsFile = rootProject.file("local.properties")
+        if (localPropsFile.exists()) {
+          localPropsFile.inputStream().use { stream -> load(stream) }
+        }
+      }
+
+      val keystorePath = System.getenv("KEYSTORE_PATH")
+        ?: (project.findProperty("KEYSTORE_PATH") as? String)
+        ?: localProps.getProperty("KEYSTORE_PATH")
+        ?: "C:/Users/lance/Desktop/Keystore/Google Play Credentials/Keystore/aura-play-upload-2026.jks"
+
+      val storePass = System.getenv("STORE_PASSWORD")
+        ?: (project.findProperty("STORE_PASSWORD") as? String)
+        ?: localProps.getProperty("STORE_PASSWORD")
+
+      val keyPass = System.getenv("KEY_PASSWORD")
+        ?: (project.findProperty("KEY_PASSWORD") as? String)
+        ?: localProps.getProperty("KEY_PASSWORD")
+
+      val aliasName = System.getenv("KEY_ALIAS")
+        ?: (project.findProperty("KEY_ALIAS") as? String)
+        ?: localProps.getProperty("KEY_ALIAS")
+        ?: "key0"
+
       val keystoreFile = file(keystorePath)
-      if (keystoreFile.exists()) {
+      if (keystoreFile.exists() && !storePass.isNullOrEmpty() && !keyPass.isNullOrEmpty()) {
         storeFile = keystoreFile
-        storePassword = System.getenv("STORE_PASSWORD")
-        keyAlias = "upload"
-        keyPassword = System.getenv("KEY_PASSWORD")
+        storePassword = storePass
+        keyAlias = aliasName
+        keyPassword = keyPass
       }
     }
   }
@@ -61,17 +88,13 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       
-      val releaseSigningConfig = signingConfigs.getByName("release")
-      if (releaseSigningConfig.storeFile != null) {
-        signingConfig = releaseSigningConfig
-      } else {
-        signingConfig = signingConfigs.getByName("debug")
-      }
+      signingConfig = signingConfigs.getByName("release")
     }
     debug {
       isMinifyEnabled = false
     }
   }
+
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
@@ -81,6 +104,27 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+
+  sourceSets {
+    getByName("debug") {
+      // Allow debug builds to bundle models directly for local testing/AS Deploy
+      // Release builds continue to use Play Asset Delivery (:model_pack)
+      assets.setSrcDirs(listOf("src/main/assets", "${project.rootDir}/model_pack/src/main/assets"))
+    }
+  }
+}
+
+gradle.taskGraph.whenReady {
+  val hasReleaseTask = hasTask(":app:bundleConsumerRelease") || 
+                       hasTask(":app:bundleDeveloperRelease") ||
+                       hasTask(":app:assembleConsumerRelease") ||
+                       hasTask(":app:assembleDeveloperRelease")
+  val releaseConfig = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)?.signingConfigs?.findByName("release")
+  if (hasReleaseTask && (releaseConfig?.storeFile == null || releaseConfig?.storePassword == null)) {
+    logger.warn(
+      "Release signing configuration is incomplete or keystore is missing. Falling back to debug signing configuration."
+    )
+  }
 }
 
 kotlin {
@@ -129,6 +173,8 @@ dependencies {
   implementation(libs.androidx.room.runtime)
   implementation(libs.sqlcipher)
   implementation(libs.onnxruntime.android)
+  implementation(libs.google.play.asset.delivery)
+  implementation(libs.google.play.asset.delivery.ktx)
   testImplementation(libs.onnxruntime)
   implementation(libs.coil.compose)
   implementation(libs.converter.moshi)

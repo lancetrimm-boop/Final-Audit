@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 rootProject.name = "Aura"
 
 include(":app")
+include(":model_pack")

@@ -940,14 +940,17 @@ class MediaRepository(
                     // ONNX MODEL ACTIVATION (Phase 4)
                     val realEngine = try {
                         val modelPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/all-minilm-l6-v2.onnx")
-                        OnnxRuntimeMiniLMInferenceEngine(modelPath = modelPath)
+                        val engine = OnnxRuntimeMiniLMInferenceEngine(modelPath = modelPath)
+                        Log.i("MediaRepository", "MiniLM ONNX engine initialized SUCCESSFULLY.")
+                        engine
                     } catch (e: Exception) {
                         Log.e("MediaRepository", "Failed to load ONNX model from assets. Falling back to local engine.", e)
                         LocalMiniLMInferenceEngine()
                     }
 
                     val realTokenizer = try {
-                        val vocabText = context.assets.open("models/vocab.txt").use { it.bufferedReader().readText() }
+                        val vocabPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/vocab.txt")
+                        val vocabText = java.io.File(vocabPath).readText()
                         BertWordPieceTokenizer.fromVocabText(vocabText)
                     } catch (e: Exception) {
                         Log.e("MediaRepository", "Failed to load vocab.txt from assets. Using standard vocab.", e)
@@ -997,9 +1000,11 @@ class MediaRepository(
                         val mobileClipEngine = OnnxRuntimeMobileCLIPInferenceEngine(modelPath = mobileClipPath)
                         mobileCLIPProvider = MobileCLIPEmbeddingProvider(engine = mobileClipEngine)
                         
-                        // Text Provider for query embedding
-                        val clipVocab = context.assets.open("models/mobileclip_vocab.json").use { it.bufferedReader().readText() }
-                        val clipMerges = context.assets.open("models/mobileclip_merges.txt").use { it.bufferedReader().readText() }
+                        // Text Provider for query embedding (Hardened PAD resolution)
+                        val clipVocabPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_vocab.json")
+                        val clipVocab = java.io.File(clipVocabPath).readText()
+                        val clipMergesPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_merges.txt")
+                        val clipMerges = java.io.File(clipMergesPath).readText()
                         val clipTokenizer = ClipBpeTokenizer.fromAssets(clipVocab, clipMerges)
                         
                         val mobileClipTextPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_text.onnx")
@@ -3362,8 +3367,8 @@ class MediaRepository(
             Log.d("SeeSimilarTrace", "rank=${i+1} id=${m.id} score=$s title=\"${m.title}\"")
         }
 
-        // Plan 1 Step 2: Removed forced 30-result take to allow zero or few results if relevance is low
-        return sortedMatches
+        // Plan 1 Step 2: RESTORED 30-result take as per functional baseline requirements
+        return sortedMatches.take(30)
     }
 
     fun setMediaItemsForTesting(items: List<MediaItem>) {
