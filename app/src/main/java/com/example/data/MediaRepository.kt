@@ -691,6 +691,10 @@ class MediaRepository(
     var libraryCurrentPage: Int = 1
     var libraryScrollIndex: Int = 0
     var libraryScrollOffset: Int = 0
+    
+    // UI Preferences (Update 4)
+    var libraryPreferences: LibraryPreferences? = null
+        private set
 
     var discoverScrollIndex: Int = 0
     var discoverScrollOffset: Int = 0
@@ -956,6 +960,9 @@ class MediaRepository(
 
     fun initDatabase(context: Context) {
         applicationContext = context.applicationContext
+        if (libraryPreferences == null) {
+            libraryPreferences = LibraryPreferences(context.applicationContext)
+        }
         if (blueprintArtifactManager == null) {
             blueprintArtifactManager = com.example.data.blueprint.BlueprintArtifactManager(context.applicationContext)
         }

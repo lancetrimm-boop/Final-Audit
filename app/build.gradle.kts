@@ -19,8 +19,8 @@ android {
     applicationId = "com.aistudio.auramediaplayer.v3.ppqtdt"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.0.1"
+    versionCode = 3
+    versionName = "1.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     multiDexEnabled = true
@@ -57,7 +57,7 @@ android {
       val keystorePath = System.getenv("KEYSTORE_PATH")
         ?: (project.findProperty("KEYSTORE_PATH") as? String)
         ?: localProps.getProperty("KEYSTORE_PATH")
-        ?: "${rootDir}/aura-play-upload-2026.jks"
+        ?: "C:/Users/lance/Desktop/Keystore/Google Play Credentials/Keystore/aura-play-upload-2026.jks"
 
       val storePass = System.getenv("STORE_PASSWORD")
         ?: (project.findProperty("STORE_PASSWORD") as? String)

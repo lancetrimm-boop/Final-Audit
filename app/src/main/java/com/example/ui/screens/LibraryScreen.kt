@@ -2,19 +2,22 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.os.Build
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -22,25 +25,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.text.style.TextAlign
 import com.example.data.*
 import com.example.data.semantic.SearchRequest
-import com.example.data.semantic.SearchQueryType
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
+import kotlinx.coroutines.flow.MutableStateFlow
 import coil.compose.AsyncImage
-import android.net.Uri
-import android.graphics.Bitmap
 import com.example.util.MediaThumbnailFetcher
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,33 +64,9 @@ fun LibraryScreen(
     val standardSort by repository.selectedStandardSort.collectAsStateWithLifecycle()
     val intelligentSort by repository.selectedIntelligentSort.collectAsStateWithLifecycle()
     val searchRequest by repository.librarySearchRequest.collectAsStateWithLifecycle()
-    var searchQuery by remember { mutableStateOf(repository.librarySearchQuery) }
     var isSearchActive by remember { mutableStateOf(false) }
 
-    // Sync searchQuery with searchRequest when it changes from other sources (Plan 1 Step 3/5 isolation)
-    LaunchedEffect(searchRequest) {
-        when (searchRequest) {
-            is SearchRequest.Text -> {
-                searchQuery = searchRequest.query ?: ""
-                if (searchQuery.isNotEmpty()) isSearchActive = true
-            }
-            is SearchRequest.Visual -> {
-                // Independent visual search clears any existing text constraint
-                searchQuery = ""
-                isSearchActive = true
-            }
-            is SearchRequest.Compound -> {
-                searchQuery = searchRequest.query ?: ""
-                isSearchActive = true
-            }
-            is SearchRequest.MultiVisual -> {
-                searchQuery = ""
-                isSearchActive = true
-            }
-        }
-    }
-
-    // Multi-select state (Phase 4)
+    // Multi-select state
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
 
@@ -98,9 +75,57 @@ fun LibraryScreen(
         initialFirstVisibleItemScrollOffset = repository.libraryScrollOffset
     )
 
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    // Library UI Preferences (Update 4)
+    val libraryPrefs = remember(repository) { repository.libraryPreferences }
+    val gridDensity by (libraryPrefs?.gridDensity ?: MutableStateFlow(160f)).collectAsStateWithLifecycle()
+    val autoScrollSpeed by (libraryPrefs?.autoScrollSpeed ?: MutableStateFlow(AutoScrollSpeed.MEDIUM)).collectAsStateWithLifecycle()
+
+    var isAutoScrollActive by remember { mutableStateOf(false) }
+    var lastInteractionTime by remember { mutableLongStateOf(0L) }
+
+    // Auto-Scroll Engine (Update 4)
+    LaunchedEffect(isAutoScrollActive, autoScrollSpeed, lastInteractionTime, isSelectionMode) {
+        if (!isAutoScrollActive || isSelectionMode) return@LaunchedEffect
+
+        // Resumption Delay: Wait 2s after last interaction
+        val now = System.currentTimeMillis()
+        val timeSinceInteraction = now - lastInteractionTime
+        if (timeSinceInteraction < 2000) {
+            delay(2000 - timeSinceInteraction)
+        }
+
+        var lastFrameTimeNanos = 0L
+        while (isActive) {
+            withFrameNanos { frameTimeNanos ->
+                if (lastFrameTimeNanos == 0L) {
+                    lastFrameTimeNanos = frameTimeNanos
+                    return@withFrameNanos
+                }
+                
+                val elapsedSeconds = (frameTimeNanos - lastFrameTimeNanos) / 1_000_000_000f
+                lastFrameTimeNanos = frameTimeNanos
+                
+                val pixelsToScroll = autoScrollSpeed.pixelsPerSecond * elapsedSeconds
+                
+                // Perform scroll
+                coroutineScope.launch {
+                    gridState.scrollBy(pixelsToScroll)
+                }
+            }
+        }
+    }
+
+    // Sync searchQuery with searchRequest when it changes from other sources
+    LaunchedEffect(searchRequest) {
+        isSearchActive = searchRequest !is SearchRequest.Text || searchRequest.query?.isNotEmpty() == true || searchRequest.visualVector != null
+    }
+
     // Automatically scroll to top when filters or sorts change
     var isFirstLoad by remember { mutableStateOf(true) }
-    LaunchedEffect(selectedFilter, activeCategory, standardSort, intelligentSort, searchQuery) {
+    LaunchedEffect(selectedFilter, activeCategory, standardSort, intelligentSort) {
         if (isFirstLoad) {
             isFirstLoad = false
         } else {
@@ -108,7 +133,7 @@ fun LibraryScreen(
         }
     }
 
-    // Clear selection mode when deletion finishes (Phase 4)
+    // Clear selection mode when deletion finishes
     val deletionState by repository.safeDeleteManager.deletionState.collectAsStateWithLifecycle()
     LaunchedEffect(deletionState) {
         if (deletionState == com.example.data.cleanup.DeletionState.CONFIRMED ||
@@ -127,20 +152,6 @@ fun LibraryScreen(
     val mediaItemsMap by repository.mediaItemsMap.collectAsStateWithLifecycle()
     val dbState by repository.databaseState.collectAsStateWithLifecycle()
 
-    LaunchedEffect(latestSortedItems) {
-        android.util.Log.i("RESULT_STATE", "LATEST_SORTED_ITEMS_UPDATE: count=${latestSortedItems.size} searchActive=$isSearchActive")
-        if (latestSortedItems.isNotEmpty()) {
-            android.util.Log.i("RESULT_STATE", "TOP_MATCHES: ${latestSortedItems.take(5).joinToString { "[${it.id}]" }}")
-        }
-    }
-
-    LaunchedEffect(searchQuery) {
-        if (searchQuery.isNotBlank() && searchQuery.length >= 2) {
-            delay(1500) // Only record if user stops typing for 1.5s
-            repository.recordSearch(searchQuery)
-        }
-    }
-
     LaunchedEffect(gridState) {
         snapshotFlow { Pair(gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset) }
             .collect { (index, offset) ->
@@ -148,9 +159,6 @@ fun LibraryScreen(
                 repository.libraryScrollOffset = offset
             }
     }
-
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
@@ -198,6 +206,9 @@ fun LibraryScreen(
         ) {
             // Selection/Search/Library Header
             if (isSelectionMode) {
+                // Ensure Auto-Scroll is disabled in selection mode
+                SideEffect { isAutoScrollActive = false }
+
                 SelectionHeader(
                     selectedCount = selectedIds.size,
                     onDelete = {
@@ -244,8 +255,6 @@ fun LibraryScreen(
                 SearchHeader(
                     searchRequest = searchRequest,
                     onQueryChange = { 
-                        android.util.Log.d("AURA_UI_TRACE", "Search query changing to: '$it'")
-                        searchQuery = it
                         repository.librarySearchQuery = it
                     },
                     onImageSearchClick = {
@@ -259,7 +268,6 @@ fun LibraryScreen(
                     },
                     onExit = { 
                         isSearchActive = false
-                        searchQuery = ""
                         repository.clearSearch()
                     }
                 )
@@ -270,7 +278,6 @@ fun LibraryScreen(
                         subtitle = "Your complete media collection"
                     )
                 } else {
-                    // Compact Landscape Header for Library
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -304,7 +311,11 @@ fun LibraryScreen(
                             },
                             showScrollToTop = showScrollToTop,
                             dbState = dbState,
-                            isCompact = true
+                            isCompact = true,
+                            isAutoScrollActive = isAutoScrollActive,
+                            onAutoScrollToggle = { isAutoScrollActive = it },
+                            autoScrollSpeed = autoScrollSpeed,
+                            onAutoScrollSpeedChange = { libraryPrefs?.setAutoScrollSpeed(it) }
                         )
                     }
                 }
@@ -329,11 +340,14 @@ fun LibraryScreen(
                         coroutineScope.launch { gridState.scrollToItem(0) }
                     },
                     showScrollToTop = showScrollToTop,
-                    dbState = dbState
+                    dbState = dbState,
+                    isAutoScrollActive = isAutoScrollActive,
+                    onAutoScrollToggle = { isAutoScrollActive = it },
+                    autoScrollSpeed = autoScrollSpeed,
+                    onAutoScrollSpeedChange = { libraryPrefs?.setAutoScrollSpeed(it) }
                 )
             }
 
-            // Compact Controls: Filters and Intelligence Modes
             CompactControlsRow(
                 activeCategory = activeCategory,
                 onCategoryChange = { repository.sortCategory = it },
@@ -343,7 +357,6 @@ fun LibraryScreen(
                 onIntelligentSortChange = { repository.intelligentSort = it }
             )
 
-            // Loading Progress Overlays
             if (scanProgress.isScanning || importProgress.isImporting) {
                 Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
                     LinearProgressIndicator(
@@ -358,7 +371,6 @@ fun LibraryScreen(
                 isRefreshing = scanProgress.isScanning,
                 onRefresh = { 
                     repository.refreshSort()
-
                     if (dbState == com.example.data.DatabaseState.READY) {
                         scanPermissionLauncher.launch(permissionsToRequest)
                     }
@@ -371,67 +383,82 @@ fun LibraryScreen(
                         onScanClick = { scanPermissionLauncher.launch(permissionsToRequest) }
                     )
                 } else {
-                    // Infinite Scrolling Grid with adaptive columns for responsive landscape support
-                    android.util.Log.i("UI_RENDER", "RENDER_GRID: items=${latestSortedItems.size} searchActive=$isSearchActive query=\"$searchQuery\"")
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 160.dp),
-                        state = gridState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp)
-                    ) {
-                        itemsIndexed(
-                            items = latestSortedItems,
-                            key = { _, item -> item.id }
-                        ) { index, item ->
-                            val mediaItem = mediaItemsMap[item.id]
-                            if (mediaItem != null) {
-                                AuraMediaTile(
-                                    item = mediaItem,
-                                    isSelected = selectedIds.contains(item.id),
-                                    isSelectionMode = isSelectionMode,
-                                    onClick = {
-                                        if (isSelectionMode) {
-                                            selectedIds = if (selectedIds.contains(item.id)) {
-                                                selectedIds - item.id
-                                            } else {
-                                                selectedIds + item.id
-                                            }
-                                            if (selectedIds.isEmpty()) isSelectionMode = false
-                                        } else {
-                                            // AURA REPAIR: Resolve exact identity from current sorted context
-                                            val currentMediaItems = latestSortedItems.mapNotNull { mediaItemsMap[it.id] }
-                                            val clickedItemIndex = currentMediaItems.indexOfFirst { it.id == item.id }
-                                            
-                                            if (clickedItemIndex != -1) {
-                                                repository.setLibraryPlaylist(
-                                                    items = currentMediaItems,
-                                                    initialIndex = clickedItemIndex
-                                                )
-                                                onMediaSelect(currentMediaItems[clickedItemIndex])
-                                            }
-                                        }
-                                    },
-                                    onLongClick = {
-                                        if (!isSelectionMode) {
-                                            isSelectionMode = true
-                                            selectedIds = setOf(item.id)
-                                        } else {
-                                            // Toggle selection in selection mode
-                                            selectedIds = if (selectedIds.contains(item.id)) {
-                                                selectedIds - item.id
-                                            } else {
-                                                selectedIds + item.id
-                                            }
-                                            if (selectedIds.isEmpty()) isSelectionMode = false
-                                        }
-                                    },
-                                    onLike = {
-                                        repository.recordLike(item.id)
-                                        repository.addToFavorites(item.id)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTransformGestures { _, _, zoom, _ ->
+                                    // 1. Pause auto-scroll on any manual gesture
+                                    lastInteractionTime = System.currentTimeMillis()
+                                    
+                                    // 2. Handle Pinch-to-Zoom
+                                    if (zoom != 1f) {
+                                        val newDensity = gridDensity / zoom
+                                        libraryPrefs?.setGridDensity(newDensity)
                                     }
-                                )
+                                }
+                            }
+                    ) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = gridDensity.dp),
+                            state = gridState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(20.dp)
+                        ) {
+                            itemsIndexed(
+                                items = latestSortedItems,
+                                key = { _, item -> item.id }
+                            ) { _, item ->
+                                val mediaItem = mediaItemsMap[item.id]
+                                if (mediaItem != null) {
+                                    AuraMediaTile(
+                                        item = mediaItem,
+                                        isSelected = selectedIds.contains(item.id),
+                                        isSelectionMode = isSelectionMode,
+                                        onClick = {
+                                            lastInteractionTime = System.currentTimeMillis()
+                                            if (isSelectionMode) {
+                                                selectedIds = if (selectedIds.contains(item.id)) {
+                                                    selectedIds - item.id
+                                                } else {
+                                                    selectedIds + item.id
+                                                }
+                                                if (selectedIds.isEmpty()) isSelectionMode = false
+                                            } else {
+                                                val currentMediaItems = latestSortedItems.mapNotNull { mediaItemsMap[it.id] }
+                                                val clickedItemIndex = currentMediaItems.indexOfFirst { it.id == item.id }
+                                                
+                                                if (clickedItemIndex != -1) {
+                                                    repository.setLibraryPlaylist(
+                                                        items = currentMediaItems,
+                                                        initialIndex = clickedItemIndex
+                                                    )
+                                                    onMediaSelect(currentMediaItems[clickedItemIndex])
+                                                }
+                                            }
+                                        },
+                                        onLongClick = {
+                                            lastInteractionTime = System.currentTimeMillis()
+                                            if (!isSelectionMode) {
+                                                isSelectionMode = true
+                                                selectedIds = setOf(item.id)
+                                            } else {
+                                                selectedIds = if (selectedIds.contains(item.id)) {
+                                                    selectedIds - item.id
+                                                } else {
+                                                    selectedIds + item.id
+                                                }
+                                                if (selectedIds.isEmpty()) isSelectionMode = false
+                                            }
+                                        },
+                                        onLike = {
+                                            repository.recordLike(item.id)
+                                            repository.addToFavorites(item.id)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -473,7 +500,6 @@ private fun SelectionHeader(
         }
         
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // SEARCH SIMILAR / FIND COMMON (Phase 2)
             if (selectedCount == 1) {
                 IconButton(onClick = onSearchSimilar) {
                     Icon(Icons.Default.ImageSearch, contentDescription = "Search Similar", tint = Color.White)
@@ -505,7 +531,6 @@ private fun SelectionHeader(
                 Spacer(modifier = Modifier.width(12.dp))
             }
 
-            // COMPARE ACTION
             Surface(
                 onClick = onCompare,
                 enabled = selectedCount >= 4,
@@ -558,7 +583,6 @@ private fun SearchHeader(
             Icon(Icons.Default.Close, contentDescription = "Exit Search", tint = AuraMidnight)
         }
         
-        // Visual Anchor (Stage 11.5 / Multi-Visual Phase 2)
         if (searchRequest is SearchRequest.MultiVisual) {
             LazyRow(
                 modifier = Modifier.padding(start = 4.dp, end = 4.dp).widthIn(max = 200.dp),
@@ -587,24 +611,27 @@ private fun SearchHeader(
                     }
                 }
             }
-        } else if (searchRequest.visualVector != null) {
+        } else if (searchRequest is SearchRequest.Visual || searchRequest is SearchRequest.Compound) {
+            val visualUri = when (searchRequest) {
+                is SearchRequest.Visual -> searchRequest.referenceUri
+                is SearchRequest.Compound -> searchRequest.referenceUri
+                else -> null
+            }
             Box(modifier = Modifier.padding(start = 4.dp, end = 8.dp)) {
                 Surface(
                     modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)),
                     color = AuraSubtleBorder,
                     onClick = onRemoveAnchor
                 ) {
-                    if (searchRequest.referenceUri != null) {
+                    if (visualUri != null) {
                         AsyncImage(
-                            model = searchRequest.referenceUri,
+                            model = visualUri,
                             contentDescription = "Visual Reference",
                             contentScale = ContentScale.Crop
                         )
                     } else {
                         Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.padding(8.dp))
                     }
-                    
-                    // Overlay "X" to suggest removal
                     Box(
                         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center
@@ -615,14 +642,19 @@ private fun SearchHeader(
             }
         }
 
-        val query = searchRequest.query ?: ""
+        val query = when (searchRequest) {
+            is SearchRequest.Text -> searchRequest.query ?: ""
+            is SearchRequest.Compound -> searchRequest.query ?: ""
+            else -> ""
+        }
+        
         TextField(
             value = query,
             onValueChange = onQueryChange,
             modifier = Modifier.weight(1f),
             placeholder = { 
                 Text(
-                    if (searchRequest.visualVector != null) "Add constraint..." else "Search your library...", 
+                    if (searchRequest !is SearchRequest.Text) "Add constraint..." else "Search your library...", 
                     color = AuraMutedSlate 
                 ) 
             },
@@ -637,7 +669,7 @@ private fun SearchHeader(
             singleLine = true,
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = AuraMidnight),
             trailingIcon = {
-                if (searchRequest.visualVector == null) {
+                if (searchRequest is SearchRequest.Text) {
                     IconButton(onClick = onImageSearchClick) {
                         Icon(Icons.Default.ImageSearch, contentDescription = "Search by Image", tint = DiscoveryViolet)
                     }
@@ -657,7 +689,11 @@ private fun UtilityControlsRow(
     onScrollToTop: () -> Unit,
     showScrollToTop: Boolean,
     dbState: DatabaseState,
-    isCompact: Boolean = false
+    isCompact: Boolean = false,
+    isAutoScrollActive: Boolean = false,
+    onAutoScrollToggle: (Boolean) -> Unit = {},
+    autoScrollSpeed: AutoScrollSpeed = AutoScrollSpeed.MEDIUM,
+    onAutoScrollSpeedChange: (AutoScrollSpeed) -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -666,34 +702,53 @@ private fun UtilityControlsRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left Side: Filters
+        // Left Side: Filters or Auto-Scroll
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.weight(1f)
         ) {
-            AuraFilterChip(
-                label = "All",
-                isSelected = selectedFilter == "ALL",
-                onClick = { onFilterChange("ALL") }
-            )
-            AuraFilterChip(
-                label = "Photos",
-                isSelected = selectedFilter == "PHOTO",
-                onClick = { onFilterChange("PHOTO") }
-            )
-            AuraFilterChip(
-                label = "Videos",
-                isSelected = selectedFilter == "VIDEO",
-                onClick = { onFilterChange("VIDEO") }
-            )
+            if (!isCompact) {
+                AuraFilterChip(
+                    label = "All",
+                    isSelected = selectedFilter == "ALL",
+                    onClick = { onFilterChange("ALL") }
+                )
+                AuraFilterChip(
+                    label = "Photos",
+                    isSelected = selectedFilter == "PHOTO",
+                    onClick = { onFilterChange("PHOTO") }
+                )
+                AuraFilterChip(
+                    label = "Videos",
+                    isSelected = selectedFilter == "VIDEO",
+                    onClick = { onFilterChange("VIDEO") }
+                )
+            } else {
+                // Compact mode (Landscape): Just show symbols or minimal
+                IconButton(onClick = { onFilterChange("ALL") }, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.PhotoLibrary, contentDescription = "All", tint = if (selectedFilter == "ALL") DiscoveryViolet else AuraMutedSlate)
+                }
+            }
         }
 
-        // Right Side: Action Icons
+        // Right Side: Action Icons + AutoScroll
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            AutoScrollToggle(
+                isEnabled = isAutoScrollActive,
+                onToggle = onAutoScrollToggle
+            )
+            
+            if (isAutoScrollActive) {
+                AutoScrollSpeedSelector(
+                    currentSpeed = autoScrollSpeed,
+                    onSpeedSelected = onAutoScrollSpeedChange
+                )
+            }
+
             if (showScrollToTop && !isCompact) {
                 IconButton(onClick = onScrollToTop, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Default.ArrowUpward, contentDescription = "Scroll to top", tint = AuraMutedSlate)
