@@ -91,6 +91,7 @@ import com.example.data.SystemDiscoveryState
 import com.example.data.TasteReveal
 import com.example.ui.components.AuraButton
 import com.example.ui.components.AuraEngagementTunerCard
+import com.example.ui.components.AuraMediaThumbnail
 import com.example.ui.components.AuraSectionHeader
 import com.example.ui.components.AuraTopBar
 import com.example.ui.components.DiscoveryPolicyControl
@@ -417,8 +418,6 @@ fun ImmersiveMediaCard(
     onFavoriteToggle: () -> Unit,
     repository: MediaRepository
 ) {
-    val isVideo = item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("Movie", ignoreCase = true)
-
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -432,23 +431,15 @@ fun ImmersiveMediaCard(
             .border(1.dp, AuraSubtleBorder, RoundedCornerShape(24.dp))
     ) {
         Box(modifier = Modifier.fillMaxWidth().aspectRatio(if (isLandscape) 2.5f else 1.2f)) {
-            val imageModel = if (item.imageUrl.isNotEmpty()) item.imageUrl else item.uriPath
-            AsyncImage(
-                model = imageModel,
-                contentDescription = null,
+            AuraMediaThumbnail(
+                itemId = item.id,
+                mediaType = item.mediaType,
+                imageUrl = item.imageUrl,
+                uriPath = item.uriPath,
+                title = item.title,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                locationTag = "immersive_card"
             )
-
-            if (isVideo) {
-                VideoTilePreview(
-                    itemId = item.id,
-                    videoUri = item.uriPath,
-                    imageUrl = item.imageUrl,
-                    locationTag = "immersive_card",
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
 
             // Top Buttons
             Row(
@@ -465,7 +456,7 @@ fun ImmersiveMediaCard(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = if (item.isFavorite) Icons.Default.Favorite else Icons.Default.Favorite,
+                            imageVector = Icons.Default.Favorite,
                             contentDescription = "Favorite",
                             tint = if (item.isFavorite) Color.Red else Color.White,
                             modifier = Modifier.size(20.dp)
@@ -615,7 +606,6 @@ fun ObsessionCard(
     repository: MediaRepository
 ) {
     val mainItem = obsession.previewItems.firstOrNull() ?: return
-    val isVideo = mainItem.mediaType.equals("VIDEO", ignoreCase = true) || mainItem.mediaType.equals("Movie", ignoreCase = true)
 
     LaunchedEffect(obsession.id) {
         com.example.data.AuraTelemetryService.logEvent(
@@ -667,23 +657,15 @@ fun ObsessionCard(
                 .aspectRatio(cardAspectRatio)
                 .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
         ) {
-            val imageModel = if (mainItem.imageUrl.isNotEmpty()) mainItem.imageUrl else mainItem.uriPath
-            AsyncImage(
-                model = imageModel,
-                contentDescription = null,
+            AuraMediaThumbnail(
+                itemId = mainItem.id,
+                mediaType = mainItem.mediaType,
+                imageUrl = mainItem.imageUrl,
+                uriPath = mainItem.uriPath,
+                title = mainItem.title,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                locationTag = "discover_feed"
             )
-            
-            if (isVideo) {
-                VideoTilePreview(
-                    itemId = mainItem.id,
-                    videoUri = mainItem.uriPath,
-                    imageUrl = mainItem.imageUrl,
-                    locationTag = "discover_feed",
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
             
             // Scrim
             Box(

@@ -2083,13 +2083,15 @@ class MediaRepository(
         _isPlayerActive.value = true
         
         // AURA P1 STABILITY: Authoritative Playlist Sanitization
-        // Only verified playable terminal states are allowed in active playback.
+        // We include PENDING/UNTESTED so users can play media as soon as it is found.
         val visibleStatuses = listOf(
             CompatibilityStatus.PLAYABLE,
             CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE,
             CompatibilityStatus.PLAYABLE_AFTER_CONVERSION,
             CompatibilityStatus.THUMBNAIL_FAILED,
-            CompatibilityStatus.NEEDS_TRANSCODE
+            CompatibilityStatus.NEEDS_TRANSCODE,
+            CompatibilityStatus.ANALYSIS_PENDING,
+            CompatibilityStatus.UNTESTED
         )
         val sanitized = items.filter { item ->
             !item.isDeleted && item.compatibilityStatus in visibleStatuses
@@ -4018,6 +4020,8 @@ stats ->
         val items = inputItems.filter { item ->
             matchesFilterType(item, filterType) && isItemVisibleInLibrary(item)
         }
+        
+        android.util.Log.d("AURA_SORT_FLOW", "getFilteredAndSortedMedia: Filtered pool size: ${items.size} (from ${inputItems.size}) Filter: $filterType, Category: $sortCategory")
 
         return if (sortCategory == SortCategory.STANDARD) {
             val sorted = when (standardSort) {
@@ -4363,13 +4367,15 @@ stats ->
 
     private fun isItemVisibleInLibrary(item: MediaItem): Boolean {
         // AURA P1 STABILITY: Authoritative Visibility Gate
-        // Only verified playable terminal states are allowed in the Library Flow.
+        // We include PENDING and UNTESTED items so they appear in the visual browser as they are discovered.
         val visibleStatuses = listOf(
             CompatibilityStatus.PLAYABLE,
             CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE,
             CompatibilityStatus.PLAYABLE_AFTER_CONVERSION,
             CompatibilityStatus.THUMBNAIL_FAILED,
-            CompatibilityStatus.NEEDS_TRANSCODE
+            CompatibilityStatus.NEEDS_TRANSCODE,
+            CompatibilityStatus.ANALYSIS_PENDING,
+            CompatibilityStatus.UNTESTED
         )
         return !item.isDeleted && item.compatibilityStatus in visibleStatuses
     }

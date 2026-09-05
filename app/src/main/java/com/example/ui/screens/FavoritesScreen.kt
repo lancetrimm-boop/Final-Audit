@@ -40,7 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.MediaItem
-import com.example.ui.components.AuraSquareMediaTile
+import com.example.ui.components.AuraMediaTile
 import com.example.ui.components.AuraTopBar
 import com.example.ui.components.AuraLogoIcon
 import com.example.ui.theme.AuraCrispWhite
@@ -159,18 +159,18 @@ fun FavoritesScreen(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+                columns = GridCells.Adaptive(minSize = 120.dp),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(favorites, key = { it.id }) { item ->
-                    AuraSquareMediaTile(
+                    AuraMediaTile(
                         item = item,
                         onClick = { onMediaSelect(item) },
                         onLike = { onLike?.invoke(item.id) },
-                        onFavoriteToggle = { onFavoriteToggle(item.id) }
+                        onLongClick = { onFavoriteToggle(item.id) }
                     )
                 }
             }

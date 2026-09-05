@@ -109,6 +109,146 @@ private data class ThumbnailResult(
     val isFailure: Boolean = false
 )
 
+/**
+ * REUSABLE MEDIA TILE (UPDATE 3)
+ * Unified presentation component for all visual media grids.
+ * Implements authoritative identity, media-first visuals, and direct interaction.
+ */
+@Composable
+fun AuraMediaTile(
+    item: MediaItem,
+    onClick: () -> Unit,
+    onLike: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    isSelected: Boolean = false,
+    isSelectionMode: Boolean = false,
+    locationTag: String = "grid"
+) {
+    val haptic = LocalHapticFeedback.current
+    var showDoubleTapHeart by remember { mutableStateOf(false) }
+
+    // Interaction Visual States
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1.0f,
+        animationSpec = tween(150),
+        label = "tile_press_scale"
+    )
+
+    Box(
+        modifier = modifier
+            .aspectRatio(1f)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .pointerInput(item.id, isSelectionMode) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onDoubleTap = {
+                        // Double tap only active in normal browsing mode
+                        if (!isSelectionMode) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showDoubleTapHeart = true
+                            onLike()
+                        }
+                    },
+                    onLongPress = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongClick()
+                    }
+                )
+            }
+            .clip(RoundedCornerShape(4.dp)) // Minimal rounding for "Wall of Media" look
+            .background(AuraSubtleSurface)
+            .testTag("media_tile_${item.id}")
+    ) {
+        // Authoritative Thumbnail Component
+        AuraMediaThumbnail(
+            itemId = item.id,
+            mediaType = item.mediaType,
+            imageUrl = item.imageUrl,
+            uriPath = item.uriPath,
+            title = item.title,
+            modifier = Modifier.fillMaxSize(),
+            locationTag = locationTag
+        )
+
+        // Video Duration Badge (Functional Context)
+        val isVideo = item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("Movie", ignoreCase = true)
+        if (isVideo && item.duration.isNotEmpty()) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp),
+                color = Color.Black.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(2.dp)
+            ) {
+                Text(
+                    text = item.duration,
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                )
+            }
+        }
+
+        // Selection & Mode Overlays
+        if (isSelectionMode || isSelected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (isSelected) DiscoveryViolet.copy(alpha = 0.25f)
+                        else Color.Black.copy(alpha = 0.05f)
+                    )
+            )
+            
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .border(2.dp, DiscoveryGradient, RoundedCornerShape(4.dp))
+                )
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(20.dp)
+                )
+            }
+        }
+
+        // Like Animation
+        AnimatedVisibility(
+            visible = showDoubleTapHeart,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut() + scaleOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Favorite,
+                contentDescription = null,
+                tint = AuraMagenta,
+                modifier = Modifier.size(48.dp)
+            )
+        }
+
+        LaunchedEffect(showDoubleTapHeart) {
+            if (showDoubleTapHeart) {
+                delay(500)
+                showDoubleTapHeart = false
+            }
+        }
+    }
+}
+
 @Composable
 fun AuraMediaThumbnail(
     itemId: String,
@@ -141,9 +281,7 @@ fun AuraMediaThumbnail(
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(AuraSubtleSurface)
-            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(12.dp)),
+            .background(AuraSubtleSurface),
         contentAlignment = Alignment.Center
     ) {
         val result = thumbnailResult
@@ -216,13 +354,15 @@ fun AuraMediaThumbnail(
                 locationTag = locationTag,
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(16.dp))
                     .clipToBounds()
             )
         }
     }
 }
 
+/**
+ * DEPRECATED: Use AuraMediaTile (Unified Pipeline)
+ */
 @Composable
 fun LibraryGalleryMediaTile(
     item: LibraryItemUi,
@@ -232,144 +372,29 @@ fun LibraryGalleryMediaTile(
     isSelected: Boolean = false,
     onLongClick: (() -> Unit)? = null
 ) {
-    val haptic = LocalHapticFeedback.current
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f,
-        animationSpec = tween(durationMillis = 150),
-        label = "gallery_tile_scale"
+    // Mapping back to temporary MediaItem for compatibility until LibraryScreen is refactored
+    val mockItem = MediaItem(
+        id = item.id,
+        title = item.title,
+        mediaType = item.mediaType,
+        uriPath = item.uriPath,
+        imageUrl = item.imageUrl,
+        duration = item.duration
     )
-
-    var showDoubleTapHeart by remember { mutableStateOf(false) }
-
-    Column(
+    
+    AuraMediaTile(
+        item = mockItem,
+        onClick = onClick,
+        onLike = onLike,
+        onLongClick = { onLongClick?.invoke() },
+        isSelected = isSelected,
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .pointerInput(item.id) {
-                detectTapGestures(
-                    onTap = { onClick() },
-                    onDoubleTap = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showDoubleTapHeart = true
-                        onLike()
-                    },
-                    onLongPress = {
-                        onLongClick?.invoke()
-                    }
-                )
-            }
-            .testTag("library_gallery_tile_${item.id}")
-    ) {
-        Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f)) {
-            AuraMediaThumbnail(
-                itemId = item.id,
-                mediaType = item.mediaType,
-                imageUrl = item.imageUrl,
-                uriPath = item.uriPath,
-                title = item.title,
-                modifier = Modifier.fillMaxSize(),
-                locationTag = "library_gallery"
-            )
-
-            // Selection Overlay (Phase 4 — Updated for Phase 3 Visuals)
-            if (isSelected) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .border(1.5.dp, DiscoveryGradient, RoundedCornerShape(0.dp))
-                        .background(DiscoveryViolet.copy(alpha = 0.05f))
-                )
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = "Selected",
-                    tint = DiscoveryViolet,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                        .size(20.dp)
-                )
-            }
-
-            // Vibe label / Selection Reason (Phase 13 Improvement)
-            if (item.selectionReason != null) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp),
-                    color = DiscoveryViolet.copy(alpha = 0.85f),
-                    shape = RoundedCornerShape(4.dp)
-                ) {
-                    Text(
-                        text = item.selectionReason.uppercase(),
-                        color = Color.White,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-            }
-
-            // Duration Badge for Videos (Retained)
-            val isVideo = item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("Movie", ignoreCase = true)
-            
-            if (isVideo && item.duration.isNotEmpty()) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp),
-                    color = Color.Black.copy(alpha = 0.7f),
-                    shape = RoundedCornerShape(4.dp)
-                ) {
-                    Text(
-                        text = item.duration,
-                        color = Color.White,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-            }
-
-            // Double tap heart pop animation (Essential feedback for gesture)
-            androidx.compose.animation.AnimatedVisibility(
-                visible = showDoubleTapHeart,
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut(),
-                modifier = Modifier.align(Alignment.Center)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Favorite,
-                    contentDescription = null,
-                    tint = AuraMagenta,
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-            LaunchedEffect(showDoubleTapHeart) {
-                if (showDoubleTapHeart) {
-                    delay(500)
-                    showDoubleTapHeart = false
-                }
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(4.dp))
-        
-        Text(
-            text = item.title,
-            style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = AuraMidnight,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 2.dp)
-        )
-    }
+    )
 }
 
+/**
+ * DEPRECATED: Use AuraMediaTile
+ */
 @Composable
 fun AuraSquareMediaTile(
     item: MediaItem,
@@ -378,106 +403,13 @@ fun AuraSquareMediaTile(
     onFavoriteToggle: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val haptic = LocalHapticFeedback.current
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.95f else 1f,
-        animationSpec = tween(durationMillis = 150),
-        label = "tile_scale"
-    )
-
-    var showDoubleTapHeart by remember { mutableStateOf(false) }
-
-    Column(
+    AuraMediaTile(
+        item = item,
+        onClick = onClick,
+        onLike = onLike,
+        onLongClick = { onFavoriteToggle?.invoke() },
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .pointerInput(item.id) {
-                detectTapGestures(
-                    onTap = {
-                        onClick()
-                    },
-                    onDoubleTap = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showDoubleTapHeart = true
-                        onLike()
-                    }
-                )
-            }
-            .testTag("media_tile_${item.id}")
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-        ) {
-            AuraMediaThumbnail(
-                itemId = item.id,
-                mediaType = item.mediaType,
-                imageUrl = item.imageUrl,
-                uriPath = item.uriPath,
-                title = item.title,
-                modifier = Modifier.fillMaxSize(),
-                locationTag = "grid"
-            )
-
-            // Top Right: Favorite heart button (if supported on this surface)
-            if (onFavoriteToggle != null) {
-                val heartColor by animateColorAsState(
-                    targetValue = if (item.isFavorite) AuraMagenta else Color.White.copy(alpha = 0.85f),
-                    label = "heart_color"
-                )
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .size(48.dp) // 48dp touch target
-                        .clip(CircleShape)
-                        .clickable { onFavoriteToggle() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.4f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (item.isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = "Favorite",
-                            tint = heartColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            }
-
-            // Double tap heart pop animation
-            androidx.compose.animation.AnimatedVisibility(
-                visible = showDoubleTapHeart,
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut(),
-                modifier = Modifier.align(Alignment.Center)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Favorite,
-                    contentDescription = null,
-                    tint = AuraMagenta,
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-            LaunchedEffect(showDoubleTapHeart) {
-                if (showDoubleTapHeart) {
-                    delay(500)
-                    showDoubleTapHeart = false
-                }
-            }
-        }
-    }
+    )
 }
 
 @Composable
@@ -488,17 +420,7 @@ fun AuraFeaturedMediaCard(
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
-    val context = LocalContext.current
-    var thumbnailBitmap by remember(item.id, item.uriPath, item.imageUrl) { mutableStateOf<Bitmap?>(null) }
     var showDoubleTapHeart by remember { mutableStateOf(false) }
-
-    LaunchedEffect(item.id, item.uriPath, item.imageUrl) {
-        val targetUri = if (item.imageUrl.isNotEmpty()) item.imageUrl else item.uriPath
-        val isVideo = item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("Movie", ignoreCase = true)
-        if (targetUri.isNotEmpty() && isVideo) {
-            thumbnailBitmap = MediaThumbnailFetcher.getThumbnail(context, targetUri)
-        }
-    }
 
     Box(
         modifier = modifier
@@ -523,23 +445,16 @@ fun AuraFeaturedMediaCard(
             }
             .testTag("featured_card_${item.id}")
     ) {
-        val imageModel = if (item.imageUrl.isNotEmpty()) item.imageUrl else item.uriPath
-
-        if (thumbnailBitmap != null) {
-            Image(
-                bitmap = thumbnailBitmap!!.asImageBitmap(),
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else if (imageModel.isNotEmpty()) {
-            AsyncImage(
-                model = imageModel,
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
+        AuraMediaThumbnail(
+            itemId = item.id,
+            mediaType = item.mediaType,
+            imageUrl = item.imageUrl,
+            uriPath = item.uriPath,
+            title = item.title,
+            modifier = Modifier.fillMaxSize(),
+            locationTag = "featured"
+        )
+        
         // Scrim gradient
         Box(
             modifier = Modifier
@@ -849,7 +764,6 @@ fun VideoTilePreview(
             },
             modifier = modifier
                 .fillMaxSize()
-                .clip(RoundedCornerShape(16.dp))
                 .clipToBounds()
         )
     }

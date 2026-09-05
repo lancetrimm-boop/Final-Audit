@@ -385,42 +385,54 @@ fun LibraryScreen(
                             items = latestSortedItems,
                             key = { _, item -> item.id }
                         ) { index, item ->
-                            LibraryGalleryMediaTile(
-                                item = item,
-                                isSelected = selectedIds.contains(item.id),
-                                onClick = {
-                                    if (isSelectionMode) {
-                                        selectedIds = if (selectedIds.contains(item.id)) {
-                                            selectedIds - item.id
+                            val mediaItem = mediaItemsMap[item.id]
+                            if (mediaItem != null) {
+                                AuraMediaTile(
+                                    item = mediaItem,
+                                    isSelected = selectedIds.contains(item.id),
+                                    isSelectionMode = isSelectionMode,
+                                    onClick = {
+                                        if (isSelectionMode) {
+                                            selectedIds = if (selectedIds.contains(item.id)) {
+                                                selectedIds - item.id
+                                            } else {
+                                                selectedIds + item.id
+                                            }
+                                            if (selectedIds.isEmpty()) isSelectionMode = false
                                         } else {
-                                            selectedIds + item.id
+                                            // AURA REPAIR: Resolve exact identity from current sorted context
+                                            val currentMediaItems = latestSortedItems.mapNotNull { mediaItemsMap[it.id] }
+                                            val clickedItemIndex = currentMediaItems.indexOfFirst { it.id == item.id }
+                                            
+                                            if (clickedItemIndex != -1) {
+                                                repository.setLibraryPlaylist(
+                                                    items = currentMediaItems,
+                                                    initialIndex = clickedItemIndex
+                                                )
+                                                onMediaSelect(currentMediaItems[clickedItemIndex])
+                                            }
                                         }
-                                        if (selectedIds.isEmpty()) isSelectionMode = false
-                                    } else {
-                                        // AURA PHASE 1: Use stable media identity and current visible list
-                                        val currentMediaItems = latestSortedItems.mapNotNull { mediaItemsMap[it.id] }
-                                        val clickedItemIndex = currentMediaItems.indexOfFirst { it.id == item.id }
-                                        
-                                        if (clickedItemIndex != -1) {
-                                            repository.setLibraryPlaylist(
-                                                items = currentMediaItems,
-                                                initialIndex = clickedItemIndex
-                                            )
-                                            onMediaSelect(currentMediaItems[clickedItemIndex])
+                                    },
+                                    onLongClick = {
+                                        if (!isSelectionMode) {
+                                            isSelectionMode = true
+                                            selectedIds = setOf(item.id)
+                                        } else {
+                                            // Toggle selection in selection mode
+                                            selectedIds = if (selectedIds.contains(item.id)) {
+                                                selectedIds - item.id
+                                            } else {
+                                                selectedIds + item.id
+                                            }
+                                            if (selectedIds.isEmpty()) isSelectionMode = false
                                         }
+                                    },
+                                    onLike = {
+                                        repository.recordLike(item.id)
+                                        repository.addToFavorites(item.id)
                                     }
-                                },
-                                onLongClick = {
-                                    if (!isSelectionMode) {
-                                        isSelectionMode = true
-                                        selectedIds = setOf(item.id)
-                                    }
-                                },
-                                onLike = {
-                                    repository.recordLike(item.id)
-                                    repository.addToFavorites(item.id)
-                                }
-                            )
+                                )
+                            }
                         }
                     }
                 }
