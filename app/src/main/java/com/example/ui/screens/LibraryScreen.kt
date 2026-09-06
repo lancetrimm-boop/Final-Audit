@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.*
 import com.example.data.semantic.SearchRequest
+import com.example.ui.models.LibraryItemUi
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
@@ -148,9 +149,30 @@ fun LibraryScreen(
         derivedStateOf { gridState.firstVisibleItemIndex > 8 }
     }
 
-    val latestSortedItems by repository.latestAiSortRecommendation.collectAsStateWithLifecycle()
+    val latestSortedItemsFromRepo by repository.latestAiSortRecommendation.collectAsStateWithLifecycle()
     val mediaItemsMap by repository.mediaItemsMap.collectAsStateWithLifecycle()
     val dbState by repository.databaseState.collectAsStateWithLifecycle()
+
+    // AURA STABILITY FIX: UI-side list stability to prevent items from jumping while viewing.
+    // In unstable modes (Discover), we lock the list and only update it on manual refresh or sort change.
+    var stableItems by remember { mutableStateOf<List<LibraryItemUi>>(emptyList()) }
+    val isUnstableMode = activeCategory == SortCategory.INTELLIGENT && intelligentSort == IntelligentSortOption.DISCOVER
+
+    LaunchedEffect(latestSortedItemsFromRepo) {
+        if (!isUnstableMode || stableItems.isEmpty()) {
+            stableItems = latestSortedItemsFromRepo
+        }
+    }
+
+    LaunchedEffect(activeCategory, intelligentSort, selectedFilter, searchRequest) {
+        // Sort/Filter change acts as a "thaw" signal
+        stableItems = latestSortedItemsFromRepo
+    }
+
+    // Filter out deleted items from the stable snapshot to ensure they disappear immediately
+    val displayItems = remember(stableItems, mediaItemsMap) {
+        stableItems.filter { mediaItemsMap.containsKey(it.id) }
+    }
 
     LaunchedEffect(gridState) {
         snapshotFlow { Pair(gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset) }
@@ -371,13 +393,14 @@ fun LibraryScreen(
                 isRefreshing = scanProgress.isScanning,
                 onRefresh = { 
                     repository.refreshSort()
+                    stableItems = emptyList() // Force reload on manual refresh
                     if (dbState == com.example.data.DatabaseState.READY) {
                         scanPermissionLauncher.launch(permissionsToRequest)
                     }
                 },
                 modifier = Modifier.fillMaxSize()
             ) {
-                if (latestSortedItems.isEmpty()) {
+                if (displayItems.isEmpty()) {
                     EmptyLibraryView(
                         onImportClick = { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
                         onScanClick = { scanPermissionLauncher.launch(permissionsToRequest) }
@@ -408,7 +431,7 @@ fun LibraryScreen(
                             verticalArrangement = Arrangement.spacedBy(20.dp)
                         ) {
                             itemsIndexed(
-                                items = latestSortedItems,
+                                items = displayItems,
                                 key = { _, item -> item.id }
                             ) { _, item ->
                                 val mediaItem = mediaItemsMap[item.id]
@@ -427,7 +450,7 @@ fun LibraryScreen(
                                                 }
                                                 if (selectedIds.isEmpty()) isSelectionMode = false
                                             } else {
-                                                val currentMediaItems = latestSortedItems.mapNotNull { mediaItemsMap[it.id] }
+                                                val currentMediaItems = displayItems.mapNotNull { mediaItemsMap[it.id] }
                                                 val clickedItemIndex = currentMediaItems.indexOfFirst { it.id == item.id }
                                                 
                                                 if (clickedItemIndex != -1) {

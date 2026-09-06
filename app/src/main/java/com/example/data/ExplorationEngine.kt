@@ -179,8 +179,12 @@ object ExplorationEngine {
             // Contrast is the absolute difference in trait presence
             val contrast = Math.abs(valA - valB)
             
-            // Information gain is higher when items contrast on this dimension
-            totalGain += contrast
+            // Step 15 Integration: Priority weight for dimensions with low confidence
+            val confidence = getConfidenceValue(tasteDNA, dim)
+            val learningPriority = 1.0 - confidence // Higher priority for lower confidence
+            
+            // Information gain is higher when items contrast on this dimension and we are unsure
+            totalGain += contrast * (0.5 + learningPriority)
         }
         
         // Normalize by total dimensions involved
@@ -188,6 +192,40 @@ object ExplorationEngine {
             (totalGain / allDimensions.size).toFloat()
         } else {
             0.1f
+        }
+    }
+
+    private fun getConfidenceValue(tasteDNA: TasteDNA, dimension: String): Double {
+        return when(dimension) {
+            "vibrancy" -> tasteDNA.confVibrancy
+            "contrast" -> tasteDNA.confContrast
+            "sharpness" -> tasteDNA.confSharpness
+            "symmetry" -> tasteDNA.confSymmetry
+            "complexity" -> tasteDNA.confComplexity
+            "naturalism" -> tasteDNA.confNaturalism
+            "novelty" -> tasteDNA.confNovelty
+            "lighting" -> tasteDNA.confLighting
+            "colorTemperature" -> tasteDNA.confColorTemp
+            "texture" -> tasteDNA.confTexture
+            "motion" -> tasteDNA.confMotion
+            "dynamicRange" -> tasteDNA.confDynamicRange
+            "framing" -> tasteDNA.confFraming
+            "depth" -> tasteDNA.confDepth
+            "warmth" -> tasteDNA.confWarmth
+            "saturation" -> tasteDNA.confSaturation
+            "elegance" -> tasteDNA.confElegance
+            "minimalism" -> tasteDNA.confMinimalism
+            "grain" -> tasteDNA.confGrain
+            "focus" -> tasteDNA.confFocus
+            "density" -> tasteDNA.confDensity
+            "rhythm" -> tasteDNA.confRhythm
+            "mood" -> tasteDNA.confMood
+            "harmony" -> tasteDNA.confHarmony
+            "skipSensitivity" -> tasteDNA.confSkipSensitivity
+            "explorationPropensity" -> tasteDNA.confExploration
+            "retentionFocus" -> tasteDNA.confRetention
+            "favoriteSignificance" -> tasteDNA.confFavSignificance
+            else -> 0.0
         }
     }
 }

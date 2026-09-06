@@ -122,10 +122,13 @@ fun DiscoverScreen(
     val context = LocalContext.current
 
     BackHandler(enabled = detailState is ObsessionDetailState.Active) {
-        com.example.data.AuraTelemetryService.logEvent(
-            repository, 
-            com.example.data.AuraTelemetryService.EventType.NAVIGATED_BACK
-        )
+        repository.interactionRepository?.let { iRepo ->
+            com.example.data.AuraInteractionService.logInteraction(
+                repository,
+                iRepo,
+                com.example.data.AuraInteractionType.NAVIGATED_BACK
+            )
+        }
         viewModel.deselectObsession()
     }
 
@@ -349,10 +352,13 @@ fun EndOfBatchView(
     repository: MediaRepository
 ) {
     LaunchedEffect(Unit) {
-        com.example.data.AuraTelemetryService.logEvent(
-            repository, 
-            com.example.data.AuraTelemetryService.EventType.END_OF_BATCH_REACHED
-        )
+        repository.interactionRepository?.let { iRepo ->
+            com.example.data.AuraInteractionService.logInteraction(
+                repository,
+                iRepo,
+                com.example.data.AuraInteractionType.END_OF_BATCH_REACHED
+            )
+        }
     }
 
     Column(
@@ -608,11 +614,14 @@ fun ObsessionCard(
     val mainItem = obsession.previewItems.firstOrNull() ?: return
 
     LaunchedEffect(obsession.id) {
-        com.example.data.AuraTelemetryService.logEvent(
-            repository, 
-            com.example.data.AuraTelemetryService.EventType.OBSESSION_EXPOSURE, 
-            metadata = mapOf("obsessionId" to obsession.id)
-        )
+        repository.interactionRepository?.let { iRepo ->
+            com.example.data.AuraInteractionService.logInteraction(
+                repository,
+                iRepo,
+                com.example.data.AuraInteractionType.OBSESSION_EXPOSURE,
+                metadata = mapOf("obsessionId" to obsession.id)
+            )
+        }
     }
 
     // Entry Animation

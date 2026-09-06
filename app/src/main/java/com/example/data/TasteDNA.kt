@@ -6,12 +6,14 @@ import com.squareup.moshi.JsonClass
  * Reorganized core visual and behavioral preference model for Aura.
  * Restored to the complete 24-dimension representation identified in the audit.
  * All dimensions follow the Fine-Tuning model: Manual Baseline + AI Learned Adjustment.
+ * 
+ * Effective preference = manual baseline + bounded learned influence controlled by confidence.
  */
 @JsonClass(generateAdapter = true)
 data class TasteDNA(
     val isFineTuningEnabled: Boolean = false,
 
-    // --- 24 VISUAL & AESTHETIC DIMENSIONS ---
+    // --- 24 VISUAL & AESTHETIC DIMENSIONS (Manual Baseline) ---
     val vibrancy: Double = 0.5,
     val contrast: Double = 0.5,
     val sharpness: Double = 0.5,
@@ -37,13 +39,13 @@ data class TasteDNA(
     val mood: Double = 0.5,
     val harmony: Double = 0.5,
 
-    // --- BEHAVIORAL PREFERENCE ---
+    // --- BEHAVIORAL PREFERENCE (Manual Baseline) ---
     val skipSensitivity: Double = 0.5,
     val explorationPropensity: Double = 0.5,
     val retentionFocus: Double = 0.5,
     val favoriteSignificance: Double = 0.5,
 
-    // --- AI LEARNED STATE (Hidden Calibration Layer) ---
+    // --- AI LEARNED STATE (Damped Aggregation Layer) ---
     val learnedVibrancy: Double = 0.5,
     val learnedContrast: Double = 0.5,
     val learnedSharpness: Double = 0.5,
@@ -68,11 +70,40 @@ data class TasteDNA(
     val learnedRhythm: Double = 0.5,
     val learnedMood: Double = 0.5,
     val learnedHarmony: Double = 0.5,
-    
     val learnedSkipSensitivity: Double = 0.5,
     val learnedExploration: Double = 0.5,
     val learnedRetention: Double = 0.5,
-    val learnedFavSignificance: Double = 0.5
+    val learnedFavSignificance: Double = 0.5,
+
+    // --- CONFIDENCE STATE (0.0 - 1.0) ---
+    val confVibrancy: Double = 0.0,
+    val confContrast: Double = 0.0,
+    val confSharpness: Double = 0.0,
+    val confSymmetry: Double = 0.0,
+    val confComplexity: Double = 0.0,
+    val confNaturalism: Double = 0.0,
+    val confNovelty: Double = 0.0,
+    val confLighting: Double = 0.0,
+    val confColorTemp: Double = 0.0,
+    val confTexture: Double = 0.0,
+    val confMotion: Double = 0.0,
+    val confDynamicRange: Double = 0.0,
+    val confFraming: Double = 0.0,
+    val confDepth: Double = 0.0,
+    val confWarmth: Double = 0.0,
+    val confSaturation: Double = 0.0,
+    val confElegance: Double = 0.0,
+    val confMinimalism: Double = 0.0,
+    val confGrain: Double = 0.0,
+    val confFocus: Double = 0.0,
+    val confDensity: Double = 0.0,
+    val confRhythm: Double = 0.0,
+    val confMood: Double = 0.0,
+    val confHarmony: Double = 0.0,
+    val confSkipSensitivity: Double = 0.0,
+    val confExploration: Double = 0.0,
+    val confRetention: Double = 0.0,
+    val confFavSignificance: Double = 0.0
 ) {
     enum class AestheticDimension(val key: String) {
         VIBRANCY("vibrancy"),
@@ -101,137 +132,112 @@ data class TasteDNA(
         HARMONY("harmony")
     }
 
-    // Effective values (Averaged Manual + AI Adjustment)
-    fun getEffective(manual: Double, learned: Double): Double =
-        if (isFineTuningEnabled) (manual + learned) / 2.0 else manual
+    /**
+     * Strict Invariant: Effective = manual + (learned - manual) * confidence * maxInfluence.
+     * Manual baseline is authoritative. Influence is bounded.
+     */
+    fun getEffective(manual: Double, learned: Double, confidence: Double): Double {
+        if (!isFineTuningEnabled || confidence <= 0.0) return manual
+        val maxInfluence = 0.2 // Hard code constant as per design rule
+        val adjustment = (learned - manual) * confidence * maxInfluence
+        return (manual + adjustment).coerceIn(0.0, 1.0)
+    }
 
-    val effectiveVibrancy: Double get() = getEffective(vibrancy, learnedVibrancy)
-    val effectiveContrast: Double get() = getEffective(contrast, learnedContrast)
-    val effectiveSharpness: Double get() = getEffective(sharpness, learnedSharpness)
-    val effectiveSymmetry: Double get() = getEffective(symmetry, learnedSymmetry)
-    val effectiveComplexity: Double get() = getEffective(complexity, learnedComplexity)
-    val effectiveNaturalism: Double get() = getEffective(naturalism, learnedNaturalism)
-    val effectiveNovelty: Double get() = getEffective(novelty, learnedNovelty)
-    val effectiveLighting: Double get() = getEffective(lighting, learnedLighting)
-    val effectiveColorTemp: Double get() = getEffective(colorTemperature, learnedColorTemp)
-    val effectiveTexture: Double get() = getEffective(texture, learnedTexture)
-    val effectiveMotion: Double get() = getEffective(motion, learnedMotion)
-    val effectiveDynamicRange: Double get() = getEffective(dynamicRange, learnedDynamicRange)
-    val effectiveFraming: Double get() = getEffective(framing, learnedFraming)
-    val effectiveDepth: Double get() = getEffective(depth, learnedDepth)
-    val effectiveWarmth: Double get() = getEffective(warmth, learnedWarmth)
-    val effectiveSaturation: Double get() = getEffective(saturation, learnedSaturation)
-    val effectiveElegance: Double get() = getEffective(elegance, learnedElegance)
-    val effectiveMinimalism: Double get() = getEffective(minimalism, learnedMinimalism)
-    val effectiveGrain: Double get() = getEffective(grain, learnedGrain)
-    val effectiveFocus: Double get() = getEffective(focus, learnedFocus)
-    val effectiveDensity: Double get() = getEffective(density, learnedDensity)
-    val effectiveRhythm: Double get() = getEffective(rhythm, learnedRhythm)
-    val effectiveMood: Double get() = getEffective(mood, learnedMood)
-    val effectiveHarmony: Double get() = getEffective(harmony, learnedHarmony)
+    val effectiveVibrancy: Double get() = getEffective(vibrancy, learnedVibrancy, confVibrancy)
+    val effectiveContrast: Double get() = getEffective(contrast, learnedContrast, confContrast)
+    val effectiveSharpness: Double get() = getEffective(sharpness, learnedSharpness, confSharpness)
+    val effectiveSymmetry: Double get() = getEffective(symmetry, learnedSymmetry, confSymmetry)
+    val effectiveComplexity: Double get() = getEffective(complexity, learnedComplexity, confComplexity)
+    val effectiveNaturalism: Double get() = getEffective(naturalism, learnedNaturalism, confNaturalism)
+    val effectiveNovelty: Double get() = getEffective(novelty, learnedNovelty, confNovelty)
+    val effectiveLighting: Double get() = getEffective(lighting, learnedLighting, confLighting)
+    val effectiveColorTemp: Double get() = getEffective(colorTemperature, learnedColorTemp, confColorTemp)
+    val effectiveTexture: Double get() = getEffective(texture, learnedTexture, confTexture)
+    val effectiveMotion: Double get() = getEffective(motion, learnedMotion, confMotion)
+    val effectiveDynamicRange: Double get() = getEffective(dynamicRange, learnedDynamicRange, confDynamicRange)
+    val effectiveFraming: Double get() = getEffective(framing, learnedFraming, confFraming)
+    val effectiveDepth: Double get() = getEffective(depth, learnedDepth, confDepth)
+    val effectiveWarmth: Double get() = getEffective(warmth, learnedWarmth, confWarmth)
+    val effectiveSaturation: Double get() = getEffective(saturation, learnedSaturation, confSaturation)
+    val effectiveElegance: Double get() = getEffective(elegance, learnedElegance, confElegance)
+    val effectiveMinimalism: Double get() = getEffective(minimalism, learnedMinimalism, confMinimalism)
+    val effectiveGrain: Double get() = getEffective(grain, learnedGrain, confGrain)
+    val effectiveFocus: Double get() = getEffective(focus, learnedFocus, confFocus)
+    val effectiveDensity: Double get() = getEffective(density, learnedDensity, confDensity)
+    val effectiveRhythm: Double get() = getEffective(rhythm, learnedRhythm, confRhythm)
+    val effectiveMood: Double get() = getEffective(mood, learnedMood, confMood)
+    val effectiveHarmony: Double get() = getEffective(harmony, learnedHarmony, confHarmony)
 
-    val effectiveSkipSensitivity: Double get() = getEffective(skipSensitivity, learnedSkipSensitivity)
-    val effectiveExploration: Double get() = getEffective(explorationPropensity, learnedExploration)
-    val effectiveRetention: Double get() = getEffective(retentionFocus, learnedRetention)
-    val effectiveFavSignificance: Double get() = getEffective(favoriteSignificance, learnedFavSignificance)
+    val effectiveSkipSensitivity: Double get() = getEffective(skipSensitivity, learnedSkipSensitivity, confSkipSensitivity)
+    val effectiveExploration: Double get() = getEffective(explorationPropensity, learnedExploration, confExploration)
+    val effectiveRetention: Double get() = getEffective(retentionFocus, learnedRetention, confRetention)
+    val effectiveFavSignificance: Double get() = getEffective(favoriteSignificance, learnedFavSignificance, confFavSignificance)
 
     /**
-     * Resets learned layers back to manual baselines.
+     * Resets learned layers and confidence back to neutral baselines.
      */
     fun resetFineTuning(): TasteDNA = this.copy(
-        learnedVibrancy = vibrancy,
-        learnedContrast = contrast,
-        learnedSharpness = sharpness,
-        learnedSymmetry = symmetry,
-        learnedComplexity = complexity,
-        learnedNaturalism = naturalism,
-        learnedNovelty = novelty,
-        learnedLighting = lighting,
-        learnedColorTemp = colorTemperature,
-        learnedTexture = texture,
-        learnedMotion = motion,
-        learnedDynamicRange = dynamicRange,
-        learnedFraming = framing,
-        learnedDepth = depth,
-        learnedWarmth = warmth,
-        learnedSaturation = saturation,
-        learnedElegance = elegance,
-        learnedMinimalism = minimalism,
-        learnedGrain = grain,
-        learnedFocus = focus,
-        learnedDensity = density,
-        learnedRhythm = rhythm,
-        learnedMood = mood,
-        learnedHarmony = harmony,
-        learnedSkipSensitivity = skipSensitivity,
-        learnedExploration = explorationPropensity,
-        learnedRetention = retentionFocus,
-        learnedFavSignificance = favoriteSignificance
+        learnedVibrancy = vibrancy, learnedContrast = contrast, learnedSharpness = sharpness,
+        learnedSymmetry = symmetry, learnedComplexity = complexity, learnedNaturalism = naturalism,
+        learnedNovelty = novelty, learnedLighting = lighting, learnedColorTemp = colorTemperature,
+        learnedTexture = texture, learnedMotion = motion, learnedDynamicRange = dynamicRange,
+        learnedFraming = framing, learnedDepth = depth, learnedWarmth = warmth,
+        learnedSaturation = saturation, learnedElegance = elegance, learnedMinimalism = minimalism,
+        learnedGrain = grain, learnedFocus = focus, learnedDensity = density,
+        learnedRhythm = rhythm, learnedMood = mood, learnedHarmony = harmony,
+        learnedSkipSensitivity = skipSensitivity, learnedExploration = explorationPropensity,
+        learnedRetention = retentionFocus, learnedFavSignificance = favoriteSignificance,
+        confVibrancy = 0.0, confContrast = 0.0, confSharpness = 0.0, confSymmetry = 0.0,
+        confComplexity = 0.0, confNaturalism = 0.0, confNovelty = 0.0, confLighting = 0.0,
+        confColorTemp = 0.0, confTexture = 0.0, confMotion = 0.0, confDynamicRange = 0.0,
+        confFraming = 0.0, confDepth = 0.0, confWarmth = 0.0, confSaturation = 0.0,
+        confElegance = 0.0, confMinimalism = 0.0, confGrain = 0.0, confFocus = 0.0,
+        confDensity = 0.0, confRhythm = 0.0, confMood = 0.0, confHarmony = 0.0,
+        confSkipSensitivity = 0.0, confExploration = 0.0, confRetention = 0.0, confFavSignificance = 0.0
     )
 
-    /**
-     * Ensures all dimensions are valid numbers and within [0, 1] range.
-     * Falls back to 0.50 for any invalid value.
-     */
     fun sanitize(): TasteDNA {
         fun Double.valid() = if (isNaN() || isInfinite()) 0.5 else coerceIn(0.0, 1.0)
+        fun Double.vConf() = if (isNaN() || isInfinite()) 0.0 else coerceIn(0.0, 1.0)
         return copy(
-            vibrancy = vibrancy.valid(),
-            contrast = contrast.valid(),
-            sharpness = sharpness.valid(),
-            symmetry = symmetry.valid(),
-            complexity = complexity.valid(),
-            naturalism = naturalism.valid(),
-            novelty = novelty.valid(),
-            lighting = lighting.valid(),
-            colorTemperature = colorTemperature.valid(),
-            texture = texture.valid(),
-            motion = motion.valid(),
-            dynamicRange = dynamicRange.valid(),
-            framing = framing.valid(),
-            depth = depth.valid(),
-            warmth = warmth.valid(),
-            saturation = saturation.valid(),
-            elegance = elegance.valid(),
-            minimalism = minimalism.valid(),
-            grain = grain.valid(),
-            focus = focus.valid(),
-            density = density.valid(),
-            rhythm = rhythm.valid(),
-            mood = mood.valid(),
-            harmony = harmony.valid(),
-            skipSensitivity = skipSensitivity.valid(),
-            explorationPropensity = explorationPropensity.valid(),
-            retentionFocus = retentionFocus.valid(),
-            favoriteSignificance = favoriteSignificance.valid(),
-            learnedVibrancy = learnedVibrancy.valid(),
-            learnedContrast = learnedContrast.valid(),
-            learnedSharpness = learnedSharpness.valid(),
-            learnedSymmetry = learnedSymmetry.valid(),
-            learnedComplexity = learnedComplexity.valid(),
-            learnedNaturalism = learnedNaturalism.valid(),
-            learnedNovelty = learnedNovelty.valid(),
-            learnedLighting = learnedLighting.valid(),
-            learnedColorTemp = learnedColorTemp.valid(),
-            learnedTexture = learnedTexture.valid(),
-            learnedMotion = learnedMotion.valid(),
-            learnedDynamicRange = learnedDynamicRange.valid(),
-            learnedFraming = learnedFraming.valid(),
-            learnedDepth = learnedDepth.valid(),
-            learnedWarmth = learnedWarmth.valid(),
-            learnedSaturation = learnedSaturation.valid(),
-            learnedElegance = learnedElegance.valid(),
-            learnedMinimalism = learnedMinimalism.valid(),
-            learnedGrain = learnedGrain.valid(),
-            learnedFocus = learnedFocus.valid(),
-            learnedDensity = learnedDensity.valid(),
-            learnedRhythm = learnedRhythm.valid(),
-            learnedMood = learnedMood.valid(),
-            learnedHarmony = learnedHarmony.valid(),
-            learnedSkipSensitivity = learnedSkipSensitivity.valid(),
-            learnedExploration = learnedExploration.valid(),
-            learnedRetention = learnedRetention.valid(),
-            learnedFavSignificance = learnedFavSignificance.valid()
+            vibrancy = vibrancy.valid(), contrast = contrast.valid(), sharpness = sharpness.valid(),
+            symmetry = symmetry.valid(), complexity = complexity.valid(), naturalism = naturalism.valid(),
+            novelty = novelty.valid(), lighting = lighting.valid(), colorTemperature = colorTemperature.valid(),
+            texture = texture.valid(), motion = motion.valid(), dynamicRange = dynamicRange.valid(),
+            framing = framing.valid(), depth = depth.valid(), warmth = warmth.valid(),
+            saturation = saturation.valid(), elegance = elegance.valid(), minimalism = minimalism.valid(),
+            grain = grain.valid(), focus = focus.valid(), density = density.valid(),
+            rhythm = rhythm.valid(), mood = mood.valid(), harmony = harmony.valid(),
+            skipSensitivity = skipSensitivity.valid(), explorationPropensity = explorationPropensity.valid(),
+            retentionFocus = retentionFocus.valid(), favoriteSignificance = favoriteSignificance.valid(),
+            learnedVibrancy = learnedVibrancy.valid(), learnedContrast = learnedContrast.valid(),
+            learnedSharpness = learnedSharpness.valid(), learnedSymmetry = learnedSymmetry.valid(),
+            learnedComplexity = learnedComplexity.valid(), learnedNaturalism = learnedNaturalism.valid(),
+            learnedNovelty = learnedNovelty.valid(), learnedLighting = learnedLighting.valid(),
+            learnedColorTemp = learnedColorTemp.valid(), learnedTexture = learnedTexture.valid(),
+            learnedMotion = learnedMotion.valid(), learnedDynamicRange = learnedDynamicRange.valid(),
+            learnedFraming = learnedFraming.valid(), learnedDepth = learnedDepth.valid(),
+            learnedWarmth = learnedWarmth.valid(), learnedSaturation = learnedSaturation.valid(),
+            learnedElegance = learnedElegance.valid(), learnedMinimalism = learnedMinimalism.valid(),
+            learnedGrain = learnedGrain.valid(), learnedFocus = learnedFocus.valid(),
+            learnedDensity = learnedDensity.valid(), learnedRhythm = learnedRhythm.valid(),
+            learnedMood = learnedMood.valid(), learnedHarmony = learnedHarmony.valid(),
+            learnedSkipSensitivity = learnedSkipSensitivity.valid(), learnedExploration = learnedExploration.valid(),
+            learnedRetention = learnedRetention.valid(), learnedFavSignificance = learnedFavSignificance.valid(),
+            confVibrancy = confVibrancy.vConf(), confContrast = confContrast.vConf(),
+            confSharpness = confSharpness.vConf(), confSymmetry = confSymmetry.vConf(),
+            confComplexity = confComplexity.vConf(), confNaturalism = confNaturalism.vConf(),
+            confNovelty = confNovelty.vConf(), confLighting = confLighting.vConf(),
+            confColorTemp = confColorTemp.vConf(), confTexture = confTexture.vConf(),
+            confMotion = confMotion.vConf(), confDynamicRange = confDynamicRange.vConf(),
+            confFraming = confFraming.vConf(), confDepth = confDepth.vConf(),
+            confWarmth = confWarmth.vConf(), confSaturation = confSaturation.vConf(),
+            confElegance = confElegance.vConf(), confMinimalism = confMinimalism.vConf(),
+            confGrain = confGrain.vConf(), confFocus = confFocus.vConf(),
+            confDensity = confDensity.vConf(), confRhythm = confRhythm.vConf(),
+            confMood = confMood.vConf(), confHarmony = confHarmony.vConf(),
+            confSkipSensitivity = confSkipSensitivity.vConf(), confExploration = confExploration.vConf(),
+            confRetention = confRetention.vConf(), confFavSignificance = confFavSignificance.vConf()
         )
     }
 
@@ -314,92 +320,46 @@ data class TasteDNA(
      * Updates manual baseline and re-anchors AI learning to that baseline.
      */
     fun updateBaseline(
-        newVibrancy: Double? = null,
-        newContrast: Double? = null,
-        newSharpness: Double? = null,
-        newSymmetry: Double? = null,
-        newComplexity: Double? = null,
-        newNaturalism: Double? = null,
-        newNovelty: Double? = null,
-        newLighting: Double? = null,
-        newColorTemp: Double? = null,
-        newTexture: Double? = null,
-        newMotion: Double? = null,
-        newDynamicRange: Double? = null,
-        newFraming: Double? = null,
-        newDepth: Double? = null,
-        newWarmth: Double? = null,
-        newSaturation: Double? = null,
-        newElegance: Double? = null,
-        newMinimalism: Double? = null,
-        newGrain: Double? = null,
-        newFocus: Double? = null,
-        newDensity: Double? = null,
-        newRhythm: Double? = null,
-        newMood: Double? = null,
-        newHarmony: Double? = null,
-        newSkip: Double? = null,
-        newExploration: Double? = null,
-        newRetention: Double? = null,
+        newVibrancy: Double? = null, newContrast: Double? = null, newSharpness: Double? = null,
+        newSymmetry: Double? = null, newComplexity: Double? = null, newNaturalism: Double? = null,
+        newNovelty: Double? = null, newLighting: Double? = null, newColorTemp: Double? = null,
+        newTexture: Double? = null, newMotion: Double? = null, newDynamicRange: Double? = null,
+        newFraming: Double? = null, newDepth: Double? = null, newWarmth: Double? = null,
+        newSaturation: Double? = null, newElegance: Double? = null, newMinimalism: Double? = null,
+        newGrain: Double? = null, newFocus: Double? = null, newDensity: Double? = null,
+        newRhythm: Double? = null, newMood: Double? = null, newHarmony: Double? = null,
+        newSkip: Double? = null, newExploration: Double? = null, newRetention: Double? = null,
         newFavSignificance: Double? = null
     ): TasteDNA {
         return this.copy(
-            vibrancy = newVibrancy ?: vibrancy,
-            learnedVibrancy = newVibrancy ?: learnedVibrancy,
-            contrast = newContrast ?: contrast,
-            learnedContrast = newContrast ?: learnedContrast,
-            sharpness = newSharpness ?: sharpness,
-            learnedSharpness = newSharpness ?: learnedSharpness,
-            symmetry = newSymmetry ?: symmetry,
-            learnedSymmetry = newSymmetry ?: learnedSymmetry,
-            complexity = newComplexity ?: complexity,
-            learnedComplexity = newComplexity ?: learnedComplexity,
-            naturalism = newNaturalism ?: naturalism,
-            learnedNaturalism = newNaturalism ?: learnedNaturalism,
-            novelty = newNovelty ?: novelty,
-            learnedNovelty = newNovelty ?: learnedNovelty,
-            lighting = newLighting ?: lighting,
-            learnedLighting = newLighting ?: learnedLighting,
-            colorTemperature = newColorTemp ?: colorTemperature,
-            learnedColorTemp = newColorTemp ?: learnedColorTemp,
-            texture = newTexture ?: texture,
-            learnedTexture = newTexture ?: learnedTexture,
-            motion = newMotion ?: motion,
-            learnedMotion = newMotion ?: learnedMotion,
-            dynamicRange = newDynamicRange ?: dynamicRange,
-            learnedDynamicRange = newDynamicRange ?: learnedDynamicRange,
-            framing = newFraming ?: framing,
-            learnedFraming = newFraming ?: learnedFraming,
-            depth = newDepth ?: depth,
-            learnedDepth = newDepth ?: learnedDepth,
-            warmth = newWarmth ?: warmth,
-            learnedWarmth = newWarmth ?: learnedWarmth,
-            saturation = newSaturation ?: saturation,
-            learnedSaturation = newSaturation ?: learnedSaturation,
-            elegance = newElegance ?: elegance,
-            learnedElegance = newElegance ?: learnedElegance,
-            minimalism = newMinimalism ?: minimalism,
-            learnedMinimalism = newMinimalism ?: learnedMinimalism,
-            grain = newGrain ?: grain,
-            learnedGrain = newGrain ?: learnedGrain,
-            focus = newFocus ?: focus,
-            learnedFocus = newFocus ?: learnedFocus,
-            density = newDensity ?: density,
-            learnedDensity = newDensity ?: learnedDensity,
-            rhythm = newRhythm ?: rhythm,
-            learnedRhythm = newRhythm ?: learnedRhythm,
-            mood = newMood ?: mood,
-            learnedMood = newMood ?: learnedMood,
-            harmony = newHarmony ?: harmony,
-            learnedHarmony = newHarmony ?: learnedHarmony,
-            skipSensitivity = newSkip ?: skipSensitivity,
-            learnedSkipSensitivity = newSkip ?: learnedSkipSensitivity,
-            explorationPropensity = newExploration ?: explorationPropensity,
-            learnedExploration = newExploration ?: learnedExploration,
-            retentionFocus = newRetention ?: retentionFocus,
-            learnedRetention = newRetention ?: learnedRetention,
-            favoriteSignificance = newFavSignificance ?: favoriteSignificance,
-            learnedFavSignificance = newFavSignificance ?: learnedFavSignificance
+            vibrancy = newVibrancy ?: vibrancy, learnedVibrancy = newVibrancy ?: learnedVibrancy,
+            contrast = newContrast ?: contrast, learnedContrast = newContrast ?: learnedContrast,
+            sharpness = newSharpness ?: sharpness, learnedSharpness = newSharpness ?: learnedSharpness,
+            symmetry = newSymmetry ?: symmetry, learnedSymmetry = newSymmetry ?: learnedSymmetry,
+            complexity = newComplexity ?: complexity, learnedComplexity = newComplexity ?: learnedComplexity,
+            naturalism = newNaturalism ?: naturalism, learnedNaturalism = newNaturalism ?: learnedNaturalism,
+            novelty = newNovelty ?: novelty, learnedNovelty = newNovelty ?: learnedNovelty,
+            lighting = newLighting ?: lighting, learnedLighting = newLighting ?: learnedLighting,
+            colorTemperature = newColorTemp ?: colorTemperature, learnedColorTemp = newColorTemp ?: learnedColorTemp,
+            texture = newTexture ?: texture, learnedTexture = newTexture ?: learnedTexture,
+            motion = newMotion ?: motion, learnedMotion = newMotion ?: learnedMotion,
+            dynamicRange = newDynamicRange ?: dynamicRange, learnedDynamicRange = newDynamicRange ?: learnedDynamicRange,
+            framing = newFraming ?: framing, learnedFraming = newFraming ?: learnedFraming,
+            depth = newDepth ?: depth, learnedDepth = newDepth ?: learnedDepth,
+            warmth = newWarmth ?: warmth, learnedWarmth = newWarmth ?: learnedWarmth,
+            saturation = newSaturation ?: saturation, learnedSaturation = newSaturation ?: learnedSaturation,
+            elegance = newElegance ?: elegance, learnedElegance = newElegance ?: learnedElegance,
+            minimalism = newMinimalism ?: minimalism, learnedMinimalism = newMinimalism ?: learnedMinimalism,
+            grain = newGrain ?: grain, learnedGrain = newGrain ?: learnedGrain,
+            focus = newFocus ?: focus, learnedFocus = newFocus ?: learnedFocus,
+            density = newDensity ?: density, learnedDensity = newDensity ?: learnedDensity,
+            rhythm = newRhythm ?: rhythm, learnedRhythm = newRhythm ?: learnedRhythm,
+            mood = newMood ?: mood, learnedMood = newMood ?: learnedMood,
+            harmony = newHarmony ?: harmony, learnedHarmony = newHarmony ?: learnedHarmony,
+            skipSensitivity = newSkip ?: skipSensitivity, learnedSkipSensitivity = newSkip ?: learnedSkipSensitivity,
+            explorationPropensity = newExploration ?: explorationPropensity, learnedExploration = newExploration ?: learnedExploration,
+            retentionFocus = newRetention ?: retentionFocus, learnedRetention = newRetention ?: learnedRetention,
+            favoriteSignificance = newFavSignificance ?: favoriteSignificance, learnedFavSignificance = newFavSignificance ?: learnedFavSignificance
         )
     }
 }

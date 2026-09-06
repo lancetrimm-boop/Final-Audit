@@ -86,22 +86,9 @@ class AuraMomentDispatcher(
                 )
             }
             is IntelligenceEvent.TasteCalibrated -> {
-                if (event.isMajor) {
-                    AuraMoment(
-                        category = MomentCategory.INSIGHT,
-                        priority = MomentPriority.MEDIUM,
-                        title = "Taste Evolving",
-                        message = "Your preference for ${event.dimension} is becoming clearer."
-                    )
-                } else {
-                    // Subtle feedback for routine learning
-                    AuraMoment(
-                        category = MomentCategory.PULSE,
-                        priority = MomentPriority.LOW,
-                        title = "Learning",
-                        message = "Refining ${event.dimension}"
-                    )
-                }
+                // AURA P1 STABILITY: Routine taste calibration popups removed as per requirement.
+                // We no longer emit moments for routine preference shifts to maintain calm UI.
+                null
             }
             is IntelligenceEvent.SystemMilestone -> {
                 val accuracy = event.accuracy

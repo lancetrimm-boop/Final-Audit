@@ -210,9 +210,10 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
         ConversionJobEntity::class,
         SemanticRepresentationEntity::class,
         VideoFrameRepresentationEntity::class,
-        SearchFeedbackEntity::class
+        SearchFeedbackEntity::class,
+        InteractionEventEntity::class
     ],
-    version = 42,
+    version = 43,
     exportSchema = false
 )
 @androidx.room.TypeConverters(IntelligenceConverters::class)
@@ -235,6 +236,7 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun conversionJobDao(): ConversionJobDao
     abstract fun semanticRepresentationDao(): SemanticRepresentationDao
     abstract fun searchFeedbackDao(): SearchFeedbackDao
+    abstract fun interactionDao(): InteractionDao
 
 
     companion object {
@@ -781,6 +783,25 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_42_43 = object : Migration(42, 43) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `interaction_events` (
+                        `id` TEXT NOT NULL, 
+                        `mediaId` TEXT, 
+                        `type` TEXT NOT NULL, 
+                        `value` REAL NOT NULL, 
+                        `timestamp` INTEGER NOT NULL, 
+                        `contextJson` TEXT, 
+                        PRIMARY KEY(`id`)
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_interaction_events_mediaId` ON `interaction_events` (`mediaId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_interaction_events_type` ON `interaction_events` (`type`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_interaction_events_timestamp` ON `interaction_events` (`timestamp`)")
+            }
+        }
+
         fun getInstance(context: Context): AuraDatabase {
             return INSTANCE ?: synchronized(this) {
                 // Return instance if created while waiting for lock
@@ -842,7 +863,8 @@ abstract class AuraDatabase : RoomDatabase() {
                         MIGRATION_38_39,
                         MIGRATION_39_40,
                         MIGRATION_40_41,
-                        MIGRATION_41_42
+                        MIGRATION_41_42,
+                        MIGRATION_42_43
                     )
                     .build()
                     INSTANCE = instance

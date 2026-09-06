@@ -36,7 +36,7 @@ interface MobileCLIPVisualRetriever {
  */
 class DefaultMobileCLIPVisualRetriever(
     private val visualSearchService: SemanticSearchService
-) : MobileCLIPVisualRetriever {
+) : MobileCLIPVisualRetriever, com.example.data.intelligence.VisualRetrievalProvider {
 
     override fun isReady(): Boolean = visualSearchService.isReady()
 

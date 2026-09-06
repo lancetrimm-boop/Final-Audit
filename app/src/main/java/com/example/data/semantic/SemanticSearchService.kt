@@ -92,9 +92,30 @@ interface SemanticSearchService {
 class DefaultSemanticSearchService(
     private val embeddingProvider: EmbeddingProvider,
     private val candidateRetriever: SemanticCandidateRetriever
-) : SemanticSearchService {
+) : SemanticSearchService, com.example.data.intelligence.SemanticRetrievalProvider {
 
     override fun isReady(): Boolean = embeddingProvider.isReady()
+
+    override suspend fun retrieveSemanticCandidates(
+        query: String,
+        topK: Int,
+        minSimilarity: Float
+    ): List<RankedChannelItem> {
+        val result = search(query, topK, minSimilarity, SemanticRepresentationType.CONTENT)
+        if (!result.isSuccess) return emptyList()
+        
+        return result.candidates.mapIndexed { index, candidate ->
+            RankedChannelItem(
+                mediaId = candidate.mediaId,
+                rawScore = candidate.similarityScore,
+                rank = index + 1,
+                metadata = mapOf(
+                    "representationType" to candidate.type.name,
+                    "modelId" to candidate.modelDescriptor.modelId
+                )
+            )
+        }
+    }
 
     override fun getIndexSize(
         targetType: SemanticRepresentationType,

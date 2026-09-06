@@ -11,12 +11,24 @@ class TasteDNATest {
 
     @Test
     fun testTasteDnaEffectiveValues() {
-        val dna = TasteDNA(
+        // Zero confidence -> manual
+        val dnaZeroConf = TasteDNA(
             isFineTuningEnabled = true,
             vibrancy = 0.8,
-            learnedVibrancy = 0.2
+            learnedVibrancy = 0.2,
+            confVibrancy = 0.0
         )
-        assertEquals(0.5, dna.effectiveVibrancy, 0.01)
+        assertEquals(0.8, dnaZeroConf.effectiveVibrancy, 0.01)
+
+        // Full confidence -> manual + (learned - manual) * 0.2
+        // 0.8 + (0.2 - 0.8) * 1.0 * 0.2 = 0.8 - 0.6 * 0.2 = 0.8 - 0.12 = 0.68
+        val dnaFullConf = TasteDNA(
+            isFineTuningEnabled = true,
+            vibrancy = 0.8,
+            learnedVibrancy = 0.2,
+            confVibrancy = 1.0
+        )
+        assertEquals(0.68, dnaFullConf.effectiveVibrancy, 0.01)
     }
 
     @Test

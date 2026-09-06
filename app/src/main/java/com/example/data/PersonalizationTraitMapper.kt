@@ -163,4 +163,51 @@ object PersonalizationTraitMapper {
 
         return adjustments
     }
+
+    /**
+     * Identifies specific keywords and categories that contributed to a dimension's score for an item.
+     * Used for local provenance explanations.
+     */
+    fun getProvenanceExplanations(item: MediaItem, dimension: String): List<String> {
+        val explanations = mutableListOf<String>()
+        
+        // 1. Tag based provenance
+        item.moodTags.forEach { tag ->
+            val cleanTag = tag.lowercase().trim()
+            tagMap[cleanTag]?.forEach { contribution ->
+                if (contribution.dimension == dimension) {
+                    explanations.add("Tag: $tag")
+                }
+            }
+        }
+        
+        // 2. Category based provenance
+        val category = item.category.lowercase().trim()
+        val categoryTags = when (category) {
+            "nature", "outdoors" -> listOf("natural", "harmony")
+            "cinematic", "drama" -> listOf("dramatic", "depth")
+            "vibrant", "color" -> listOf("vivid", "saturation")
+            "minimalist", "clean" -> listOf("minimalist", "framing")
+            "retro", "vintage" -> listOf("retro", "warmth")
+            "action", "energy" -> listOf("motion", "intense")
+            "calm", "relax" -> listOf("calm", "serene")
+            "urban", "city" -> listOf("dense", "complexity")
+            "art", "creative" -> listOf("artistic", "experimental")
+            else -> emptyList()
+        }
+        categoryTags.forEach { hint ->
+            tagMap[hint]?.forEach { contribution ->
+                if (contribution.dimension == dimension) {
+                    explanations.add("Category: $category")
+                }
+            }
+        }
+
+        // 3. Special cases
+        if (dimension == "motion" && (item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("Movie", ignoreCase = true))) {
+            explanations.add("Media Type: Video")
+        }
+        
+        return explanations.distinct()
+    }
 }

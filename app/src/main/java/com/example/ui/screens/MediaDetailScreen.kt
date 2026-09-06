@@ -350,11 +350,14 @@ fun MediaDetailScreen(
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_ENDED) {
-                        com.example.data.AuraTelemetryService.logEvent(
-                            repository,
-                            com.example.data.AuraTelemetryService.EventType.MEDIA_COMPLETED,
-                            activeItem.id
-                        )
+                        repository.interactionRepository?.let { iRepo ->
+                            com.example.data.AuraInteractionService.logInteraction(
+                                repository,
+                                iRepo,
+                                com.example.data.AuraInteractionType.MEDIA_COMPLETED,
+                                mediaId = activeItem.id
+                            )
+                        }
                     }
                 }
 

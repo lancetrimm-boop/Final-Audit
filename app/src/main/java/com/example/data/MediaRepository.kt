@@ -224,6 +224,10 @@ class MediaRepository(
         private set
 
     @Volatile
+    var interactionRepository: InteractionRepository? = null
+        private set
+
+    @Volatile
     var playbackErrorLogRepository: PlaybackErrorLogRepository? = null
         private set
 
@@ -269,6 +273,10 @@ class MediaRepository(
 
     @Volatile
     var visualIndexingService: VisualIndexingService? = null
+        private set
+
+    @Volatile
+    var intelligenceCore: com.example.data.intelligence.AuraIntelligenceCore? = null
         private set
 
     private val _consentState = MutableStateFlow(ConsentState.NOT_DECIDED)
@@ -552,6 +560,8 @@ class MediaRepository(
                     scaled.recycle()
                 }
             }
+
+
         }
     }
 
@@ -820,6 +830,33 @@ class MediaRepository(
         }
 
         if (isSearchBlank) {
+            val core = intelligenceCore
+            if (core != null && category == SortCategory.INTELLIGENT && 
+                (intelligentSort == IntelligentSortOption.PERSONALIZED || intelligentSort == IntelligentSortOption.DISCOVER)) {
+                try {
+                    val coreRequest = com.example.data.intelligence.IntelligenceRequest(
+                        mode = com.example.data.intelligence.IntelligenceMode.SORT,
+                        sortOption = intelligentSort.name,
+                        filterType = filter,
+                        tasteDNA = dna,
+                        profile = profile,
+                        policy = policy,
+                        intent = intent,
+                        stats = stats,
+                        creatorProfiles = creators,
+                        limit = items.size
+                    )
+                    val response = core.processRequest(coreRequest)
+                    if (response.isSuccess) {
+                        android.util.Log.i("AURA_SORT_FLOW", "Core sort [${response.requestId}]: Candidates=${response.candidates.size}")
+                        emit(response.candidates.map { it.item })
+                        return@transformLatest
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("AURA_SORT_FLOW", "Intelligence Core sort exception. Falling back to legacy.", e)
+                }
+            }
+
             val sorted = getFilteredAndSortedMedia(
                 filterType = filter,
                 sortCategory = category,
@@ -837,39 +874,41 @@ class MediaRepository(
             android.util.Log.i("AURA_SORT_FLOW", "Emission: Sorted list of ${sorted.size} items.")
             emit(sorted)
         } else {
-            // Hybrid Search Path (Stage 10.4 Reactive Integration)
-            val hybridEngine = hybridSearchEngine
-            if (hybridEngine != null && hybridEngine.isSemanticReady()) {
+            // Intelligence Core Search Path (Update 6 Consolidation)
+            val core = intelligenceCore
+            if (core != null) {
                 try {
-                    val searchResult = hybridEngine.search(searchRequest, com.example.data.semantic.HybridSearchConfig(topK = 100))
+                    val coreRequest = com.example.data.intelligence.IntelligenceRequest(
+                        mode = com.example.data.intelligence.IntelligenceMode.SEARCH,
+                        query = searchRequest.query,
+                        visualVector = searchRequest.visualVector,
+                        limit = 100,
+                        tasteDNA = dna,
+                        profile = profile,
+                        stats = stats,
+                        creatorProfiles = creators
+                    )
+                    val response = core.processRequest(coreRequest)
                     
-                    if (searchResult.isSuccess) {
-                        val allItemsMap = items.associateBy { it.id }
-                        val results = searchResult.candidates
-                            .mapNotNull { allItemsMap[it.mediaId] }
+                    if (response.isSuccess) {
+                        val results = response.candidates
+                            .map { it.item }
                             .filter { matchesFilterType(it, filter) }
                         
-                        val queryLabel = when (searchRequest) {
-                            is com.example.data.semantic.SearchRequest.Text -> searchRequest.query
-                            is com.example.data.semantic.SearchRequest.Visual -> "[Visual]"
-                            is com.example.data.semantic.SearchRequest.Compound -> "[Visual] + ${searchRequest.query}"
-                            is com.example.data.semantic.SearchRequest.MultiVisual -> "[Multi-Visual]"
-                        }
-                        android.util.Log.i("AURA_SEARCH_FLOW", "Hybrid search [${searchResult.requestId}]: Query=\"$queryLabel\", Candidates=${searchResult.candidates.size}, Displayed=${results.size}")
+                        android.util.Log.i("AURA_SEARCH_FLOW", "Core search [${response.requestId}]: Candidates=${response.candidates.size}, Displayed=${results.size}")
                         emit(results)
                     } else {
                         val fallbackQuery = searchRequest.query ?: ""
                         if (fallbackQuery.isNotBlank()) {
-                            android.util.Log.w("AURA_SEARCH_FLOW", "Hybrid search failed: ${searchResult.errorMessage}. Falling back to legacy.")
+                            android.util.Log.w("AURA_SEARCH_FLOW", "Core search failed: ${response.errorMessage}. Falling back to legacy.")
                             emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
                         } else {
-                            // Plan 1 Step 3/5: Independent visual search must not leak all items on failure
-                            android.util.Log.w("AURA_SEARCH_FLOW", "Visual search failed: ${searchResult.errorMessage}. No fallback available.")
+                            android.util.Log.w("AURA_SEARCH_FLOW", "Core visual search failed. No fallback available.")
                             emit(emptyList())
                         }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("AURA_SEARCH_FLOW", "CRITICAL: Hybrid search engine threw exception. Falling back to legacy.", e)
+                    android.util.Log.e("AURA_SEARCH_FLOW", "CRITICAL: Intelligence Core search exception. Falling back to legacy.", e)
                     val fallbackQuery = searchRequest.query ?: ""
                     if (fallbackQuery.isNotBlank()) {
                         emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
@@ -1043,6 +1082,39 @@ class MediaRepository(
                     }
 
                     intelligenceRepository = IntelligenceRepository(db.intelligenceDao(), this@MediaRepository, moshi, scope, db)
+                    val iRepo = InteractionRepository(db.interactionDao(), moshi, scope)
+                    interactionRepository = iRepo
+
+                    // Phase 3: Preference Engine Activation
+                    launch {
+                        val watermarkFlow = MutableStateFlow(db.userPreferenceDao().getPreference("last_interaction_watermark")?.value?.toLongOrNull() ?: 0L)
+                        
+                        watermarkFlow.flatMapLatest { watermark ->
+                            iRepo.observeEventsAfter(watermark)
+                        }
+                        .debounce(5000) // Batch updates every 5 seconds of quiet
+                        .collect { events ->
+                            if (events.isEmpty()) return@collect
+                            
+                            val currentDna = _tasteDNA.value
+                            if (!currentDna.isFineTuningEnabled) return@collect
+
+                            val updatedDna = com.example.data.intelligence.PreferenceEngine.calculateUpdatedDNA(
+                                currentDna, events, this@MediaRepository
+                            )
+
+                            if (updatedDna != currentDna) {
+                                updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "AI Learned Aggregation")
+                                
+                                val newWatermark = events.maxOf { it.timestamp }
+                                watermarkFlow.value = newWatermark + 1 // Start next batch from after this one
+                                db.userPreferenceDao().insertPreference(
+                                    com.example.data.db.UserPreferenceEntity("last_interaction_watermark", newWatermark.toString())
+                                )
+                            }
+                        }
+                    }
+
                     val errorRepo = PlaybackErrorLogRepository(db.playbackErrorLogDao(), scope)
                     playbackErrorLogRepository = errorRepo
                     flushPendingErrorLogs(errorRepo)
@@ -1109,11 +1181,17 @@ class MediaRepository(
                         override fun score(mediaId: String): Float = scoreMediaItemForPersonalization(mediaId)
                     }
 
-                    hybridSearchEngine = DefaultHybridSearchEngine(
-                        semanticService = semanticSearchService!!,
-                        lexicalRetriever = lexicalRetriever,
-                        personalizationScorer = personalizationScorer
+                    // Initial Intelligence Core (Lexical + Semantic Content)
+                    val initialCore = com.example.data.intelligence.AuraIntelligenceCore(
+                        repository = this@MediaRepository,
+                        retrievalRouter = com.example.data.intelligence.RetrievalRouter(
+                            lexicalRetriever = lexicalRetriever,
+                            semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
+                            visualProvider = null
+                        )
                     )
+                    intelligenceCore = initialCore
+                    hybridSearchEngine = DefaultHybridSearchEngine(initialCore)
 
                     // PHASE 7: MobileCLIP Activation (Hardened and Decoupled)
                     var mClipTextProvider: MobileCLIPTextEmbeddingProvider? = null
@@ -1175,15 +1253,28 @@ class MediaRepository(
                         semanticCandidateRetriever
                     )
                     
+                    // Phase 4: Intelligence Core Activation
+                    val core = com.example.data.intelligence.AuraIntelligenceCore(
+                        repository = this@MediaRepository,
+                        retrievalRouter = com.example.data.intelligence.RetrievalRouter(
+                            lexicalRetriever = lexicalRetriever,
+                            semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
+                            visualProvider = mClipVisualRetriever as? com.example.data.intelligence.VisualRetrievalProvider
+                        )
+                    )
+                    intelligenceCore = core
+
                     // Update hybrid engine with visual channel and Stage 8 video intelligence
-                    hybridSearchEngine = DefaultHybridSearchEngine(
-                        semanticService = semanticSearchService!!,
-                        lexicalRetriever = lexicalRetriever,
-                        repository = semanticRepresentationRepository,
-                        visualTextProvider = mClipTextProvider,
-                        visualImageProvider = mobileCLIPProvider,
-                        visualRetriever = mClipVisualRetriever,
-                        personalizationScorer = personalizationScorer
+                    hybridSearchEngine = DefaultHybridSearchEngine(core)
+
+                    // Phase 4: Intelligence Core Activation
+                    intelligenceCore = com.example.data.intelligence.AuraIntelligenceCore(
+                        repository = this@MediaRepository,
+                        retrievalRouter = com.example.data.intelligence.RetrievalRouter(
+                            lexicalRetriever = lexicalRetriever,
+                            semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
+                            visualProvider = mClipVisualRetriever as? com.example.data.intelligence.VisualRetrievalProvider
+                        )
                     )
 
                     // AURA STABILITY: Ensure all mandatory repositories are initialized before marking READY
@@ -1452,6 +1543,8 @@ class MediaRepository(
                     _databaseErrorMessage.value = "Initialization failed to complete normally."
                 }
             }
+
+
         }
     }
 
@@ -1495,24 +1588,15 @@ class MediaRepository(
                     dao.update(entity.copy(playCount = entity.playCount + 1, lastViewedTimestamp = timestamp))
                 }
             }
-        }
 
-        // 2. Automatic Taste DNA Learning from meaningful engagement
-        val dna = _tasteDNA.value
-        if (dna.isFineTuningEnabled) {
-            val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
-            var updatedDna = dna
-            
-            // Engagement is a positive signal but should be very gradual (0.005)
-            val engagementIncrement = 0.005
-            
-            adjustments.forEach { (dim, multiplier) ->
-                val amount = multiplier * engagementIncrement
-                updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
-            }
-            
-            if (updatedDna != dna) {
-                updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Media Engagement (View)")
+            // Standardized Interaction Recording
+            interactionRepository?.let { iRepo ->
+                AuraInteractionService.logInteraction(
+                    mediaRepository = this@MediaRepository,
+                    interactionRepository = iRepo,
+                    type = AuraInteractionType.MEDIA_ENGAGEMENT,
+                    mediaId = item.id
+                )
             }
         }
 
@@ -1559,29 +1643,9 @@ class MediaRepository(
                     dao.update(entity.copy(progress = 1.0f))
                 }
             }
-        }
 
-        // 2. Automatic Taste DNA Learning from Completion (Strong Positive Signal)
-        val dna = _tasteDNA.value
-        if (dna.isFineTuningEnabled) {
-            val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
-            var updatedDna = dna
-            
-            // Completion is a strong positive signal (0.01)
-            val completionIncrement = 0.01
-            
-            adjustments.forEach { (dim, multiplier) ->
-                val amount = multiplier * completionIncrement
-                updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
-            }
-            
-            if (updatedDna != dna) {
-                updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Media Completion")
-            }
+
         }
-        
-        // 3. Update Preference Profile Learning
-        learnPreferenceSignals(item, isCompletion = true, isSuccess = true)
     }
 
     private fun learnPreferenceSignals(
@@ -1864,6 +1928,10 @@ class MediaRepository(
 
     private val pairwiseWins = mutableMapOf<String, Int>()
     private val pairwiseLosses = mutableMapOf<String, Int>()
+    
+    fun getPairwiseWins(): Map<String, Int> = pairwiseWins.toMap()
+    fun getPairwiseLosses(): Map<String, Int> = pairwiseLosses.toMap()
+    
     private val comparisonCounts = mutableMapOf<String, Int>()
     private val recentPairs = mutableListOf<Pair<String, String>>()
     private val recentItemIds = mutableListOf<String>()
@@ -2988,6 +3056,15 @@ class MediaRepository(
                     )
                 }
             }
+
+            // Standardized Interaction Recording
+            interactionRepository?.let { iRepo ->
+                iRepo.recordSignal(
+                    mediaId = id,
+                    type = AuraInteractionType.MEDIA_EXPOSURE.name,
+                    value = 1.0
+                )
+            }
         }
     }
 
@@ -3050,6 +3127,15 @@ class MediaRepository(
                         )
                     )
                 }
+
+                // Standardized Interaction Recording
+                interactionRepository?.let { iRepo ->
+                    iRepo.recordSignal(
+                        mediaId = id,
+                        type = AuraInteractionType.MEDIA_EXPOSURE.name,
+                        value = 1.0
+                    )
+                }
             }
             if (entitiesToUpdate.isNotEmpty()) {
                 Log.d("AuraPerformance", "Flushing ${entitiesToUpdate.size} exposures to database.")
@@ -3091,34 +3177,21 @@ class MediaRepository(
                 }
             }
 
-            // Automatic Taste DNA Learning from explicit rating
+            // Standardized Interaction Recording
             val item = updatedItem
-            val dna = _tasteDNA.value
-            if (item != null && dna.isFineTuningEnabled && rating > 0) {
-                val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
-                var updatedDna = dna
-                
-                // Calibration direction based on star rating
-                // 4-5 stars: Positive reinforcement (1.0x)
-                // 3 stars: Neutral (0.0x)
-                // 1-2 stars: Negative reinforcement (-1.0x)
-                val sentimentDirection = when {
-                    rating >= 4f -> 1.0
-                    rating == 3f -> 0.0
-                    else -> -1.0
-                }
-
-                if (sentimentDirection != 0.0) {
-                    adjustments.forEach { (dim, multiplier) ->
-                        val amount = multiplier * MAX_ADJUSTMENT_PER_VOTE * sentimentDirection
-                        updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
-                    }
-                    
-                    if (updatedDna != dna) {
-                        updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Explicit Rating ($rating stars)")
-                    }
+            if (item != null) {
+                interactionRepository?.let { iRepo ->
+                    AuraInteractionService.logInteraction(
+                        mediaRepository = this@MediaRepository,
+                        interactionRepository = iRepo,
+                        type = AuraInteractionType.RATING,
+                        mediaId = item.id,
+                        value = rating.toDouble()
+                    )
                 }
             }
+
+
         }
     }
 
@@ -3166,6 +3239,8 @@ class MediaRepository(
                     updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Cleanup Decision ($category)")
                 }
             }
+
+
         }
     }
 
@@ -3248,21 +3323,14 @@ class MediaRepository(
                 }
             }
 
-            // Automatic Taste DNA Learning from Favorite addition (Priority 1 Invariant)
-            val dna = _tasteDNA.value
-            if (dna.isFineTuningEnabled) {
-                val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(updated)
-                var updatedDna = dna
-                val direction = 1.0
-
-                adjustments.forEach { (dim, multiplier) ->
-                    val amount = multiplier * MAX_ADJUSTMENT_PER_VOTE * direction
-                    updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
-                }
-
-                if (updatedDna != dna) {
-                    updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Favorite Added")
-                }
+            // Standardized Interaction Recording
+            interactionRepository?.let { iRepo ->
+                AuraInteractionService.logInteraction(
+                    mediaRepository = this@MediaRepository,
+                    interactionRepository = iRepo,
+                    type = AuraInteractionType.FAVORITE,
+                    mediaId = updated.id
+                )
             }
         }
     }
@@ -3293,6 +3361,16 @@ class MediaRepository(
                         repo.enqueueRecommendationFeedback(payload)
                     }
                 }
+            }
+            
+            // Standardized Interaction Recording
+            interactionRepository?.let { iRepo ->
+                AuraInteractionService.logInteraction(
+                    mediaRepository = this@MediaRepository,
+                    interactionRepository = iRepo,
+                    type = AuraInteractionType.UNFAVORITE,
+                    mediaId = updated.id
+                )
             }
             // Invariant: NEVER delete or decrement micro_moments. Zero negative Taste DNA learning.
         }
@@ -3338,21 +3416,14 @@ class MediaRepository(
                 )
             }
 
-            // Automatic Taste DNA Learning from Favorite toggle
-            val dna = _tasteDNA.value
-            if (updated.isFavorite && dna.isFineTuningEnabled) {
-                val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(updated)
-                var updatedDna = dna
-                val direction = 1.0
-
-                adjustments.forEach { (dim, multiplier) ->
-                    val amount = multiplier * MAX_ADJUSTMENT_PER_VOTE * direction
-                    updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
-                }
-
-                if (updatedDna != dna) {
-                    updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Favorite Added")
-                }
+            // Standardized Interaction Recording
+            interactionRepository?.let { iRepo ->
+                AuraInteractionService.logInteraction(
+                    mediaRepository = this@MediaRepository,
+                    interactionRepository = iRepo,
+                    type = if (updated.isFavorite) AuraInteractionType.FAVORITE else AuraInteractionType.UNFAVORITE,
+                    mediaId = updated.id
+                )
             }
         }
     }
@@ -3478,7 +3549,22 @@ class MediaRepository(
         }
     }
 
-    suspend fun getSimilarMedia(item: MediaItem, requestId: String = "NONE"): List<MediaItem> {
+    suspend fun getSimilarMedia(item: MediaItem, requestId: String = "NONE", useCore: Boolean = true): List<MediaItem> {
+        val core = intelligenceCore
+        if (useCore && core != null) {
+            val request = com.example.data.intelligence.IntelligenceRequest(
+                mode = com.example.data.intelligence.IntelligenceMode.SIMILAR,
+                referenceItemId = item.id,
+                limit = 50,
+                requestId = if (requestId == "NONE") java.util.UUID.randomUUID().toString().take(8) else requestId
+            )
+            val response = core.processRequest(request)
+            if (response.isSuccess) {
+                return response.candidates.map { it.item }
+            }
+        }
+
+        // Legacy Fallback
         Log.d("SeeSimilarTrace", "STAGE=START requestId=$requestId sourceId=${item.id} title=\"${item.title}\"")
         val allItems = _mediaItems.value
         val all = allItems.filter { other ->
@@ -3666,6 +3752,22 @@ class MediaRepository(
                 )
                 db.pairwiseDao().insertOutcome(outcome)
 
+                // Standardized Interaction Recording
+                interactionRepository?.let { iRepo ->
+                    AuraInteractionService.logInteraction(
+                        mediaRepository = this@MediaRepository,
+                        interactionRepository = iRepo,
+                        type = AuraInteractionType.PAIRWISE_WIN,
+                        mediaId = chosenId
+                    )
+                    AuraInteractionService.logInteraction(
+                        mediaRepository = this@MediaRepository,
+                        interactionRepository = iRepo,
+                        type = AuraInteractionType.PAIRWISE_LOSS,
+                        mediaId = loserId
+                    )
+                }
+
                 // Phase 3B.2: Enqueue sanitized contribution if consent is granted
                 contributionQueueRepository?.let { repo ->
                     if (repo.isConsentGranted()) {
@@ -3786,6 +3888,22 @@ class MediaRepository(
                     )
                     db.pairwiseDao().insertOutcome(outcome)
 
+                    // Standardized Interaction Recording
+                    interactionRepository?.let { iRepo ->
+                        AuraInteractionService.logInteraction(
+                            mediaRepository = this@MediaRepository,
+                            interactionRepository = iRepo,
+                            type = AuraInteractionType.MEDIA_ABANDONED,
+                            mediaId = itemA.id
+                        )
+                        AuraInteractionService.logInteraction(
+                            mediaRepository = this@MediaRepository,
+                            interactionRepository = iRepo,
+                            type = AuraInteractionType.MEDIA_ABANDONED,
+                            mediaId = itemB.id
+                        )
+                    }
+
                     // Phase 3B.2: Enqueue sanitized contribution if consent is granted
                     contributionQueueRepository?.let { repo ->
                         if (repo.isConsentGranted()) {
@@ -3873,43 +3991,20 @@ class MediaRepository(
                 }
             }
 
-            // Automatic Skip Sensitivity Learning (Individual Level Only)
-            val dna = _tasteDNA.value
-            if (dna.isFineTuningEnabled) {
-                var amount = 0.0
-                when (eventType) {
-                    "SKIP_REVERSAL" -> amount = -MAX_ADJUSTMENT_PER_SKIP
-                    "REPEATED_SKIP" -> amount = MAX_ADJUSTMENT_PER_SKIP
-                    "WATCHED_DESTINATION" -> amount = MAX_ADJUSTMENT_PER_SKIP / 2
-                }
-                
-                var updatedDna = dna
-                if (amount != 0.0) {
-                    updatedDna = updatedDna.updateLearnedDimension("skipSensitivity", amount, TOTAL_ADJUSTMENT_LIMIT)
-                }
-
-                // ALSO: Use traits of the skipped media as a negative signal (for SKIP_FORWARD/REPEATED_SKIP)
-                if (eventType == "SKIP_FORWARD" || eventType == "REPEATED_SKIP") {
-                    val item = getMediaItemById(mediaId)
-                    if (item != null) {
-                        val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
-                        adjustments.forEach { (dim, multiplier) ->
-                            // Skips are negative signals
-                            val traitAmount = multiplier * MAX_ADJUSTMENT_PER_SKIP * -1.0
-                            updatedDna = updatedDna.updateLearnedDimension(dim, traitAmount, TOTAL_ADJUSTMENT_LIMIT)
-                        }
-                        
-                        // Update Preference Profile Learning - Negative engagement signal
-                        learnPreferenceSignals(item, isSuccess = false)
-                    }
-                }
-                
-                if (updatedDna != dna) {
-                    updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "AI Skip Behavior ($eventType)")
-                    
-                    // Emit Emotional Intelligence Signal
-                    momentDispatcher.onEvent(AuraMomentDispatcher.IntelligenceEvent.TasteCalibrated("Sensitivity", amount))
-                }
+            // Standardized Interaction Recording
+            interactionRepository?.let { iRepo ->
+                AuraInteractionService.logInteraction(
+                    mediaRepository = this@MediaRepository,
+                    interactionRepository = iRepo,
+                    type = when (eventType) {
+                        "SKIP_FORWARD", "REPEATED_SKIP" -> AuraInteractionType.MEDIA_ABANDONED
+                        "WATCHED_DESTINATION" -> AuraInteractionType.MEDIA_ENGAGEMENT
+                        "SKIP_REVERSAL" -> AuraInteractionType.MEDIA_REPLAY
+                        else -> AuraInteractionType.MEDIA_ABANDONED
+                    },
+                    mediaId = mediaId,
+                    metadata = mapOf("fromPos" to fromPosMs.toString(), "toPos" to toPosMs.toString())
+                )
             }
 
             _intelligenceStats.update {
@@ -4157,6 +4252,8 @@ stats ->
                     }.map { it.copy(selectionReason = "Surprise!") }
                 }
             }
+
+
         }
     }
 

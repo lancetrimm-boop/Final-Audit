@@ -200,7 +200,14 @@ class DiscoverViewModel(
 
     fun selectObsession(obsession: ObsessionRecommendation) {
         viewModelScope.launch {
-            com.example.data.AuraTelemetryService.logEvent(repository, com.example.data.AuraTelemetryService.EventType.OBSESSION_OPENED, metadata = mapOf("obsessionId" to obsession.id))
+            repository.interactionRepository?.let { iRepo ->
+                com.example.data.AuraInteractionService.logInteraction(
+                    repository,
+                    iRepo,
+                    com.example.data.AuraInteractionType.OBSESSION_OPENED,
+                    metadata = mapOf("obsessionId" to obsession.id)
+                )
+            }
             _detailState.value = ObsessionDetailState.Active(
                 obsession,
                 ObsessionContentBatch(obsession.id, emptyList(), false),
@@ -226,7 +233,13 @@ class DiscoverViewModel(
     }
 
     fun deselectObsession() {
-        com.example.data.AuraTelemetryService.logEvent(repository, com.example.data.AuraTelemetryService.EventType.OBSESSION_ABANDONED)
+        repository.interactionRepository?.let { iRepo ->
+            com.example.data.AuraInteractionService.logInteraction(
+                repository,
+                iRepo,
+                com.example.data.AuraInteractionType.OBSESSION_ABANDONED
+            )
+        }
         _detailState.value = ObsessionDetailState.Idle
     }
 
@@ -235,7 +248,14 @@ class DiscoverViewModel(
         if (!currentState.batch.canExpand || currentState.isLoading) return
 
         viewModelScope.launch {
-            com.example.data.AuraTelemetryService.logEvent(repository, com.example.data.AuraTelemetryService.EventType.BATCH_EXPANDED, metadata = mapOf("obsessionId" to currentState.obsession.id))
+            repository.interactionRepository?.let { iRepo ->
+                com.example.data.AuraInteractionService.logInteraction(
+                    repository,
+                    iRepo,
+                    com.example.data.AuraInteractionType.BATCH_EXPANDED,
+                    metadata = mapOf("obsessionId" to currentState.obsession.id)
+                )
+            }
             _detailState.value = currentState.copy(isLoading = true)
 
             val items = repository.mediaItems.first()
@@ -258,7 +278,13 @@ class DiscoverViewModel(
     }
 
     fun trySomethingNew() {
-        com.example.data.AuraTelemetryService.logEvent(repository, com.example.data.AuraTelemetryService.EventType.TRY_SOMETHING_NEW)
+        repository.interactionRepository?.let { iRepo ->
+            com.example.data.AuraInteractionService.logInteraction(
+                repository,
+                iRepo,
+                com.example.data.AuraInteractionType.TRY_SOMETHING_NEW
+            )
+        }
         val currentFeed = _feedState.value as? DiscoverFeedState.Success ?: return
         val currentObsession = (_detailState.value as? ObsessionDetailState.Active)?.obsession
         
