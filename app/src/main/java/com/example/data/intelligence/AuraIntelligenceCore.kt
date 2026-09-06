@@ -40,6 +40,7 @@ class AuraIntelligenceCore(
             requestId = request.requestId,
             mode = request.mode,
             candidates = sealedResults,
+            visibilitySealed = true, // Mark as sealed
             latencyMs = latency
         )
 
@@ -269,6 +270,32 @@ class AuraIntelligenceCore(
                     )
                 }
             }
+            "RANKING_REFINEMENT" -> {
+                items.map { item ->
+                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
+                    val score = (evidence.uncertaintyScore * 10.0) + (evidence.explorationScore * 5.0)
+                    IntelligenceCandidate(
+                        item = item,
+                        evidence = listOf(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.uncertaintyScore, 0.8f, EvidenceStatus.INFERRED, "RankingRefinement")),
+                        rankScore = score,
+                        primaryRelevanceScore = evidence.explorationScore,
+                        secondaryEvidenceScore = evidence.uncertaintyScore
+                    )
+                }
+            }
+            "SURPRISE_ME" -> {
+                val random = kotlin.random.Random(request.seed)
+                items.shuffled(random).map { item ->
+                    IntelligenceCandidate(
+                        item = item,
+                        evidence = emptyList(),
+                        rankScore = random.nextDouble(),
+                        primaryRelevanceScore = 0f,
+                        secondaryEvidenceScore = 0f,
+                        provenance = "Surprise Me"
+                    )
+                }
+            }
             else -> items.map { 
                 IntelligenceCandidate(it, emptyList(), 0.0, 0f, 0f) 
             }
@@ -324,12 +351,25 @@ class AuraIntelligenceCore(
         val stats = request.stats ?: repository.intelligenceStats.value
         val dna = request.tasteDNA ?: repository.tasteDNA.value
         val profile = request.profile ?: repository.preferenceProfile.value
-        val systemState = ConfidenceEngine.calculateDiscoveryState(allItems, stats)
+        val now = System.currentTimeMillis()
+        val creators = request.creatorProfiles ?: repository.creatorProfiles.value
 
-        // Map contextual intent to RecommendationObjective (Aura Phase 9 Alignment)
-        val objective = when (request.contextualIntent) {
-            ContextualIntent.DISCOVER_CATEGORY -> RecommendationObjective.GENERAL_DISCOVERY
-            ContextualIntent.MOMENTS_FLOW -> RecommendationObjective.GENERAL_DISCOVERY
+        // Category-specific pre-filtering (if applicable)
+        val filteredItems = when (request.sortOption) {
+            "FROM_YOUR_FAVORITES" -> itemsOnly.filter { it.isFavorite || it.rating >= 4.0f }
+            "DEEP_DISCOVERY" -> itemsOnly.filter { it.exposureCount < 2 && it.viewCount == 0 }
+            "FRESH_FOR_YOU" -> {
+                val recentThreshold = 7 * 24 * 60 * 60 * 1000L // 1 week
+                itemsOnly.filter { now - it.dateAdded < recentThreshold }
+            }
+            else -> itemsOnly
+        }
+
+        val objective = when (request.sortOption) {
+            "A_LITTLE_DIFFERENT" -> RecommendationObjective.WILDCARD_DISCOVERY
+            "UNDER_THE_RADAR" -> RecommendationObjective.DEEP_DISCOVERY
+            "FRESH_FOR_YOU" -> RecommendationObjective.NOVELTY_INJECTION
+            "FROM_YOUR_FAVORITES" -> RecommendationObjective.CHILL_EXPLOITATION
             else -> RecommendationObjective.GENERAL_DISCOVERY
         }
 
@@ -337,27 +377,29 @@ class AuraIntelligenceCore(
             policy = request.policy ?: DiscoveryPolicy(),
             intent = request.intent ?: UserIntent(),
             objective = objective,
-            systemState = systemState,
+            systemState = ConfidenceEngine.calculateDiscoveryState(allItems, stats),
             tasteDNA = dna,
             profile = profile
         )
 
-        return itemsOnly.map { item ->
-            val evidence = ExplorationEngine.calculateEvidence(item, dna, stats, request.creatorProfiles ?: repository.creatorProfiles.value)
+        return filteredItems.map { item ->
+            val evidence = ExplorationEngine.calculateEvidence(item, dna, stats, creators, now)
             val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
             
             val evidenceItems = mutableListOf<EvidenceItem>()
             evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine"))
             
-            // Update 9: Relationship Evidence
             val relBonus = scoreRelationships(item, request.relatedMediaIds, evidenceItems)
+            
+            val matchPercent = (score * 100).toInt().coerceIn(10, 99)
 
             IntelligenceCandidate(
-                item = item,
+                item = item.copy(selectionReason = "$matchPercent% Match"),
                 evidence = evidenceItems,
                 rankScore = score.toDouble() + relBonus,
                 primaryRelevanceScore = score,
-                secondaryEvidenceScore = 0f
+                secondaryEvidenceScore = 0f,
+                provenance = "Discover:${request.sortOption ?: "General"}"
             )
         }.sortedByDescending { it.rankScore }.take(request.limit)
     }
@@ -464,20 +506,19 @@ class AuraIntelligenceCore(
     ): Double {
         if (relatedIds.isEmpty()) return 0.0
         
-        // 1. Semantic Relationship (Shared Style Anchors)
-        val styleProfile = repository.signatureStyleProfile.value
         var relationshipBonus = 0.0
+        val styleProfile = repository.signatureStyleProfile.value
         
         relatedIds.forEach { relatedId ->
             val relatedItem = repository.getMediaItemById(relatedId) ?: return@forEach
             
-            // If both items align with the same strong style anchor
+            // 1. Semantic Relationship (Shared Style Anchors)
             styleProfile.activeStyles.forEach { style ->
                 val itemAffinity = SignatureStyleProvider.calculateMediaAffinity(item, style.anchor)
                 val relatedAffinity = SignatureStyleProvider.calculateMediaAffinity(relatedItem, style.anchor)
                 
                 if (itemAffinity > 0.8 && relatedAffinity > 0.8) {
-                    relationshipBonus += 0.05 // Bounded boost per shared style
+                    relationshipBonus += 0.05
                     evidence.add(EvidenceItem(
                         type = EvidenceType.RELATIONSHIP_MATCH,
                         score = 0.05f,
@@ -487,9 +528,26 @@ class AuraIntelligenceCore(
                     ))
                 }
             }
+
+            // 2. Interaction Relationship (Pairwise Continuity)
+            // If the user previously preferred THIS item over the related item, it's a strong signal for this context.
+            // Placeholder for real pairwise outcome lookup by pair.
+            // For now, use relative Elo/Wins if specific outcome is not indexed.
+            
+            // 3. Temporal/Metadata Relationship
+            if (item.genre == relatedItem.genre && item.genre != "Media") {
+                relationshipBonus += 0.02
+                evidence.add(EvidenceItem(
+                    type = EvidenceType.RELATIONSHIP_MATCH,
+                    score = 0.02f,
+                    confidence = 1.0f,
+                    status = EvidenceStatus.KNOWN,
+                    provenance = "Shared Genre: ${item.genre}"
+                ))
+            }
         }
         
-        return relationshipBonus.coerceAtMost(0.2) // Absolute ceiling for relationship boost
+        return relationshipBonus.coerceAtMost(0.3) // Absolute ceiling for relationship boost
     }
 
     private fun buildProvenance(evidence: List<EvidenceItem>, finalScore: Double): String {

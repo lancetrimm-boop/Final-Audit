@@ -39,13 +39,7 @@ class DiscoverSessionManager {
 
         // Attach explanations and pre-mark previews as seen
         val explainedObsessions = obsessions.map { obsession ->
-            val mainItem = obsession.previewItems.firstOrNull()
-            val strategy = resolveStrategy(obsession.strategy, repository.discoveryPolicy.value, systemState, tasteDNA, profile)
-            val explanation = if (mainItem != null) {
-                RecommendationExplanationGenerator.generate(mainItem, tasteDNA, stats, creatorProfiles, strategy)
-            } else null
-            
-            obsession.copy(explanation = explanation)
+            obsession
         }
 
         explainedObsessions.forEach { obsession ->
@@ -75,23 +69,12 @@ class DiscoverSessionManager {
         existingItems: List<MediaItem> = emptyList()
     ): ObsessionContentBatch = withContext(Dispatchers.Default) {
         val core = repository.intelligenceCore
-        val systemState = ConfidenceEngine.calculateDiscoveryState(allMedia, stats)
-        val resolvedStrategy = resolveStrategy(obsession.strategy, policy, systemState, tasteDNA, profile)
-
+        
         // Ensure preview items from the feed are included at the start of the first batch
         val isFirstBatch = existingItems.isEmpty()
-        val baseItems = if (isFirstBatch) {
-            obsession.previewItems.map { item ->
-                val reason = item.selectionReason
-                if (reason == null || !reason.contains("% Match")) {
-                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creatorProfiles)
-                    val matchPercent = (evidence.exploitationScore * 100).toInt().coerceIn(10, 99)
-                    item.copy(selectionReason = "$matchPercent% Match")
-                } else item
-            }
-        } else existingItems
+        val baseItems = if (isFirstBatch) obsession.previewItems else existingItems
 
-        val items = if (core != null) {
+        val candidateBatch = if (core != null) {
             val request = com.example.data.intelligence.IntelligenceRequest(
                 mode = com.example.data.intelligence.IntelligenceMode.DISCOVER,
                 contextualIntent = com.example.data.intelligence.ContextualIntent.DISCOVER_CATEGORY,
@@ -99,33 +82,29 @@ class DiscoverSessionManager {
                 tasteDNA = tasteDNA,
                 profile = profile,
                 stats = stats,
-                creatorProfiles = creatorProfiles
+                creatorProfiles = creatorProfiles,
+                sortOption = obsession.strategy.javaClass.simpleName.uppercase() // Map strategy to sortOption
             )
             val response = core.processRequest(request)
             response.candidates
                 .filter { it.item.id !in sessionSeenIds && !isContentSeen(it.item) && it.item.id !in baseItems.map { b -> b.id } }
                 .take(12)
-                .map { it.item.copy(selectionReason = "${(it.primaryRelevanceScore * 100).toInt().coerceIn(10, 99)}% Match") }
         } else {
             // Minimal Fallback
             emptyList()
         }
 
+        val items = candidateBatch.map { it.item }
         items.forEach { markUsed(it) }
 
         val combinedItems = baseItems + items
         
-        // Generate explanations for the new items in the batch using the resolved strategy
+        // Generate explanations for the new items in the batch
         val batchExplanations = mutableMapOf<String, RecommendationExplanation>()
         
-        // If first batch, add the hero explanation if available
-        if (isFirstBatch && obsession.explanation != null && obsession.previewItems.isNotEmpty()) {
-            batchExplanations[obsession.previewItems.first().id] = obsession.explanation
-        }
-
-        items.forEach { item ->
-            val exp = RecommendationExplanationGenerator.generate(item, tasteDNA, stats, creatorProfiles, resolvedStrategy)
-            if (exp != null) batchExplanations[item.id] = exp
+        candidateBatch.forEach { candidate ->
+            val exp = RecommendationExplanationGenerator.generate(candidate, tasteDNA)
+            if (exp != null) batchExplanations[candidate.item.id] = exp
         }
 
         ObsessionContentBatch(

@@ -315,17 +315,23 @@ class MediaRepository(
 
     fun setCompareMediaType(filter: CompareMediaTypeFilter) {
         _compareMediaType.value = filter
-        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        scope.launch {
+            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        }
     }
 
     fun setCompareStrategy(strategy: CompareStrategy) {
         _compareStrategy.value = strategy
-        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        scope.launch {
+            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        }
     }
 
     fun setCompareSort(sort: CompareSortOption) {
         _compareSort.value = sort
-        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        scope.launch {
+            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        }
     }
 
     fun startCompareSelectionSession(selectedIds: Set<String>) {
@@ -340,7 +346,9 @@ class MediaRepository(
             roundNumber = 1,
             comparedPairIds = emptyList()
         )
-        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        scope.launch {
+            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        }
     }
 
     fun restartCompareSelectionSession() {
@@ -353,12 +361,16 @@ class MediaRepository(
                 comparedPairIds = emptyList()
             )
         }
-        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        scope.launch {
+            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        }
     }
 
     fun exitCompareSelectionSession() {
         _compareSelectionSession.value = CompareSelectionSession()
-        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        scope.launch {
+            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        }
     }
 
     fun recordCompareSelectionVote(chosenId: String) = recordComparisonVote(chosenId)
@@ -1212,7 +1224,11 @@ class MediaRepository(
                             // Update pairwise options if available
                             val available = items.filter { it.itemCount == null }
                             if (available.size >= 2) {
-                                refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+                                scope.launch {
+                                    scope.launch {
+                refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+            }
+                                }
                             }
                         }
                     }
@@ -1608,6 +1624,9 @@ class MediaRepository(
             val json = tasteDnaAdapter.toJson(dna)
             database?.userPreferenceDao()?.insertPreference(UserPreferenceEntity("taste_dna", json))
             
+            // Invalidate intelligence cache as personalization context has changed
+            com.example.data.intelligence.IntelligenceCache.invalidateAll()
+            
             // Record Audit Trail
             recordTuningAudits(previousDna, dna, isUserGenerated, evidenceCategory)
 
@@ -1621,7 +1640,9 @@ class MediaRepository(
             }
 
             // Re-trigger candidate pool refresh to apply new weights immediately
-            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+            scope.launch {
+                refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+            }
 
             // Emit Emotional Intelligence Signal (only for AI-learned calibrations)
             if (!isUserGenerated && evidenceCategory != "Manual Adjustment") {
@@ -1703,7 +1724,9 @@ class MediaRepository(
             database?.userPreferenceDao()?.insertPreference(UserPreferenceEntity("preference_profile", json))
             
             // Re-trigger candidate pool refresh to apply new weights immediately
-            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+            scope.launch {
+                refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+            }
         }
     }
 
@@ -1812,7 +1835,7 @@ class MediaRepository(
     private val _pairwiseDiagnostics = MutableStateFlow(PairwiseDiagnostics())
     val pairwiseDiagnostics: StateFlow<PairwiseDiagnostics> = _pairwiseDiagnostics.asStateFlow()
 
-    fun refreshPairwiseCandidatePoolAndSelectNext(
+    suspend fun refreshPairwiseCandidatePoolAndSelectNext(
         forceNextPair: Boolean = true
     ) {
         val session = _compareSelectionSession.value
@@ -1890,7 +1913,7 @@ class MediaRepository(
         }
 
         val top100Pool = RecommendationEngine.getTop100PairwiseCandidates(
-            allMedia = items,
+            repository = this,
             winsMap = pairwiseWins,
             lossesMap = pairwiseLosses,
             mediaTypeFilter = activeFilter,
@@ -2221,6 +2244,8 @@ class MediaRepository(
 
             if (newEntities.isNotEmpty()) {
                 db.mediaDao().insertAll(newEntities)
+                // Invalidate intelligence cache on library structure change
+                com.example.data.intelligence.IntelligenceCache.invalidateAll()
             }
 
             _importProgress.value = ImportProgressState(
@@ -2320,6 +2345,10 @@ class MediaRepository(
                 if (discoveredEntities.isNotEmpty()) {
                     database?.mediaDao()?.insertAll(discoveredEntities)
                     Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Database insertAll complete.")
+                    
+                    // Invalidate intelligence cache on library structure change
+                    com.example.data.intelligence.IntelligenceCache.invalidateAll()
+                    
                     changed = true
                 }
 
@@ -3249,6 +3278,9 @@ class MediaRepository(
         scope.launch {
             database?.mediaDao()?.update(updated.toEntity())
             
+            // Invalidate intelligence cache on high-weight interaction
+            com.example.data.intelligence.IntelligenceCache.invalidateAll()
+            
             // Phase 3A: Enqueue sanitized telemetry if consent is granted
             contributionQueueRepository?.let { repo ->
                 if (repo.isConsentGranted()) {
@@ -3317,12 +3349,17 @@ class MediaRepository(
                     session.copy(selectedIds = session.selectedIds - id)
                 } else session
             }
-            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+            scope.launch {
+                refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+            }
         }
 
         scope.launch {
             database?.mediaDao()?.deleteById(id)
             deleteSemanticDataForMedia(id)
+            
+            // Invalidate intelligence cache on library structure change
+            com.example.data.intelligence.IntelligenceCache.invalidateAll()
         }
         
         // AURA P1 STABILITY: Identity-Aware Playlist Deletion
@@ -3388,13 +3425,20 @@ class MediaRepository(
             recordComparisonVote(survivorId)
         } else {
             // If not in a comparison, just ensure we refresh the pairwise state if needed
-            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+            scope.launch {
+                scope.launch {
+                refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
+            }
+            }
         }
 
         // 3. Persistent delete from database
         scope.launch {
             database?.mediaDao()?.deleteById(id)
             deleteSemanticDataForMedia(id)
+            
+            // Invalidate intelligence cache on library structure change
+            com.example.data.intelligence.IntelligenceCache.invalidateAll()
         }
 
         // 4. Clean up active playlist
@@ -3414,121 +3458,23 @@ class MediaRepository(
     }
 
     suspend fun getSimilarMedia(item: MediaItem, requestId: String = "NONE"): List<MediaItem> {
-        Log.d("SeeSimilarTrace", "STAGE=START requestId=$requestId sourceId=${item.id} title=\"${item.title}\"")
-        val allItems = _mediaItems.value
-        val all = allItems.filter { other ->
-            other.id != item.id && 
-            other.uriPath != item.uriPath && 
-            (item.contentHash == null || other.contentHash != item.contentHash) &&
-            isItemVisibleInLibrary(other)
+        val core = intelligenceCore
+        if (core != null) {
+            val request = com.example.data.intelligence.IntelligenceRequest(
+                mode = com.example.data.intelligence.IntelligenceMode.SIMILAR,
+                contextualIntent = com.example.data.intelligence.ContextualIntent.DETAIL_CONTEXT,
+                referenceItemId = item.id,
+                limit = 30,
+                requestId = if (requestId == "NONE") java.util.UUID.randomUUID().toString().take(8) else requestId
+            )
+            val response = core.processRequest(request)
+            if (response.isSuccess) {
+                return response.candidates.map { it.item }
+            }
         }
         
-        Log.d("SeeSimilarTrace", "STAGE=POOL_READY requestId=$requestId poolSize=${all.size}")
-        
-        if (all.isEmpty()) {
-            Log.w("SeeSimilarTrace", "No candidates available for similarity search.")
-            return emptyList()
-        }
-
-        // 1. Semantic Integration
-        val repo = semanticRepresentationRepository
-        val retriever = semanticCandidateRetriever
-        val semanticCandidates = mutableMapOf<String, Float>() 
-        
-        if (repo != null && retriever != null) {
-            val reps = repo.getForMedia(item.id)
-            val refRep = reps.find { it.type == com.example.data.semantic.SemanticRepresentationType.VISUAL }
-                ?: reps.find { it.type == com.example.data.semantic.SemanticRepresentationType.CONTENT }
-                
-            if (refRep != null) {
-                val results = retriever.retrieveCandidates(
-                    queryVector = refRep.vector,
-                    type = refRep.type,
-                    descriptor = refRep.modelDescriptor,
-                    topK = 50,
-                    minSimilarity = 0.3f 
-                )
-                results.forEach { semanticCandidates[it.mediaId] = it.similarityScore }
-                Log.d("SeeSimilarTrace", "STAGE=SEMANTIC_QUERY_COMPLETE requestId=$requestId results=${results.size} modality=${refRep.type}")
-            } else {
-                Log.d("SeeSimilarTrace", "STAGE=SEMANTIC_QUERY_SKIP requestId=$requestId - No embeddings for source.")
-            }
-        }
-
-        val itemTags = item.moodTags.filter { it.isNotBlank() }.map { it.lowercase().trim() }.toSet()
-        val itemGenre = item.genre.lowercase().trim()
-        val itemCategory = item.category.lowercase().trim()
-        val isItemVideo = item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("Movie", ignoreCase = true)
-
-        val stopWords = setOf("the", "and", "a", "an", "in", "on", "at", "for", "with", "of", "to", "is", "you")
-        val itemTitleTokens = item.title.lowercase()
-            .split(Regex("[^a-z0-9]+"))
-            .filter { it.length >= 2 && !stopWords.contains(it) }
-            .toSet()
-
-        val scored = all.mapNotNull { other ->
-            var contentScore = 0f
-
-            // 1. Semantic Boost
-            val semanticScore = semanticCandidates[other.id] ?: 0f
-            if (semanticScore > 0.3f) {
-                contentScore += (semanticScore * 30f)
-            }
-
-            // 2. Mood Tags matching (+12 per matching tag)
-            val otherTags = other.moodTags.filter { it.isNotBlank() }.map { it.lowercase().trim() }.toSet()
-            val commonTags = itemTags.intersect(otherTags).size
-            contentScore += commonTags * 12f
-
-            // 3. Genre matching (+10 for matching genre)
-            val otherGenre = other.genre.lowercase().trim()
-            if (itemGenre.isNotEmpty() && itemGenre == otherGenre) {
-                contentScore += if (itemGenre != "media") 10f else 1f
-            }
-
-            // 4. Category matching (+1 for matching category - weakened in Step 2.1)
-            val otherCategory = other.category.lowercase().trim()
-            if (itemCategory.isNotEmpty() && itemCategory == otherCategory) {
-                contentScore += 1f
-            }
-
-            // 5. Title token overlap (+15 per matching token)
-            val otherTitleTokens = other.title.lowercase()
-                .split(Regex("[^a-z0-9]+"))
-                .filter { it.length >= 2 && !stopWords.contains(it) }
-                .toSet()
-            val commonTitleTokens = itemTitleTokens.intersect(otherTitleTokens).size
-            contentScore += commonTitleTokens * 15f
-
-            // Media type match bonus
-            val isOtherVideo = other.mediaType.equals("VIDEO", ignoreCase = true) || other.mediaType.equals("Movie", ignoreCase = true)
-            val isSameType = (isOtherVideo == isItemVideo)
-
-            val totalScore = contentScore + (if (isSameType && contentScore > 0) 1f else 0f)
-
-            // Jitter for variety (Reduced in Step 2 to prioritize pure relevance)
-            val jitter = ((other.id.hashCode() xor item.id.hashCode()).toFloat() / Int.MAX_VALUE.toFloat()).let { if (it < 0) -it else it } * 0.02f
-            val finalScore = totalScore + jitter
-
-            // Step 2: Use a more principled relevance threshold (18.0)
-            // This ensures results have at least one strong signal or multiple weak signals.
-            if (finalScore >= 18f) {
-                Pair(other, finalScore)
-            } else {
-                null
-            }
-        }
-
-        val sortedMatches = scored.sortedByDescending { it.second }.map { it.first }
-
-        Log.d("SeeSimilarTrace", "STAGE=SORT_COMPLETE requestId=$requestId results=${sortedMatches.size}")
-        sortedMatches.take(5).forEachIndexed { i, m -> 
-            val s = scored.find { it.first.id == m.id }?.second ?: 0f
-            Log.d("SeeSimilarTrace", "rank=${i+1} id=${m.id} score=$s title=\"${m.title}\"")
-        }
-
-        // Plan 1 Step 2: Removed forced 30-result take to allow zero or few results if relevance is low
-        return sortedMatches
+        // Final Degraded Fallback
+        return emptyList()
     }
 
     fun setMediaItemsForTesting(items: List<MediaItem>) {
@@ -3574,6 +3520,9 @@ class MediaRepository(
             pairwiseLosses[loserId] = (pairwiseLosses[loserId] ?: 0) + 1
             comparisonCounts[itemA.id] = (comparisonCounts[itemA.id] ?: 0) + 1
             comparisonCounts[itemB.id] = (comparisonCounts[itemB.id] ?: 0) + 1
+
+            // Invalidate intelligence cache on high-weight interaction
+            com.example.data.intelligence.IntelligenceCache.invalidateAll()
 
             // True Elo Update
             val expectedA = PairwiseEloEngine.calculateExpectedScore(itemA.eloRating, itemB.eloRating)
@@ -3676,7 +3625,9 @@ class MediaRepository(
             newStats
         }
 
-        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        scope.launch {
+            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        }
     }
 
     fun skipComparison() {
@@ -3736,7 +3687,9 @@ class MediaRepository(
             }
         }
 
-        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        scope.launch {
+            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
+        }
     }
 
 
@@ -3945,7 +3898,7 @@ stats ->
         )
     }
 
-    fun getFilteredAndSortedMedia(
+    suspend fun getFilteredAndSortedMedia(
         filterType: String, // "ALL", "PHOTO", "VIDEO"
         sortCategory: SortCategory,
         standardSort: StandardSortOption,
@@ -3980,116 +3933,33 @@ stats ->
                 }
             }
             // AURA LABEL FIX: Standard sort results must not display stale ephemeral AI labels.
-            // Systems labels like "Retry Analysis" are preserved.
             sorted.map { item ->
                 if (isEphemeralReason(item.selectionReason)) item.copy(selectionReason = null) else item
             }
         } else {
-            // INTELLIGENT SORTING
-            // AURA P1 STABILITY: Evaluation Context Timestamp
-            // Capturing a single 'now' ensures ordering does not drift during unrelated metadata emissions.
-            val now = System.currentTimeMillis()
-            val recentThreshold = 3600000L // 1 hour
-            
-            when (intelligentSort) {
-                IntelligentSortOption.PERSONALIZED -> {
-                    val systemState = ConfidenceEngine.calculateDiscoveryState(inputItems, stats)
-                    val strategy = DiscoveryPolicyManager.resolveStrategy(
-                        policy = policy,
-                        intent = intent,
-                        objective = RecommendationObjective.LIBRARY_INTELLIGENT_DISCOVERY,
-                        systemState = systemState,
-                        tasteDNA = tasteDNA,
-                        profile = profile
-                    )
-
-                    items.filter { item ->
-                        val isLiked = item.isFavorite || item.rating >= 4.0f
-                        val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
-                        !isLiked && !isRecent
-                    }.map { item ->
-                        val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creatorProfiles, now)
-                        val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
-                        val reason = when {
-                            evidence.exploitationScore > 0.6 && evidence.familiarityScore > 0.4 -> "For You"
-                            evidence.exploitationScore > 0.5 && evidence.familiarityScore < 0.3 -> "Hidden Gem"
-                            strategy.explorationWeight > 0.5 && evidence.explorationScore > 0.6 -> "Best Match"
-                            else -> "Personalized"
-                        }
-                        item.copy(selectionReason = reason) to score
-                    }.sortedByDescending { it.second }.map { it.first }
-                }
-
-                IntelligentSortOption.DISCOVER -> {
-                    val strategy = DiscoveryPolicyManager.resolveStrategy(
-                        policy = policy,
-                        intent = intent,
-                        objective = RecommendationObjective.GENERAL_DISCOVERY,
-                        systemState = ConfidenceEngine.calculateDiscoveryState(inputItems, stats),
-                        tasteDNA = tasteDNA,
-                        profile = profile
-                    ).copy(exploitationWeight = 0.2f, explorationWeight = 0.8f) // Favor exploration
-
-                    items.filter { item ->
-                        item.viewCount == 0 || item.exposureCount < 3
-                    }.map { item ->
-                        val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creatorProfiles, now)
-                        val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
-                        item.copy(selectionReason = "New Discovery") to score
-                    }.sortedByDescending { it.second }.map { it.first }
-                }
-
-                IntelligentSortOption.REDISCOVER -> {
-                    items.filter { item ->
-                        val isLiked = item.isFavorite || item.rating >= 4.0f
-                        val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
-                        isLiked && !isRecent
-                    }.map { item ->
-                        val ageBonus = if (item.lastViewedTimestamp != null) {
-                            (now - item.lastViewedTimestamp!!).toDouble() / (1000.0 * 60 * 60 * 24 * 7) // weeks
-                        } else 100.0 // Should not happen for Liked items usually, but fallback
-                        
-                        val score = (item.rating.toDouble() * 20.0) + (item.viewCount.toDouble() * 2.0) + ageBonus
-                        item.copy(selectionReason = "Blast from the Past") to score
-                    }.sortedByDescending { it.second }.map { it.first }
-                }
-
-                IntelligentSortOption.HIDDEN_GEMS -> {
-                    val strategy = DiscoveryPolicyManager.resolveStrategy(
-                        policy = policy,
-                        intent = intent,
-                        objective = RecommendationObjective.LIBRARY_INTELLIGENT_DISCOVERY,
-                        systemState = ConfidenceEngine.calculateDiscoveryState(inputItems, stats),
-                        tasteDNA = tasteDNA,
-                        profile = profile
-                    )
-                    
-                    items.filter { item ->
-                        item.exposureCount < 5 && item.viewCount < 2 && item.rating == 0f
-                    }.map { item ->
-                        val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creatorProfiles, now)
-                        val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
-                        item.copy(selectionReason = "Hidden Gem") to score
-                    }.sortedByDescending { it.second }.map { it.first }
-                }
-
-                IntelligentSortOption.FAVORITES -> {
-                    items.filter { item ->
-                        item.isFavorite || item.rating >= 4.0f
-                    }.map { item ->
-                        val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creatorProfiles, now)
-                        // Favorites are already high quality, sort by newest added
-                        val score = evidence.exploitationScore * 10f + (item.dateAdded.toDouble() / 1e12).toFloat()
-                        item.copy(selectionReason = "Your Favorite") to score
-                    }.sortedByDescending { it.second }.map { it.first }
-                }
-
-                IntelligentSortOption.SURPRISE_ME -> {
-                    items.sortedBy { item ->
-                        (item.id + sessionSeed).hashCode()
-                    }.map { it.copy(selectionReason = "Surprise!") }
+            // DELEGATE TO CORE (Update 9 Consolidation)
+            val core = intelligenceCore
+            if (core != null) {
+                val request = com.example.data.intelligence.IntelligenceRequest(
+                    mode = com.example.data.intelligence.IntelligenceMode.SORT,
+                    sortOption = intelligentSort.name,
+                    filterType = filterType,
+                    tasteDNA = tasteDNA,
+                    profile = profile,
+                    policy = policy,
+                    intent = intent,
+                    stats = stats,
+                    creatorProfiles = creatorProfiles,
+                    seed = sessionSeed
+                )
+                val response = core.processRequest(request)
+                if (response.isSuccess) {
+                    return response.candidates.map { it.item }
                 }
             }
+            
+            // Fallback (Safe degraded state)
+            items.sortedByDescending { it.rating }
         }
     }
 

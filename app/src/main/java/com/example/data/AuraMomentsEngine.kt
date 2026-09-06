@@ -65,6 +65,7 @@ object AuraMomentsEngine {
             mode = IntelligenceMode.SORT,
             sortOption = when(mode) {
                 MomentsMode.SURPRISE_ME -> "DISCOVER"
+                MomentsMode.FAVORITES -> "FAVORITES"
                 else -> "PERSONALIZED"
             },
             limit = limit * 3 // Over-sample for sequencing variety
@@ -74,13 +75,8 @@ object AuraMomentsEngine {
         val selectionMs = System.currentTimeMillis() - selectionStart
         if (!response.isSuccess) return generateSlideshow(repository.mediaItems.value, limit)
 
-        var candidates = response.candidates
+        val candidates = response.candidates
         
-        // 2. Mode-Specific Filtering
-        if (mode == MomentsMode.FAVORITES) {
-            candidates = candidates.filter { it.item.isFavorite }
-        }
-
         if (candidates.isEmpty()) return emptyList()
 
         // 3. Embedding Retrieval for Sequencing
@@ -135,7 +131,9 @@ object AuraMomentsEngine {
         
         if (photosOnly.isEmpty()) return emptyList()
 
-        // Simplified Legacy Fallback (Update 9 Cleanup)
+        // Consolidated fallback: Use standard personalized sort via Core if possible,
+        // but since this is a non-suspend fallback, we use a simple heuristic.
+        // Rule: In non-suspend fallbacks, simple metadata-only sorting is permitted.
         val result = photosOnly.sortedByDescending { it.rating }.take(limit)
         return sequenceVisualStory(result)
     }

@@ -1,7 +1,10 @@
 package com.example.data
 
+import com.example.data.intelligence.IntelligenceCandidate
+import com.example.data.intelligence.EvidenceType
+
 /**
- * Data-backed explanation for a recommendation.
+ * Data backed explanation for a recommendation.
  */
 data class RecommendationExplanation(
     val primaryReason: String,
@@ -13,31 +16,21 @@ data class RecommendationExplanation(
 object RecommendationExplanationGenerator {
 
     /**
-     * Generates an explanation for why a specific item was recommended.
+     * Generates an explanation for why a specific candidate was recommended.
+     * Consumes evidence purely from the Intelligence Core.
      */
     fun generate(
-        item: MediaItem,
-        tasteDNA: TasteDNA,
-        stats: IntelligenceStats,
-        creatorProfiles: Map<String, CreatorProfile>,
-        strategy: RecommendationStrategy? = null
+        candidate: IntelligenceCandidate,
+        tasteDNA: TasteDNA
     ): RecommendationExplanation? {
-        val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creatorProfiles)
+        val item = candidate.item
+        val evidence = candidate.evidence
         
         val details = mutableListOf<String>()
         var primary = ""
         var isExploratory = false
 
-        // 0. Contextual Mode Signal
-        if (strategy != null) {
-            if (strategy.explorationWeight > 1.2f) {
-                details.add("Priority: Discovering new potential favorites")
-            } else if (strategy.exploitationWeight > 1.2f) {
-                details.add("Priority: Content you are highly likely to enjoy")
-            }
-        }
-
-        // 1. Explicit signals (Highest priority for explanation)
+        // 1. Explicit signals (Highest priority)
         if (item.isFavorite) {
             primary = "Similar to your favorites"
             details.add("You previously favorited this item")
@@ -46,8 +39,16 @@ object RecommendationExplanationGenerator {
             details.add("You gave this item ${item.rating.toInt()} stars")
         }
 
-        // 2. High Match logic (DNA alignment)
-        if (primary.isEmpty() && evidence.exploitationScore > 0.75) {
+        // 2. Pairwise Preference
+        val pairwise = evidence.find { it.type == EvidenceType.PAIRWISE_PREFERENCE }
+        if (primary.isEmpty() && pairwise != null && pairwise.score > 0.5f) {
+            primary = "Matches your choices"
+            details.add("You previously picked this in comparisons")
+        }
+
+        // 3. High Match logic (DNA alignment)
+        val dnaAlignment = evidence.find { it.type == EvidenceType.TASTE_DNA_ALIGNMENT }
+        if (primary.isEmpty() && dnaAlignment != null && dnaAlignment.score > 0.75f) {
             primary = "High predicted match"
             val highDNA = getHighPreferenceDimensions(item, tasteDNA)
             if (highDNA.isNotEmpty()) {
@@ -55,65 +56,35 @@ object RecommendationExplanationGenerator {
             }
         }
 
-        // 3. Novelty / Exploration
-        if (primary.isEmpty() && evidence.noveltyScore > 0.7) {
+        // 4. Novelty / Exploration
+        val exploration = evidence.find { it.type == EvidenceType.EXPLORATION_VALUE }
+        if (primary.isEmpty() && exploration != null && exploration.score > 0.7f) {
             primary = "Expand your taste"
             isExploratory = true
-            if (item.viewCount == 0 && item.exposureCount == 0) {
-                details.add("A new discovery you haven't seen yet")
-            }
-            if (!stats.topGenres.contains(item.genre)) {
-                details.add("A style outside your usual ${stats.topGenres.firstOrNull() ?: "genres"}")
-            }
+            details.add("A new discovery you haven't explored yet")
         }
 
-        // 4. Uncertainty / Aura learning (Only if match is low/moderate)
-        if (primary.isEmpty() && evidence.uncertaintyScore > 0.7 && evidence.exploitationScore < 0.6) {
-            primary = "Aura is learning your style"
-            details.add("Recommended to refine your future predictions")
-        }
-
-        // 5. Creator Affinity (Secondary signal)
-        val creator = item.creatorId?.let { creatorProfiles[it] }
-        if (creator != null && creator.affinityScore > 0.6) {
-            details.add("From ${creator.name}, a creator you enjoy")
-        }
-
-        // 6. Emotional Role Overrides (Phase 11)
-        if (strategy != null) {
-            // We can detect roles from weights if we didn't pass it explicitly
-            when {
-                strategy.exploitationWeight > 1.5f -> {
-                    primary = "High Confidence"
-                    details.add("Aura thinks this is strongly aligned with your taste.")
-                }
-                strategy.noveltyWeight > 1.5f -> {
-                    primary = "Wildcard"
-                    details.add("This is outside your usual pattern.")
-                }
-                strategy.explorationWeight > 1.5f -> {
-                    primary = "Exploration"
-                    details.add("Aura is testing something new.")
-                }
-            }
+        // 5. Relationship Evidence
+        val relationship = evidence.find { it.type == EvidenceType.RELATIONSHIP_MATCH }
+        if (relationship != null) {
+            details.add("Contextual connection: ${relationship.provenance}")
         }
 
         // Fallback
         if (primary.isEmpty()) {
-            if (evidence.exploitationScore > 0.5) {
+            if (candidate.rankScore > 0.5) {
                 primary = "Aura matched this to your taste"
-            } else if (evidence.uncertaintyScore > 0.7) {
-                primary = "Aura is learning your style"
-                details.add("Recommended to refine your future predictions")
             } else {
                 return null
             }
         }
 
+        val matchPercent = (candidate.primaryRelevanceScore * 100).toInt().coerceIn(10, 99)
+
         return RecommendationExplanation(
             primaryReason = primary,
             detailPoints = details,
-            confidenceLabel = if (evidence.exploitationScore > 0.6) "${(evidence.exploitationScore * 100).toInt()}% Match" else null,
+            confidenceLabel = "$matchPercent% Match",
             isExploratory = isExploratory
         )
     }

@@ -44,11 +44,12 @@ object RecommendationEngine {
         // 2. Specialized Categories (Phased Core Requests)
         // For Update 9, we reuse the Core's DISCOVER mode with category-specific policies
         
-        suspend fun getCategory(limit: Int): List<MediaItem> {
+        suspend fun getCategory(option: String, limit: Int): List<MediaItem> {
             val req = IntelligenceRequest(
                 mode = IntelligenceMode.DISCOVER,
                 contextualIntent = ContextualIntent.DISCOVER_CATEGORY,
                 limit = limit,
+                sortOption = option,
                 tasteDNA = tasteDNA,
                 profile = profile,
                 stats = stats,
@@ -57,12 +58,12 @@ object RecommendationEngine {
             return core.processRequest(req).candidates.map { it.item }
         }
 
-        val freshForYou = getCategory(4)
-        val fromYourFavorites = getCategory(4)
-        val wildcard = getCategory(3)
-        val deepDiscovery = getCategory(3)
-        val underTheRadar = getCategory(4)
-        val aLittleDifferent = getCategory(4)
+        val freshForYou = getCategory("FRESH_FOR_YOU", 4)
+        val fromYourFavorites = getCategory("FROM_YOUR_FAVORITES", 4)
+        val wildcard = getCategory("WILDCARD", 3)
+        val deepDiscovery = getCategory("DEEP_DISCOVERY", 3)
+        val underTheRadar = getCategory("UNDER_THE_RADAR", 4)
+        val aLittleDifferent = getCategory("A_LITTLE_DIFFERENT", 4)
 
         // 0. Continue Watching: Item in progress (Deterministic, preserved)
         val itemsOnly = repository.mediaItems.value.filter { 
@@ -141,8 +142,8 @@ object RecommendationEngine {
      * While candidate pools are now Core-driven, the specific information-value
      * and diversity logic for Pairwise selection remains here for the Update 9 MVP.
      */
-    fun getTop100PairwiseCandidates(
-        allMedia: List<MediaItem>,
+    suspend fun getTop100PairwiseCandidates(
+        repository: MediaRepository,
         winsMap: Map<String, Int> = emptyMap(),
         lossesMap: Map<String, Int> = emptyMap(),
         mediaTypeFilter: String = "ALL",
@@ -154,18 +155,26 @@ object RecommendationEngine {
         compareStrategy: CompareStrategy = CompareStrategy.PERSONALIZED,
         compareSort: CompareSortOption = CompareSortOption.RECOMMENDED
     ): List<Pair<MediaItem, Float>> {
-        val eligible = allMedia.filter { item ->
-            val isPlayable = item.itemCount == null && item.compatibilityStatus !in listOf(CompatibilityStatus.CORRUPT, CompatibilityStatus.UNSUPPORTED)
-            val matchesFilter = when (mediaTypeFilter.uppercase()) {
-                "PHOTO", "PHOTOS" -> item.mediaType.uppercase() in listOf("PHOTO", "IMAGE")
-                "VIDEO", "VIDEOS" -> item.mediaType.uppercase() in listOf("VIDEO", "MOVIE")
-                else -> true
+        val core = repository.intelligenceCore
+        if (core != null) {
+            val req = IntelligenceRequest(
+                mode = IntelligenceMode.SORT,
+                sortOption = "RANKING_REFINEMENT",
+                filterType = mediaTypeFilter,
+                limit = 100,
+                tasteDNA = tasteDNA,
+                profile = profile,
+                stats = stats,
+                creatorProfiles = creatorProfiles
+            )
+            val response = core.processRequest(req)
+            if (response.isSuccess) {
+                return response.candidates.map { it.item to it.rankScore.toFloat() }
             }
-            isPlayable && matchesFilter
         }
         
-        // Return a shuffled top pool for selection
-        return eligible.shuffled().take(100).map { it to 1.0f }
+        // Final fallback (Safe degraded state)
+        return repository.mediaItems.value.shuffled().take(100).map { it to 1.0f }
     }
 
     fun selectNextPairFromPool(

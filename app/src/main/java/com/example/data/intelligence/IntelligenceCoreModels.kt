@@ -90,6 +90,7 @@ data class IntelligenceRequest(
     val seed: Long = 42L,
     val sortOption: String? = null,
     val filterType: String = "ALL",
+    val explicitConstraints: Map<String, String> = emptyMap(),
     val useLegacyRanking: Boolean = false,
     val requestId: String = java.util.UUID.randomUUID().toString().take(8)
 )
@@ -113,6 +114,8 @@ data class IntelligenceResponse(
     val requestId: String,
     val mode: IntelligenceMode,
     val candidates: List<IntelligenceCandidate>,
+    val relationshipEvidence: List<EvidenceItem> = emptyList(), // Global relationship context
+    val visibilitySealed: Boolean = false,
     val latencyMs: Long,
     val isSuccess: Boolean = true,
     val errorMessage: String? = null
