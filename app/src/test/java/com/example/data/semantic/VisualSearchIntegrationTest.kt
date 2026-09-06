@@ -1,5 +1,7 @@
 package com.example.data.semantic
 
+import com.example.data.intelligence.*
+import com.example.data.MediaItem
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Before
@@ -9,42 +11,22 @@ import org.mockito.kotlin.*
 class VisualSearchIntegrationTest {
 
     private lateinit var engine: DefaultHybridSearchEngine
-    private val semanticService: SemanticSearchService = mock()
-    private val lexicalRetriever: LexicalCandidateRetriever = mock()
-    private val repository: SemanticRepresentationRepository = mock()
-    private val visualTextProvider: EmbeddingProvider = mock()
-    private val visualImageProvider: EmbeddingProvider = mock()
-    private val visualRetriever: MobileCLIPVisualRetriever = mock()
-    private val personalizationScorer: PersonalizationScorer = mock()
-    
-    private val descriptor = EmbeddingModelDescriptor("mobileclip", 1, 512, SemanticRepresentationType.VISUAL)
+    private val core: AuraIntelligenceCore = mock()
 
     @Before
     fun setUp() {
-        engine = DefaultHybridSearchEngine(
-            semanticService = semanticService,
-            lexicalRetriever = lexicalRetriever,
-            repository = repository,
-            visualTextProvider = visualTextProvider,
-            visualImageProvider = visualImageProvider,
-            visualRetriever = visualRetriever,
-            personalizationScorer = personalizationScorer
-        )
-        whenever(visualImageProvider.isReady()).thenReturn(true)
-        whenever(visualRetriever.isReady()).thenReturn(true)
-        whenever(visualImageProvider.descriptor).thenReturn(descriptor)
+        engine = DefaultHybridSearchEngine(core)
     }
 
     @Test
     fun testSearchVisual_RetrievesUsingVector() = runBlocking<Unit> {
         val queryVector = FloatArray(512) { it.toFloat() }
         
-        // 1. Mock retrieval
-        val visualItems = listOf(
-            RankedChannelItem("media_1", 0.9f, 1)
-        )
-        whenever(visualRetriever.retrieveVisualCandidates(eq(queryVector), any(), any()))
-            .thenReturn(visualItems)
+        val item = MediaItem(id = "media_1", title = "Visual Match", mediaType = "PHOTO")
+        val candidates = listOf(IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f, "Visual Match"))
+        val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, 10L)
+
+        whenever(core.processRequest(any())).thenReturn(response)
 
         // 2. Execute with pre-encoded vector
         val request = SearchRequest.Visual(queryVector)
@@ -55,17 +37,9 @@ class VisualSearchIntegrationTest {
         assertEquals(1, result.candidates.size)
         assertEquals("media_1", result.candidates[0].mediaId)
         
-        // Verify Lexical and MiniLM Text channels were SKIPPED
-        verify(lexicalRetriever, never()).retrieveKeywordCandidates(any(), any())
-        verify(semanticService, never()).search(any<String>(), any(), any(), any(), any())
-    }
-
-    @Test
-    fun testSearchVisual_MissingVector_HandlesStateCorrectly() = runBlocking<Unit> {
-        // Unified SearchRequest with nulls
-        val emptyRequest = SearchRequest.Text("") // Using a concrete implementation
-        assertEquals(SearchQueryType.TEXT, emptyRequest.queryType)
-        
-        // Forced visual-like request without vector is not possible with sealed interface
+        verify(core).processRequest(check {
+            assertEquals(IntelligenceMode.SEARCH, it.mode)
+            assertArrayEquals(queryVector, it.visualVector, 1e-6f)
+        })
     }
 }

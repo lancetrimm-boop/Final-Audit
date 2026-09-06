@@ -1,94 +1,44 @@
 package com.example.data.semantic
 
+import com.example.data.intelligence.*
+import com.example.data.MediaItem
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
-import org.mockito.kotlin.any
-import org.mockito.kotlin.mock
-import org.mockito.kotlin.whenever
+import org.mockito.kotlin.*
 
 class SearchIntegrationTest {
 
     private lateinit var hybridEngine: HybridSearchEngine
-    private val semanticService: SemanticSearchService = mock()
-    private val lexicalRetriever: LexicalCandidateRetriever = mock()
+    private val core: AuraIntelligenceCore = mock()
 
     @Before
     fun setUp() {
-        hybridEngine = DefaultHybridSearchEngine(
-            semanticService = semanticService,
-            lexicalRetriever = lexicalRetriever
-        )
+        hybridEngine = DefaultHybridSearchEngine(core)
     }
 
     @Test
-    fun testHybridSearch_CombinesBothChannels() = runBlocking {
-        val query = "beach"
-        
-        // Lexical results: IMG_beach.jpg
-        whenever(lexicalRetriever.retrieveKeywordCandidates(any<String>(), any<Int>()))
-            .thenReturn(listOf(RankedChannelItem("m_lexical", 1.0f, 1)))
+    fun testHybridSearch_DelegatesToCore() {
+        runBlocking {
+            val query = "beach"
+            
+            val item = MediaItem(id = "item1", title = "Beach", mediaType = "PHOTO")
+            val candidates = listOf(IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f, "Match"))
+            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, 10L)
 
-        // Semantic results: VID_vacation.mp4 (scored high for "beach")
-        val descriptor = EmbeddingModelDescriptor("test", 1, 384, SemanticRepresentationType.CONTENT)
-        val semanticCandidates = listOf(
-            SemanticRetrievalCandidate("m_semantic", "r1", 0.85f, SemanticRepresentationType.CONTENT, descriptor, 1.0f)
-        )
-        whenever(semanticService.search(any<String>(), any<Int>(), any<Float>(), any<SemanticRepresentationType>(), any()))
-            .thenReturn(SemanticSearchResult(query, semanticCandidates, descriptor, SemanticRepresentationType.CONTENT, 10, 1))
+            whenever(core.processRequest(any())).thenReturn(response)
 
-        val result = hybridEngine.search(query)
+            val result = hybridEngine.search(query)
 
-        assertTrue(result.isSuccess)
-        assertEquals(2, result.candidates.size)
-        
-        val ids = result.candidates.map { it.mediaId }
-        assertTrue(ids.contains("m_lexical"))
-        assertTrue(ids.contains("m_semantic"))
-    }
-
-    @Test
-    fun testSemanticMatch_ReachesResultsWithoutLexicalOverlap() = runBlocking {
-        val query = "bikini"
-        
-        // No lexical matches
-        whenever(lexicalRetriever.retrieveKeywordCandidates(any<String>(), any<Int>())).thenReturn(emptyList())
-
-        // Strong semantic match
-        val descriptor = EmbeddingModelDescriptor("test", 1, 384, SemanticRepresentationType.CONTENT)
-        val semanticCandidates = listOf(
-            SemanticRetrievalCandidate("m_visual", "r1", 0.9f, SemanticRepresentationType.CONTENT, descriptor, 1.0f)
-        )
-        whenever(semanticService.search(any<String>(), any<Int>(), any<Float>(), any<SemanticRepresentationType>(), any()))
-            .thenReturn(SemanticSearchResult(query, semanticCandidates, descriptor, SemanticRepresentationType.CONTENT, 10, 1))
-
-        val result = hybridEngine.search(query)
-
-        assertEquals(1, result.candidates.size)
-        assertEquals("m_visual", result.candidates[0].mediaId)
-    }
-
-    @Test
-    fun testRanking_ExactLexicalOutranksWeakSemantic() = runBlocking {
-        val query = "car"
-        
-        // Lexical: "My Car.jpg" (Rank 1)
-        whenever(lexicalRetriever.retrieveKeywordCandidates(any<String>(), any<Int>()))
-            .thenReturn(listOf(RankedChannelItem("m_car", 1.0f, 1)))
-
-        // Semantic: "transport.mp4" (Score 0.4 - weak)
-        val descriptor = EmbeddingModelDescriptor("test", 1, 384, SemanticRepresentationType.CONTENT)
-        val semanticCandidates = listOf(
-            SemanticRetrievalCandidate("m_transport", "r1", 0.4f, SemanticRepresentationType.CONTENT, descriptor, 1.0f)
-        )
-        whenever(semanticService.search(any<String>(), any<Int>(), any<Float>(), any<SemanticRepresentationType>(), any()))
-            .thenReturn(SemanticSearchResult(query, semanticCandidates, descriptor, SemanticRepresentationType.CONTENT, 10, 1))
-
-        val result = hybridEngine.search(query)
-
-        // RRF should favor the Rank #1 match
-        assertEquals("m_car", result.candidates[0].mediaId)
+            assertTrue(result.isSuccess)
+            assertEquals(1, result.candidates.size)
+            assertEquals("item1", result.candidates[0].mediaId)
+            
+            verify(core).processRequest(argThat { req -> 
+                req.mode == IntelligenceMode.SEARCH && req.query == "beach" 
+            })
+        }
     }
 
     @Test
@@ -113,8 +63,8 @@ class SearchIntegrationTest {
         uriPath: String,
         genre: String = "",
         moodTags: List<String> = emptyList()
-    ): com.example.data.MediaItem {
-        return com.example.data.MediaItem(
+    ): MediaItem {
+        return MediaItem(
             id = "test",
             title = title,
             mediaType = "PHOTO",

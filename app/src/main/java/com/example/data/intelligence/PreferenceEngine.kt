@@ -64,6 +64,36 @@ object PreferenceEngine {
                  dimensionSignals.getOrPut("skipSensitivity") { mutableListOf() }
                      .add(WeightedSignal(1.0, effectiveWeight))
             }
+
+            // Update 9.1: Visual Context Signals
+            if (event.type == AuraInteractionType.VISUAL_CONTEXT.name) {
+                // Parse metrics from contextJson if available
+                event.contextJson?.let { json ->
+                    try {
+                        val adapter = repository.getMoshi().adapter<Map<String, String>>(
+                            com.squareup.moshi.Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
+                        )
+                        val metrics = adapter.fromJson(json)
+
+                        metrics?.forEach { (key: String, valueStr: String) ->
+                            val value = valueStr.toDoubleOrNull() ?: 0.5
+                            val dim = when(key) {
+                                "brightness" -> "lighting"
+                                "contrast" -> "contrast"
+                                "warmth" -> "warmth"
+                                "saturation" -> "saturation"
+                                else -> null
+                            }
+                            if (dim != null) {
+                                dimensionSignals.getOrPut(dim) { mutableListOf() }
+                                    .add(WeightedSignal(value, effectiveWeight))
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to parse visual context metrics", e)
+                    }
+                }
+            }
         }
 
         // 2. Aggregate signals into Target Learned State and Confidence

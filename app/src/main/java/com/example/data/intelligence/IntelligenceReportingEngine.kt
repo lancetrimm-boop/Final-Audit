@@ -95,12 +95,10 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
             }
         }
 
-        // Calculate actual match score from engine
-        val rawScore = com.example.data.RecommendationEngine.scoreItemForPairwise(
-            item = item,
-            tasteDNA = tasteDNA
-        )
-        val normalizedScore = (rawScore / 20.0).coerceIn(0.0, 1.0) // Heuristic normalization
+        // Calculate actual match score from core (Update 9 Consolidation)
+        val core = com.example.data.MediaRepository.instance.intelligenceCore
+        val rawScore = core?.scorePersonalization(item, tasteDNA)?.toDouble() ?: 0.5
+        val normalizedScore = (rawScore / 1.0).coerceIn(0.0, 1.0)
 
         RecommendationInsightSnapshot(
             schemaVersion = CURRENT_SCHEMA_VERSION,
@@ -155,8 +153,23 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
                 if (entry.value > 0.5) "Strong ${entry.key}" else "Subtle ${entry.key}"
             }
 
-        // --- NEW: Generate Taste Cluster Evidence ---
-        val tasteClusters = generateTasteClusters(dna, library)
+        // --- Update 7: Use SignatureStyleProvider ---
+        val styleProfile = SignatureStyleProvider.calculateStyleProfile(dna, com.example.data.MediaRepository.instance)
+        val tasteClusters = styleProfile.activeStyles.map { style ->
+            TasteClusterEvidence(
+                categoryId = style.anchor.id,
+                title = style.anchor.displayName,
+                description = style.anchor.description,
+                strengthScore = style.affinityScore,
+                strengthLabel = if (style.affinityScore > 0.8) "Strong" else "Established",
+                confidenceScore = style.confidence,
+                confidenceLabel = if (style.confidence > 0.7) "High" else "Moderate",
+                contributingTraits = style.anchor.dimensionTargets.keys.toList(),
+                representativeMediaId = style.representativeMedia.firstOrNull()?.id,
+                representativeMediaThumbnailUrl = style.representativeMedia.firstOrNull()?.imageUrl,
+                isVideo = style.representativeMedia.firstOrNull()?.mediaType == "VIDEO"
+            )
+        }
 
         return TasteProfileSnapshot(
             schemaVersion = CURRENT_SCHEMA_VERSION,
@@ -169,161 +182,6 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
             tasteClusters = tasteClusters
         )
     }
-
-    private fun generateTasteClusters(dna: TasteDNA, library: List<com.example.data.db.MediaEntity>): List<TasteClusterEvidence> {
-        val clusters = mutableListOf<TasteClusterEvidence>()
-        
-        // Define high-level clusters and their associated dimensions
-        val mapping = listOf(
-            ClusterMapping("cinematic", "Clean & Atmospheric", listOf("Depth", "Lighting", "Dynamic Range", "Contrast")),
-            ClusterMapping("vibrant", "Vibrant & Energetic", listOf("Vibrancy", "Saturation", "Motion", "Mood")),
-            ClusterMapping("minimal", "Minimal & Clean", listOf("Minimalism", "Symmetry", "Harmony", "Framing")),
-            ClusterMapping("tactile", "Tactile & Organic", listOf("Texture", "Grain", "Naturalism", "Warmth")),
-            ClusterMapping("complex", "Complex & Intricate", listOf("Complexity", "Density", "Rhythm", "Sharpness")),
-            ClusterMapping("unusual", "Unusual & Experimental", listOf("Novelty"))
-        )
-
-        val usedMediaIds = mutableSetOf<String>()
-
-        mapping.forEach { map ->
-            val score = map.dimensions.map { getDimensionValue(dna, it) }.average()
-            if (score > 0.4) { // Only show clusters with at least emerging strength
-                val evidence = selectMediaForCluster(map, library, usedMediaIds)
-                
-                // STRICT EVIDENCE REQUIREMENT: Only add cluster if usable evidence exists
-                if (evidence != null && !evidence.imageUrl.isNullOrBlank()) {
-                    val description = generateClusterDescription(map, dna)
-                    clusters.add(TasteClusterEvidence(
-                        categoryId = map.id,
-                        title = map.title,
-                        description = description,
-                        strengthScore = quantize(score),
-                        strengthLabel = getStrengthLabel(score),
-                        confidenceScore = 0.8, // Baseline confidence for snapshots
-                        confidenceLabel = "High",
-                        contributingTraits = map.dimensions,
-                        representativeMediaId = evidence.id,
-                        representativeMediaThumbnailUrl = evidence.imageUrl,
-                        isVideo = evidence.mediaType == "VIDEO"
-                    ))
-                    usedMediaIds.add(evidence.id)
-                }
-            }
-        }
-
-        return clusters.sortedByDescending { it.strengthScore }
-    }
-
-    private fun generateClusterDescription(map: ClusterMapping, dna: TasteDNA): String {
-        val strongTraits = map.dimensions.filter { getDimensionValue(dna, it) > 0.6 }
-            .map { it.lowercase() }
-        
-        if (strongTraits.isEmpty()) {
-            return "Aura identified emerging patterns in your library matching this style."
-        }
-        
-        val traitsText = when (strongTraits.size) {
-            1 -> strongTraits[0]
-            2 -> "${strongTraits[0]} and ${strongTraits[1]}"
-            else -> strongTraits.dropLast(1).joinToString(", ") + ", and " + strongTraits.last()
-        }
-        
-        return "Aura identified a preference for $traitsText, as seen in your representative media."
-    }
-
-    private fun getStrengthLabel(score: Double): String {
-        return when {
-            score >= 0.85 -> "Very Strong"
-            score >= 0.70 -> "Strong"
-            score >= 0.55 -> "Moderate"
-            score >= 0.40 -> "Emerging"
-            else -> "Low"
-        }
-    }
-
-    private fun getDimensionValue(dna: TasteDNA, dim: String): Double {
-        return when(dim) {
-            "Vibrancy" -> dna.effectiveVibrancy
-            "Contrast" -> dna.effectiveContrast
-            "Sharpness" -> dna.effectiveSharpness
-            "Symmetry" -> dna.effectiveSymmetry
-            "Complexity" -> dna.effectiveComplexity
-            "Naturalism" -> dna.effectiveNaturalism
-            "Novelty" -> dna.effectiveNovelty
-            "Lighting" -> dna.effectiveLighting
-            "Color Temperature" -> dna.effectiveColorTemp
-            "Texture" -> dna.effectiveTexture
-            "Motion" -> dna.effectiveMotion
-            "Dynamic Range" -> dna.effectiveDynamicRange
-            "Framing" -> dna.effectiveFraming
-            "Depth" -> dna.effectiveDepth
-            "Warmth" -> dna.effectiveWarmth
-            "Saturation" -> dna.effectiveSaturation
-            "Elegance" -> dna.effectiveElegance
-            "Minimalism" -> dna.effectiveMinimalism
-            "Grain" -> dna.effectiveGrain
-            "Focus" -> dna.effectiveFocus
-            "Density" -> dna.effectiveDensity
-            "Rhythm" -> dna.effectiveRhythm
-            "Mood" -> dna.effectiveMood
-            "Harmony" -> dna.effectiveHarmony
-            else -> 0.5
-        }
-    }
-
-    private fun selectMediaForCluster(
-        map: ClusterMapping, 
-        library: List<com.example.data.db.MediaEntity>,
-        usedIds: Set<String>
-    ): com.example.data.db.MediaEntity? {
-        if (library.isEmpty()) return null
-
-        // Score library items based on alignment with cluster traits and behavioral signals
-        // CRITICAL: Only consider items with valid visual evidence (imageUrl or uriPath)
-        return library.filter { (it.imageUrl.isNotBlank() || it.uriPath.isNotBlank()) && (it.id !in usedIds || library.size < 6) }
-            .map { entity ->
-                val traitScore = calculateTraitAlignment(entity, map.dimensions)
-                val behavioralScore = calculateBehavioralSignal(entity)
-                val totalScore = (traitScore * 0.4) + (behavioralScore * 0.6)
-                entity to totalScore
-            }
-            .filter { it.second > 0.15 } // Lower threshold to ensure clusters appear for newer libraries
-            .sortedByDescending { it.second }
-            .firstOrNull()?.first
-    }
-
-    private fun calculateTraitAlignment(entity: com.example.data.db.MediaEntity, dimensions: List<String>): Double {
-        val tags = entity.moodTagsJson.split(",").filter { it.isNotBlank() }
-        val traits = PersonalizationTraitMapper.getTraitAdjustments(tags)
-        if (traits.isEmpty()) return 0.5
-        
-        var matches = 0
-        dimensions.forEach { dim ->
-            val dimLower = dim.lowercase().replace(" ", "")
-            val traitVal = traits[dimLower] ?: 0.0
-            if (traitVal > 0.3) matches++
-        }
-        
-        return matches.toDouble() / dimensions.size.coerceAtLeast(1)
-    }
-
-    private fun calculateBehavioralSignal(entity: com.example.data.db.MediaEntity): Double {
-        var score = 0.0
-        if (entity.rating > 4) score += 0.5
-        else if (entity.rating > 0) score += 0.2
-        
-        if (entity.isFavorite) score += 0.3
-        
-        score += (entity.playCount.coerceAtMost(10) * 0.02)
-        
-        return score.coerceIn(0.0, 1.0)
-    }
-
-    private data class ClusterMapping(
-        val id: String,
-        val title: String,
-        val dimensions: List<String>
-    )
 
     private fun generateVisualDescription(dimensions: Map<String, Double>, topTraits: List<String>): String {
         if (topTraits.isEmpty()) {

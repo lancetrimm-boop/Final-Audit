@@ -188,6 +188,14 @@ fun AuraMainContent(repository: MediaRepository) {
         }
     )
 
+    val favoritesViewModel: com.example.ui.screens.FavoritesViewModel = viewModel(
+        factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                return com.example.ui.screens.FavoritesViewModel(repository) as T
+            }
+        }
+    )
+
     var showEngagementDebugger by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
@@ -340,14 +348,20 @@ fun AuraMainContent(repository: MediaRepository) {
                 .padding(innerPadding)
         ) {
             if (activeMomentsMode != null) {
-                val momentsItems = remember(activeMomentsMode, mediaItems) {
-                    com.example.data.AuraMomentsEngine.generateSlideshow(mediaItems, activeMomentsMode!!)
-                }
                 com.example.ui.screens.AuraMomentsSlideshowScreen(
-                    items = momentsItems,
                     mode = activeMomentsMode!!,
                     repository = repository,
-                    onClose = { activeMomentsMode = null }
+                    onClose = { activeMomentsMode = null },
+                    onSeeSimilar = { targetItem ->
+                        val requestId = java.util.UUID.randomUUID().toString().take(6)
+                        coroutineScope.launch {
+                            val similar = repository.getSimilarMedia(targetItem, requestId)
+                            if (similar.isNotEmpty()) {
+                                repository.setPlaylist(items = similar, initialIndex = 0, sourceTitle = "Similar — ${targetItem.title}")
+                                activeMomentsMode = null // Exit slideshow to play similar items
+                            }
+                        }
+                    }
                 )
             } else if (showAuraMomentsSelection) {
                 com.example.ui.screens.AuraMomentsSelectionScreen(
@@ -596,26 +610,34 @@ fun AuraMainContent(repository: MediaRepository) {
                             )
                         }
                         NavDestination.FAVORITES.route -> {
+                            val sections by favoritesViewModel.sections.collectAsStateWithLifecycle()
+                            val isLoading by favoritesViewModel.isLoading.collectAsStateWithLifecycle()
                             FavoritesScreen(
-                                mediaItems = mediaItems,
-                                onMediaSelect = { selectedItem ->
-                                    val favoriteItems = mediaItems.filter { it.isFavorite }
-                                    val selectedIndex = favoriteItems.indexOfFirst { it.id == selectedItem.id }
+                                sections = sections,
+                                isLoading = isLoading,
+                                onMediaSelect = { selectedItem, sectionItems ->
+                                    val selectedIndex = sectionItems.indexOfFirst { it.id == selectedItem.id }
                                     if (selectedIndex != -1) {
                                         repository.setPlaylist(
-                                            items = favoriteItems,
+                                            items = sectionItems,
                                             initialIndex = selectedIndex,
                                             sourceTitle = "Favorites"
                                         )
                                     }
                                 },
-                                onFavoriteToggle = { id -> repository.removeFromFavorites(id) },
+                                onFavoriteToggle = { id -> 
+                                    repository.removeFromFavorites(id)
+                                    favoritesViewModel.refreshFavorites()
+                                },
                                 onLike = { id ->
                                     repository.recordLike(id)
                                     repository.addToFavorites(id)
                                 },
                                 onBack = {
                                     currentRoute = NavDestination.PROFILE.route
+                                },
+                                onRefresh = {
+                                    favoritesViewModel.refreshFavorites()
                                 }
                             )
                         }

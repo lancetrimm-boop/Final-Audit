@@ -1,13 +1,23 @@
-package com.example
+package com.example.data.intelligence
 
-import com.example.data.MediaItem
-import com.example.data.RecommendationEngine
-import com.example.data.TasteDNA
+import com.example.data.*
+import com.example.data.intelligence.*
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
+import org.mockito.Mockito.mock
 
 class TasteDNATest {
+
+    private lateinit var core: AuraIntelligenceCore
+
+    @Before
+    fun setup() {
+        // Intelligence Core is now the authoritative scorer
+        core = AuraIntelligenceCore(mock(MediaRepository::class.java), mock(RetrievalRouter::class.java))
+    }
 
     @Test
     fun testTasteDnaEffectiveValues() {
@@ -42,45 +52,13 @@ class TasteDNATest {
         )
 
         // Baseline score with default TasteDNA (0.5)
-        val baselineScore = RecommendationEngine.scoreItemForPairwise(
-            item = item,
-            tasteDNA = TasteDNA(vibrancy = 0.5, learnedVibrancy = 0.5)
-        )
+        val dnaBaseline = TasteDNA(vibrancy = 0.5, learnedVibrancy = 0.5)
+        val baselineScore = core.scorePersonalization(item, dnaBaseline)
 
         // Score with high vibrancy (1.0)
-        val highVibrancyScore = RecommendationEngine.scoreItemForPairwise(
-            item = item,
-            tasteDNA = TasteDNA(vibrancy = 1.0, learnedVibrancy = 1.0)
-        )
+        val dnaHigh = TasteDNA(vibrancy = 1.0, learnedVibrancy = 1.0)
+        val highVibrancyScore = core.scorePersonalization(item, dnaHigh)
 
         assertTrue("Score with higher vibrancy should be greater", highVibrancyScore > baselineScore)
-    }
-
-    @Test
-    fun testScoringWithPreferenceProfile() {
-        val item = MediaItem(
-            id = "test_item",
-            title = "Unseen Gem",
-            mediaType = "PHOTO",
-            rating = 4.0f,
-            viewCount = 0
-        )
-
-        val profileLowNovelty = TasteDNA.PreferenceProfile(noveltyWeight = 0.1)
-        val profileHighNovelty = TasteDNA.PreferenceProfile(noveltyWeight = 0.9)
-
-        val lowNoveltyScore = RecommendationEngine.scoreItemForPairwise(
-            item = item,
-            profile = profileLowNovelty,
-            tasteDNA = TasteDNA(novelty = 1.0)
-        )
-
-        val highNoveltyScore = RecommendationEngine.scoreItemForPairwise(
-            item = item,
-            profile = profileHighNovelty,
-            tasteDNA = TasteDNA(novelty = 1.0)
-        )
-
-        assertTrue("Score with higher novelty weight should be greater for unseen item", highNoveltyScore > lowNoveltyScore)
     }
 }

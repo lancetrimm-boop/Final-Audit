@@ -165,7 +165,6 @@ class DiscoverViewModel(
                 val items = repository.mediaItems.first()
                 val dna = repository.tasteDNA.first()
                 val profile = repository.preferenceProfile.first()
-                val policy = repository.discoveryPolicy.first()
                 val stats = repository.intelligenceStats.first()
                 val creators = repository.creatorProfiles.first()
 
@@ -179,7 +178,7 @@ class DiscoverViewModel(
                     _feedState.value = DiscoverFeedState.Success(emptySnap)
                 } else {
                     val snapshot = sessionManager.generateSnapshot(
-                        items, dna, profile, policy, stats, creators, forceNewSession
+                        repository, dna, profile, stats, creators, forceNewSession
                     )
                     repository.updateDiscoverSnapshot(snapshot)
                     
@@ -223,7 +222,7 @@ class DiscoverViewModel(
             
             try {
                 val batch = sessionManager.realizeBatch(
-                    obsession, items, dna, profile, policy, stats, creators
+                    repository, obsession, items, dna, profile, policy, stats, creators
                 )
                 _detailState.value = ObsessionDetailState.Active(obsession, batch, false)
             } catch (e: Exception) {
@@ -267,7 +266,7 @@ class DiscoverViewModel(
 
             try {
                 val expandedBatch = sessionManager.realizeBatch(
-                    currentState.obsession, items, dna, profile, policy, stats, creators,
+                    repository, currentState.obsession, items, dna, profile, policy, stats, creators,
                     existingItems = currentState.batch.items
                 )
                 _detailState.value = currentState.copy(batch = expandedBatch, isLoading = false)

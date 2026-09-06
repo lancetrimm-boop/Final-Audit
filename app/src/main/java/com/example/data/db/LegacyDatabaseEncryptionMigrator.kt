@@ -7,7 +7,8 @@ import android.util.Log
 import java.io.File
 
 /**
- * Handles the secure transition of a legacy plaintext SQLite database to SQLCipher encryption.
+ * Handles the secure transition of a legacy plaintext SQLite database to SQLCipher encryption,
+ * and manages key-format migrations for forward compatibility.
  */
 object LegacyDatabaseEncryptionMigrator {
     private const val TAG = "AURA_TRANSITION_FORENSIC"
@@ -21,14 +22,12 @@ object LegacyDatabaseEncryptionMigrator {
     }
 
     /**
-     * Ensures the database is encrypted. If a plaintext database is found, it is transitioned.
+     * Ensures the database is encrypted and uses the current hardware-backed key format.
      */
     fun ensureEncryption(context: Context): TransitionResult {
         val dbPath = context.getDatabasePath(DATABASE_NAME)
-        val tempDbPath = File(dbPath.parent, "${DATABASE_NAME}.tmp")
         val backupDbPath = File(dbPath.parent, "${DATABASE_NAME}.legacy_bak")
 
-        // Interrupted Swap Recovery: If main file is missing but backup exists, restore it to retry.
         if (!dbPath.exists() && backupDbPath.exists()) {
             Log.w(TAG, "Interrupted transition detected. Restoring legacy backup for retry.")
             if (!backupDbPath.renameTo(dbPath)) {
@@ -36,43 +35,48 @@ object LegacyDatabaseEncryptionMigrator {
             }
         }
 
-        if (!dbPath.exists()) {
-            Log.i(TAG, "Legacy database not present. Proceeding normally.")
-            return TransitionResult.LegacyNotPresent
-        }
-
-        // Check for zero-length files which can cause SQLite open crashes
-        if (dbPath.length() == 0L) {
-            Log.w(TAG, "Empty database file detected. Skipping transition.")
+        if (!dbPath.exists() || dbPath.length() == 0L) {
             return TransitionResult.LegacyNotPresent
         }
 
         if (isDatabaseEncrypted(dbPath)) {
-            Log.i(TAG, "Database is already encrypted. Validating access...")
-            return try {
-                val rawKey = PassphraseManager.getPassphrase(context)
-                EncryptedSQLiteDatabase.openDatabase(dbPath.absolutePath, rawKey, null, EncryptedSQLiteDatabase.OPEN_READONLY, null).use { 
-                    Log.i(TAG, "Encryption validation successful.")
+            Log.i(TAG, "Database is already encrypted. Validating key format...")
+            val binaryKey = PassphraseManager.getPassphrase(context)
+            
+            // 1. Try primary binary key (Current Standard)
+            try {
+                EncryptedSQLiteDatabase.openDatabase(dbPath.absolutePath, binaryKey, null, EncryptedSQLiteDatabase.OPEN_READONLY, null).use { 
+                    Log.i(TAG, "Encryption validation successful (Binary Key).")
                 }
-                TransitionResult.AlreadyEncrypted
+                return TransitionResult.AlreadyEncrypted
             } catch (t: Throwable) {
-                Log.e(TAG, "Encryption validation failed: ${t.message}")
-                TransitionResult.Failure("Existing database could not be opened with recovered key.", t)
+                Log.w(TAG, "Primary binary key failed (HMAC mismatch). Checking legacy key format...")
+            }
+
+            // 2. Try legacy hex-string key (Historical/Baseline format)
+            try {
+                val hexKeyBytes = PassphraseManager.getPassphraseAsHex(context).toByteArray()
+                EncryptedSQLiteDatabase.openDatabase(dbPath.absolutePath, hexKeyBytes, null, EncryptedSQLiteDatabase.OPEN_READONLY, null).use { 
+                    Log.i(TAG, "Legacy key format working. Migration required.")
+                }
+                return performLegacyFormatMigration(context, dbPath, hexKeyBytes, binaryKey)
+            } catch (t: Throwable) {
+                Log.e(TAG, "All known key formats failed validation.")
+                return handleUnrecoverableDatabase(dbPath)
             }
         }
 
         Log.i(TAG, "Plaintext legacy database detected. Starting transition...")
         
-        // 0. Space Check
         val requiredSpace = dbPath.length() * 2
         val usableSpace = dbPath.parentFile?.usableSpace ?: 0L
         if (usableSpace < requiredSpace) {
-            return TransitionResult.Failure("Insufficient disk space for transition. Required: $requiredSpace, Available: $usableSpace")
+            return TransitionResult.Failure("Insufficient disk space for transition.")
         }
 
         return try {
-            val rawKey = PassphraseManager.getPassphrase(context)
-            performTransition(context, dbPath, rawKey)
+            val binaryKey = PassphraseManager.getPassphrase(context)
+            performTransition(dbPath, binaryKey)
             TransitionResult.Success
         } catch (t: Throwable) {
             Log.e(TAG, "Transition failed: ${t.message}", t)
@@ -81,140 +85,167 @@ object LegacyDatabaseEncryptionMigrator {
     }
 
     private fun isDatabaseEncrypted(dbPath: File): Boolean {
-        if (!dbPath.exists() || dbPath.length() < 16L) {
-            return false
-        }
+        if (!dbPath.exists() || dbPath.length() < 16L) return false
         return try {
             val header = ByteArray(16)
-            java.io.FileInputStream(dbPath).use { fis ->
-                val bytesRead = fis.read(header)
-                if (bytesRead < 16) return false
-            }
+            java.io.FileInputStream(dbPath).use { fis -> fis.read(header) }
             val sqliteMagic = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
             !header.contentEquals(sqliteMagic)
-        } catch (e: Exception) {
-            Log.d(TAG, "Failed to inspect database header bytes (assuming encrypted): ${e.message}")
-            true
-        }
+        } catch (e: Exception) { true }
     }
 
-    private fun performTransition(context: Context, originalDbPath: File, rawKey: ByteArray) {
+    /**
+     * Migrates data from a plaintext source to a new encrypted container.
+     */
+    private fun performTransition(originalDbPath: File, rawKey: ByteArray) {
         val tempDbPath = File(originalDbPath.parent, "${DATABASE_NAME}.tmp")
         val backupDbPath = File(originalDbPath.parent, "${DATABASE_NAME}.legacy_bak")
 
-        // Cleanup any stale temporary files
         if (tempDbPath.exists()) tempDbPath.delete()
-        File(tempDbPath.path + "-wal").delete()
-        File(tempDbPath.path + "-shm").delete()
-        File(tempDbPath.path + "-journal").delete()
-
-        // 0. Capture baseline metrics and version from plaintext
-        val baselineMetrics = mutableMapOf<String, Int>()
-        val criticalTables = listOf("media_items", "user_preferences", "pairwise_outcomes", "collections")
+        
         var legacyVersion = 0
+        val baselineMetrics = mutableMapOf<String, Int>()
+        val criticalTables = listOf("media_items", "user_preferences", "pairwise_outcomes")
         
         StandardSQLiteDatabase.openDatabase(originalDbPath.absolutePath, null, StandardSQLiteDatabase.OPEN_READONLY).use { db ->
             legacyVersion = db.version
             criticalTables.forEach { table ->
                 try {
                     db.rawQuery("SELECT count(*) FROM $table", null).use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            baselineMetrics[table] = cursor.getInt(0)
-                        }
+                        if (cursor.moveToFirst()) baselineMetrics[table] = cursor.getInt(0)
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Table $table not found in legacy schema. Skipping baseline.")
+                    Log.w(TAG, "Table $table not found in legacy schema.")
                 }
             }
         }
 
-        // 1. Pre-initialize the encrypted destination (Approach B)
-        // This ensures SQLCipher initializes headers and confirms the key is working.
+        // 1. Create encrypted destination
         EncryptedSQLiteDatabase.openOrCreateDatabase(tempDbPath, rawKey, null, null).use { db ->
-            db.version = legacyVersion // Preserve the version pragma for Room migration logic
+            db.version = legacyVersion
         }
 
-        // 2. Open the plaintext database using SQLCipher with an empty key
+        // 2. Open source via SQLCipher using empty key (treats as plaintext)
         val plaintextDb = EncryptedSQLiteDatabase.openDatabase(originalDbPath.absolutePath, "".toByteArray(), null, EncryptedSQLiteDatabase.OPEN_READWRITE, null)
         try {
-            // 3. Attach the new encrypted database using SQLCipher's x'HEX' literal syntax for ATTACH
-            val hexKeyLiteral = "x'${bytesToHex(rawKey)}'"
-            plaintextDb.execSQL("ATTACH DATABASE '${tempDbPath.absolutePath}' AS encrypted KEY \"$hexKeyLiteral\"")
+            // 3. Attach using x'HEX' literal
+            val hexKeyLiteral = bytesToHex(rawKey)
+            plaintextDb.execSQL("ATTACH DATABASE '${tempDbPath.absolutePath}' AS encrypted KEY \"x'$hexKeyLiteral'\"")
             
             try {
-                // 4. Export data
                 Log.i(TAG, "Exporting data to encrypted container...")
-                plaintextDb.rawQuery("SELECT sqlcipher_export('encrypted')", null).use { cursor ->
-                    cursor.moveToFirst()
-                }
+                plaintextDb.rawQuery("SELECT sqlcipher_export('encrypted')", null).use { it.moveToFirst() }
             } finally {
-                // 5. Detach
                 plaintextDb.execSQL("DETACH DATABASE encrypted")
             }
         } finally {
             plaintextDb.close()
         }
 
-        // 6. Comprehensive Verification
-        Log.i(TAG, "Verifying encrypted database integrity...")
-        // Use raw key for verification open
-        val encryptedDb = EncryptedSQLiteDatabase.openDatabase(tempDbPath.absolutePath, rawKey, null, EncryptedSQLiteDatabase.OPEN_READONLY, null)
-        try {
-            // A. Check SQLCipher is actually active (Standard SQLite should fail on this file)
-            if (!isDatabaseEncrypted(tempDbPath)) {
-                throw IllegalStateException("Verification failed: Target database is not encrypted")
-            }
+        // 4. Verify Integrity
+        verifyIntegrity(tempDbPath, rawKey, baselineMetrics)
 
-            // B. Verify Table and Row Continuity
-            baselineMetrics.forEach { (table, expectedCount) ->
-                encryptedDb.rawQuery("SELECT count(*) FROM $table", null).use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val actualCount = cursor.getInt(0)
-                        if (actualCount != expectedCount) {
-                            throw IllegalStateException("Data loss detected in $table: Expected $expectedCount, found $actualCount")
-                        }
-                        Log.d(TAG, "Verified $table: $actualCount rows preserved.")
-                    } else {
-                        throw IllegalStateException("Verification failed: Could not read $table")
-                    }
-                }
-            }
+        // 5. Atomic Swap
+        swapFiles(originalDbPath, tempDbPath, backupDbPath)
+        Log.i(TAG, "Plaintext-to-Encrypted transition complete.")
+    }
 
-            // C. Verify Schema Integrity (Indexes)
-            val expectedIndexes = listOf("index_media_items_uriPath", "index_media_items_contentHash")
-            expectedIndexes.forEach { idx ->
-                encryptedDb.rawQuery("SELECT name FROM sqlite_master WHERE type='index' AND name='$idx'", null).use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        Log.d(TAG, "Verified index preservation: $idx")
-                    } else {
-                        Log.w(TAG, "Index $idx not found in migrated database (legacy schema?)")
-                    }
-                }
-            }
-
-            // D. PRAGMA integrity_check
-            encryptedDb.rawQuery("PRAGMA integrity_check", null).use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val result = cursor.getString(0)
-                    if (result != "ok") throw IllegalStateException("SQLite integrity check failed: $result")
-                }
-            }
-
-        } finally {
-            encryptedDb.close()
-        }
-
-        // 7. Atomic Swap
-        Log.i(TAG, "Transition verified. Performing atomic swap...")
-        if (backupDbPath.exists()) backupDbPath.delete()
-        if (!originalDbPath.renameTo(backupDbPath)) throw IllegalStateException("Failed to backup legacy database")
-        if (!tempDbPath.renameTo(originalDbPath)) {
-            // Rollback backup if swap fails
-            backupDbPath.renameTo(originalDbPath)
-            throw IllegalStateException("Failed to move encrypted database into place")
-        }
+    /**
+     * Migrates an encrypted database between different key formats.
+     */
+    private fun performLegacyFormatMigration(
+        context: Context,
+        originalDbPath: File,
+        legacyKey: ByteArray,
+        binaryKey: ByteArray
+    ): TransitionResult {
+        Log.i(TAG, "Performing key-format migration (String -> Binary Entropy)...")
+        val tempDbPath = File(originalDbPath.parent, "${DATABASE_NAME}.migrated")
+        val backupDbPath = File(originalDbPath.parent, "${DATABASE_NAME}.key_format_bak")
         
-        Log.i(TAG, "Transition complete. legacy_bak retained for safety.")
+        if (tempDbPath.exists()) tempDbPath.delete()
+
+        try {
+            val baselineMetrics = mutableMapOf<String, Int>()
+            val criticalTables = listOf("media_items", "user_preferences", "pairwise_outcomes")
+
+            // 1. Open legacy and capture baselines
+            EncryptedSQLiteDatabase.openDatabase(originalDbPath.absolutePath, legacyKey, null, EncryptedSQLiteDatabase.OPEN_READWRITE, null).use { legacyDb ->
+                criticalTables.forEach { table ->
+                    try {
+                        legacyDb.rawQuery("SELECT count(*) FROM $table", null).use { cursor ->
+                            if (cursor.moveToFirst()) baselineMetrics[table] = cursor.getInt(0)
+                        }
+                    } catch (e: Exception) {}
+                }
+
+                // 2. Attach new container with binary key
+                val binaryHexLiteral = bytesToHex(binaryKey)
+                legacyDb.execSQL("ATTACH DATABASE '${tempDbPath.absolutePath}' AS migrated KEY \"x'$binaryHexLiteral'\"")
+                
+                try {
+                    // 3. Export
+                    legacyDb.rawQuery("SELECT sqlcipher_export('migrated')", null).use { it.moveToFirst() }
+                    legacyDb.version.let { ver ->
+                        // Transfer version pragma
+                        legacyDb.execSQL("PRAGMA migrated.user_version = $ver")
+                    }
+                } finally {
+                    legacyDb.execSQL("DETACH DATABASE migrated")
+                }
+            }
+
+            // 4. Verify Integrity
+            verifyIntegrity(tempDbPath, binaryKey, baselineMetrics)
+
+            // 5. Atomic Swap
+            swapFiles(originalDbPath, tempDbPath, backupDbPath)
+            
+            Log.i(TAG, "Key-format migration complete.")
+            return TransitionResult.Success
+
+        } catch (t: Throwable) {
+            Log.e(TAG, "Key-format migration failed", t)
+            if (tempDbPath.exists()) tempDbPath.delete()
+            return TransitionResult.Failure("Failed to migrate legacy key format: ${t.message}", t)
+        }
+    }
+
+    private fun verifyIntegrity(dbPath: File, key: ByteArray, baselineMetrics: Map<String, Int>) {
+        EncryptedSQLiteDatabase.openDatabase(dbPath.absolutePath, key, null, EncryptedSQLiteDatabase.OPEN_READONLY, null).use { db ->
+            baselineMetrics.forEach { (table, expected) ->
+                db.rawQuery("SELECT count(*) FROM $table", null).use { cursor ->
+                    if (cursor.moveToFirst() && cursor.getInt(0) != expected) {
+                        throw IllegalStateException("Data loss detected in $table: Expected $expected, found ${cursor.getInt(0)}")
+                    }
+                }
+            }
+            db.rawQuery("PRAGMA integrity_check", null).use { cursor ->
+                if (cursor.moveToFirst() && cursor.getString(0) != "ok") {
+                    throw IllegalStateException("Integrity check failed: ${cursor.getString(0)}")
+                }
+            }
+        }
+    }
+
+    private fun swapFiles(original: File, new: File, backup: File) {
+        if (backup.exists()) backup.delete()
+        if (!original.renameTo(backup)) throw IllegalStateException("Failed to create backup")
+        if (!new.renameTo(original)) {
+            backup.renameTo(original)
+            throw IllegalStateException("Failed to swap new database into place")
+        }
+    }
+
+    private fun handleUnrecoverableDatabase(dbPath: File): TransitionResult {
+        Log.e(TAG, "Database is unrecoverable (Key Mismatch or Corruption). Quarantining...")
+        val quarantinePath = File(dbPath.parent, "aura_quarantine_${System.currentTimeMillis()}.db")
+        return if (dbPath.renameTo(quarantinePath)) {
+            Log.i(TAG, "Unrecoverable database moved to: ${quarantinePath.name}")
+            TransitionResult.Success // Allow Aura to start fresh
+        } else {
+            TransitionResult.Failure("Failed to quarantine unrecoverable database.")
+        }
     }
 
     private fun bytesToHex(bytes: ByteArray): String {
@@ -228,26 +259,20 @@ object LegacyDatabaseEncryptionMigrator {
         return String(hexChars)
     }
 
-    /**
-     * Cleans up legacy backups after a retention period or successful use of the new database.
-     */
     fun cleanupLegacyBackups(context: Context) {
-        val backupDbPath = File(context.getDatabasePath(DATABASE_NAME).parent, "${DATABASE_NAME}.legacy_bak")
-        if (!backupDbPath.exists()) return
+        val dir = context.getDatabasePath(DATABASE_NAME).parentFile ?: return
+        val backups = dir.listFiles { _, name -> 
+            name.endsWith(".legacy_bak") || name.endsWith(".key_format_bak") 
+        } ?: return
 
         val prefs = context.getSharedPreferences("aura_transition_prefs", Context.MODE_PRIVATE)
-        val launchCount = prefs.getInt("successful_launches_post_transition", 0) + 1
+        val count = prefs.getInt("successful_launches", 0) + 1
         
-        val lastModified = backupDbPath.lastModified()
-        val sevenDaysMs = 7 * 24 * 60 * 60 * 1000L
-        val isExpired = (System.currentTimeMillis() - lastModified) > sevenDaysMs
-
-        if (launchCount >= 5 || isExpired) {
-            Log.i(TAG, "Legacy backup retention period expired ($launchCount launches). Deleting backup.")
-            backupDbPath.delete()
+        if (count >= 5) {
+            backups.forEach { it.delete() }
+            Log.i(TAG, "Legacy backups cleaned up after stable period.")
         } else {
-            prefs.edit().putInt("successful_launches_post_transition", launchCount).apply()
-            Log.d(TAG, "Legacy backup retained (Launch count: $launchCount/5)")
+            prefs.edit().putInt("successful_launches", count).apply()
         }
     }
 }

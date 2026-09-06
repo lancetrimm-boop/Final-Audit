@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AuraDatabase
 import com.example.data.db.MediaEntity
 import com.example.data.semantic.*
+import com.example.data.intelligence.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -63,13 +64,22 @@ class SemanticQuantitativeAuditTest {
         lexicalConstructor.isAccessible = true
         val lexicalRetriever = lexicalConstructor.newInstance(repository) as LexicalCandidateRetriever
         
-        val hybridEngine = DefaultHybridSearchEngine(searchService, lexicalRetriever)
+        val core = AuraIntelligenceCore(
+            repository = repository,
+            retrievalRouter = RetrievalRouter(
+                lexicalRetriever = lexicalRetriever,
+                semanticProvider = searchService as? SemanticRetrievalProvider,
+                visualProvider = null
+            )
+        )
+        val hybridEngine = DefaultHybridSearchEngine(core)
 
         val fields = mapOf(
             "semanticRepresentationRepository" to semanticRepo,
             "embeddingProvider" to provider,
             "semanticCandidateRetriever" to retriever,
             "semanticSearchService" to searchService,
+            "intelligenceCore" to core,
             "hybridSearchEngine" to hybridEngine
         )
         
@@ -154,13 +164,13 @@ class SemanticQuantitativeAuditTest {
             
             // Extract channel info via reflection/internal engine query
             val engine = repository.hybridSearchEngine!!
-            val searchResult = (engine as DefaultHybridSearchEngine).search(q)
+            val searchResult = engine.search(q)
             
             val lexicalCount = searchResult.channelCandidateCounts[SearchChannel.KEYWORD] ?: 0
             val semanticCount = searchResult.channelCandidateCounts[SearchChannel.SEMANTIC_CONTENT] ?: 0
             
             // Check for semantic-only results
-            val lexicalIds = (engine as DefaultHybridSearchEngine).search(q).candidates
+            val lexicalIds = engine.search(q).candidates
                 .filter { it.channelRanks.containsKey(SearchChannel.KEYWORD) }
                 .map { it.mediaId }.toSet()
             

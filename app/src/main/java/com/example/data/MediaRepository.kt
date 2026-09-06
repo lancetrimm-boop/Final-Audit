@@ -205,6 +205,8 @@ class MediaRepository(
     private val dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO
 ) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    fun getMoshi(): Moshi = moshi
+
     private val tasteDnaAdapter = moshi.adapter(TasteDNA::class.java)
     private val profileAdapter = moshi.adapter(TasteDNA.PreferenceProfile::class.java)
     private val discoveryPolicyAdapter = moshi.adapter(DiscoveryPolicy::class.java)
@@ -225,7 +227,7 @@ class MediaRepository(
 
     @Volatile
     var interactionRepository: InteractionRepository? = null
-        private set
+        internal set
 
     @Volatile
     var playbackErrorLogRepository: PlaybackErrorLogRepository? = null
@@ -274,10 +276,16 @@ class MediaRepository(
     @Volatile
     var visualIndexingService: VisualIndexingService? = null
         private set
-
+    
     @Volatile
     var intelligenceCore: com.example.data.intelligence.AuraIntelligenceCore? = null
         private set
+
+    var libraryPreferences: LibraryPreferences? = null
+        private set
+
+    private val _signatureStyleProfile = MutableStateFlow(com.example.data.intelligence.SignatureStyleProfile(emptyList(), emptyList()))
+    val signatureStyleProfile: StateFlow<com.example.data.intelligence.SignatureStyleProfile> = _signatureStyleProfile.asStateFlow()
 
     private val _consentState = MutableStateFlow(ConsentState.NOT_DECIDED)
     val consentState: StateFlow<ConsentState> = _consentState.asStateFlow()
@@ -560,111 +568,6 @@ class MediaRepository(
                     scaled.recycle()
                 }
             }
-
-
-        }
-    }
-
-    /**
-     * Triggers a multi-reference visual search (Phase 2 Soft Intersection).
-     * Reuses existing embeddings to minimize redundant ONNX inference.
-     */
-    fun searchByMultipleImages(items: List<MediaItem>) {
-        if (items.isEmpty()) return
-        
-        android.util.Log.i("SEARCH_REQUEST", "UPDATE_MULTI_IMAGE: count=${items.size}")
-        
-        scope.launch(Dispatchers.Default) {
-            try {
-                val provider = mobileCLIPProvider ?: return@launch
-                val repo = semanticRepresentationRepository ?: return@launch
-                
-                val vectors = mutableListOf<FloatArray>()
-                val uris = mutableListOf<String>()
-                
-                for (item in items) {
-                    uris.add(item.uriPath)
-                    
-                    // 1. Try to reuse existing visual embedding
-                    val existing = repo.getSpecificRepresentation(
-                        item.id, 
-                        com.example.data.semantic.SemanticRepresentationType.VISUAL, 
-                        provider.descriptor
-                    )
-                    
-                    if (existing != null) {
-                        vectors.add(existing.vector)
-                        continue
-                    }
-                    
-                    // 2. Fallback to encoding if missing (e.g. newly imported)
-                    val ctx = applicationContext ?: return@launch
-                    val bitmap = com.example.util.MediaThumbnailFetcher.getThumbnail(ctx, item.uriPath)
-                    if (bitmap != null) {
-                        val result = provider.generateEmbedding(
-                            mediaId = item.id,
-                            input = com.example.data.semantic.SemanticInput.ExplicitBitmap(bitmap),
-                            sourceDataHash = "multi_query_temp"
-                        )
-                        if (result is com.example.data.semantic.EmbeddingResult.Success) {
-                            vectors.add(result.representation.vector)
-                        }
-                        bitmap.recycle()
-                    }
-                }
-                
-                if (vectors.size >= 2) {
-                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.MultiVisual(
-                        visualVectors = vectors,
-                        referenceUris = uris
-                    )
-                } else if (vectors.size == 1) {
-                    // Fallback to single visual search path
-                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Visual(
-                        visualVector = vectors[0],
-                        referenceUri = uris[0]
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e("MediaRepository", "Failed to encode multiple images for search.", e)
-            }
-        }
-    }
-    /**
-     * Removes a specific visual reference from the active search.
-     * Fallbacks to single-reference search or text-only search as appropriate.
-     */
-    fun removeVisualReference(index: Int) {
-        val current = _librarySearchRequest.value
-        when (current) {
-            is com.example.data.semantic.SearchRequest.MultiVisual -> {
-                if (index < 0 || index >= current.visualVectors.size) return
-                
-                val nextVectors = current.visualVectors.toMutableList().apply { removeAt(index) }
-                val nextUris = current.referenceUris.toMutableList().apply { removeAt(index) }
-                
-                if (nextVectors.size >= 2) {
-                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.MultiVisual(
-                        visualVectors = nextVectors,
-                        referenceUris = nextUris
-                    )
-                } else if (nextVectors.size == 1) {
-                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Visual(
-                        visualVector = nextVectors[0],
-                        referenceUri = nextUris[0]
-                    )
-                } else {
-                    clearSearch()
-                }
-            }
-            is com.example.data.semantic.SearchRequest.Visual -> {
-                clearSearch()
-            }
-            is com.example.data.semantic.SearchRequest.Compound -> {
-                // If compound, removing the visual anchor leaves only the text query
-                _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Text(current.query ?: "")
-            }
-            else -> { /* No visual anchor to remove */ }
         }
     }
 
@@ -680,8 +583,52 @@ class MediaRepository(
     /**
      * Clears any active search (text or visual) and returns to standard library view.
      */
+    fun getIntelligentFavorites(limit: Int = 20): List<com.example.data.intelligence.IntelligentSection> {
+        val favs = _mediaItems.value.filter { it.isFavorite }.sortedByDescending { it.rating }
+        return listOf(
+            com.example.data.intelligence.IntelligentSection(
+                title = "Your Favorites",
+                subtitle = "Hand-picked by you",
+                items = favs.take(limit)
+            )
+        )
+    }
+
+    fun setAutoScrollSpeed(speed: com.example.data.AutoScrollSpeed) {
+        libraryPreferences?.setAutoScrollSpeed(speed)
+    }
+
+    fun setGridDensity(density: Float) {
+        libraryPreferences?.setGridDensity(density)
+    }
+
+    fun searchByMultipleImages(items: List<MediaItem>) {
+        val uris = items.map { Uri.parse(it.uriPath) }
+        // Implementation stub for UI contract
+        Log.i("MediaRepository", "Multiple image search requested: ${uris.size} items")
+        if (uris.isNotEmpty()) {
+            val context = applicationContext ?: return
+            val uri = uris.first()
+            try {
+                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
+                } else {
+                    MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+                }
+                searchByImage(bitmap, uri.toString())
+            } catch (e: Exception) {
+                Log.e("MediaRepository", "Failed to load image for multi-visual search", e)
+            }
+        }
+    }
+
     fun clearSearch() {
         _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Text("")
+    }
+
+    fun removeVisualReference(index: Int) {
+        // Implementation stub for UI contract
+        removeVisualAnchor()
     }
 
     @OptIn(kotlinx.coroutines.FlowPreview::class)
@@ -701,10 +648,6 @@ class MediaRepository(
     var libraryCurrentPage: Int = 1
     var libraryScrollIndex: Int = 0
     var libraryScrollOffset: Int = 0
-    
-    // UI Preferences (Update 4)
-    var libraryPreferences: LibraryPreferences? = null
-        private set
 
     var discoverScrollIndex: Int = 0
     var discoverScrollOffset: Int = 0
@@ -830,33 +773,6 @@ class MediaRepository(
         }
 
         if (isSearchBlank) {
-            val core = intelligenceCore
-            if (core != null && category == SortCategory.INTELLIGENT && 
-                (intelligentSort == IntelligentSortOption.PERSONALIZED || intelligentSort == IntelligentSortOption.DISCOVER)) {
-                try {
-                    val coreRequest = com.example.data.intelligence.IntelligenceRequest(
-                        mode = com.example.data.intelligence.IntelligenceMode.SORT,
-                        sortOption = intelligentSort.name,
-                        filterType = filter,
-                        tasteDNA = dna,
-                        profile = profile,
-                        policy = policy,
-                        intent = intent,
-                        stats = stats,
-                        creatorProfiles = creators,
-                        limit = items.size
-                    )
-                    val response = core.processRequest(coreRequest)
-                    if (response.isSuccess) {
-                        android.util.Log.i("AURA_SORT_FLOW", "Core sort [${response.requestId}]: Candidates=${response.candidates.size}")
-                        emit(response.candidates.map { it.item })
-                        return@transformLatest
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("AURA_SORT_FLOW", "Intelligence Core sort exception. Falling back to legacy.", e)
-                }
-            }
-
             val sorted = getFilteredAndSortedMedia(
                 filterType = filter,
                 sortCategory = category,
@@ -874,41 +790,39 @@ class MediaRepository(
             android.util.Log.i("AURA_SORT_FLOW", "Emission: Sorted list of ${sorted.size} items.")
             emit(sorted)
         } else {
-            // Intelligence Core Search Path (Update 6 Consolidation)
-            val core = intelligenceCore
-            if (core != null) {
+            // Hybrid Search Path (Stage 10.4 Reactive Integration)
+            val hybridEngine = hybridSearchEngine
+            if (hybridEngine != null && hybridEngine.isSemanticReady()) {
                 try {
-                    val coreRequest = com.example.data.intelligence.IntelligenceRequest(
-                        mode = com.example.data.intelligence.IntelligenceMode.SEARCH,
-                        query = searchRequest.query,
-                        visualVector = searchRequest.visualVector,
-                        limit = 100,
-                        tasteDNA = dna,
-                        profile = profile,
-                        stats = stats,
-                        creatorProfiles = creators
-                    )
-                    val response = core.processRequest(coreRequest)
+                    val searchResult = hybridEngine.search(searchRequest, com.example.data.semantic.HybridSearchConfig(topK = 100))
                     
-                    if (response.isSuccess) {
-                        val results = response.candidates
-                            .map { it.item }
+                    if (searchResult.isSuccess) {
+                        val allItemsMap = items.associateBy { it.id }
+                        val results = searchResult.candidates
+                            .mapNotNull { allItemsMap[it.mediaId] }
                             .filter { matchesFilterType(it, filter) }
                         
-                        android.util.Log.i("AURA_SEARCH_FLOW", "Core search [${response.requestId}]: Candidates=${response.candidates.size}, Displayed=${results.size}")
+                        val queryLabel = when (searchRequest) {
+                            is com.example.data.semantic.SearchRequest.Text -> searchRequest.query
+                            is com.example.data.semantic.SearchRequest.Visual -> "[Visual]"
+                            is com.example.data.semantic.SearchRequest.Compound -> "[Visual] + ${searchRequest.query}"
+                            is com.example.data.semantic.SearchRequest.MultiVisual -> "[Multi-Visual]"
+                        }
+                        android.util.Log.i("AURA_SEARCH_FLOW", "Hybrid search [${searchResult.requestId}]: Query=\"$queryLabel\", Candidates=${searchResult.candidates.size}, Displayed=${results.size}")
                         emit(results)
                     } else {
                         val fallbackQuery = searchRequest.query ?: ""
                         if (fallbackQuery.isNotBlank()) {
-                            android.util.Log.w("AURA_SEARCH_FLOW", "Core search failed: ${response.errorMessage}. Falling back to legacy.")
+                            android.util.Log.w("AURA_SEARCH_FLOW", "Hybrid search failed: ${searchResult.errorMessage}. Falling back to legacy.")
                             emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
                         } else {
-                            android.util.Log.w("AURA_SEARCH_FLOW", "Core visual search failed. No fallback available.")
+                            // Plan 1 Step 3/5: Independent visual search must not leak all items on failure
+                            android.util.Log.w("AURA_SEARCH_FLOW", "Visual search failed: ${searchResult.errorMessage}. No fallback available.")
                             emit(emptyList())
                         }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("AURA_SEARCH_FLOW", "CRITICAL: Intelligence Core search exception. Falling back to legacy.", e)
+                    android.util.Log.e("AURA_SEARCH_FLOW", "CRITICAL: Hybrid search engine threw exception. Falling back to legacy.", e)
                     val fallbackQuery = searchRequest.query ?: ""
                     if (fallbackQuery.isNotBlank()) {
                         emit(performLegacySearch(items.filter { matchesFilterType(it, filter) }, fallbackQuery))
@@ -999,11 +913,11 @@ class MediaRepository(
 
     fun initDatabase(context: Context) {
         applicationContext = context.applicationContext
-        if (libraryPreferences == null) {
-            libraryPreferences = LibraryPreferences(context.applicationContext)
-        }
         if (blueprintArtifactManager == null) {
             blueprintArtifactManager = com.example.data.blueprint.BlueprintArtifactManager(context.applicationContext)
+        }
+        if (libraryPreferences == null) {
+            libraryPreferences = LibraryPreferences(context.applicationContext)
         }
         
         if (_databaseState.value == DatabaseState.READY) return
@@ -1082,39 +996,6 @@ class MediaRepository(
                     }
 
                     intelligenceRepository = IntelligenceRepository(db.intelligenceDao(), this@MediaRepository, moshi, scope, db)
-                    val iRepo = InteractionRepository(db.interactionDao(), moshi, scope)
-                    interactionRepository = iRepo
-
-                    // Phase 3: Preference Engine Activation
-                    launch {
-                        val watermarkFlow = MutableStateFlow(db.userPreferenceDao().getPreference("last_interaction_watermark")?.value?.toLongOrNull() ?: 0L)
-                        
-                        watermarkFlow.flatMapLatest { watermark ->
-                            iRepo.observeEventsAfter(watermark)
-                        }
-                        .debounce(5000) // Batch updates every 5 seconds of quiet
-                        .collect { events ->
-                            if (events.isEmpty()) return@collect
-                            
-                            val currentDna = _tasteDNA.value
-                            if (!currentDna.isFineTuningEnabled) return@collect
-
-                            val updatedDna = com.example.data.intelligence.PreferenceEngine.calculateUpdatedDNA(
-                                currentDna, events, this@MediaRepository
-                            )
-
-                            if (updatedDna != currentDna) {
-                                updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "AI Learned Aggregation")
-                                
-                                val newWatermark = events.maxOf { it.timestamp }
-                                watermarkFlow.value = newWatermark + 1 // Start next batch from after this one
-                                db.userPreferenceDao().insertPreference(
-                                    com.example.data.db.UserPreferenceEntity("last_interaction_watermark", newWatermark.toString())
-                                )
-                            }
-                        }
-                    }
-
                     val errorRepo = PlaybackErrorLogRepository(db.playbackErrorLogDao(), scope)
                     playbackErrorLogRepository = errorRepo
                     flushPendingErrorLogs(errorRepo)
@@ -1130,17 +1011,14 @@ class MediaRepository(
                     // ONNX MODEL ACTIVATION (Phase 4)
                     val realEngine = try {
                         val modelPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/all-minilm-l6-v2.onnx")
-                        val engine = OnnxRuntimeMiniLMInferenceEngine(modelPath = modelPath)
-                        Log.i("MediaRepository", "MiniLM ONNX engine initialized SUCCESSFULLY.")
-                        engine
+                        OnnxRuntimeMiniLMInferenceEngine(modelPath = modelPath)
                     } catch (e: Exception) {
                         Log.e("MediaRepository", "Failed to load ONNX model from assets. Falling back to local engine.", e)
                         LocalMiniLMInferenceEngine()
                     }
 
                     val realTokenizer = try {
-                        val vocabPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/vocab.txt")
-                        val vocabText = java.io.File(vocabPath).readText()
+                        val vocabText = context.assets.open("models/vocab.txt").use { it.bufferedReader().readText() }
                         BertWordPieceTokenizer.fromVocabText(vocabText)
                     } catch (e: Exception) {
                         Log.e("MediaRepository", "Failed to load vocab.txt from assets. Using standard vocab.", e)
@@ -1149,10 +1027,7 @@ class MediaRepository(
 
                     embeddingProvider = MiniLMEmbeddingProvider(engine = realEngine, tokenizer = realTokenizer)
                     
-                    val retriever = DefaultSemanticCandidateRetriever(
-                        repository = semanticRepresentationRepository!!,
-                        scope = scope
-                    )
+                    val retriever = DefaultSemanticCandidateRetriever(semanticRepresentationRepository!!)
                     semanticCandidateRetriever = retriever
 
                     semanticSearchService = DefaultSemanticSearchService(embeddingProvider!!, retriever)
@@ -1177,11 +1052,8 @@ class MediaRepository(
                     }
                     
                     val lexicalRetriever = ProductionLexicalRetriever()
-                    val personalizationScorer = object : PersonalizationScorer {
-                        override fun score(mediaId: String): Float = scoreMediaItemForPersonalization(mediaId)
-                    }
-
-                    // Initial Intelligence Core (Lexical + Semantic Content)
+                    
+                    // Initial Core (Stage 1: Content Lexical + Content Semantic)
                     val initialCore = com.example.data.intelligence.AuraIntelligenceCore(
                         repository = this@MediaRepository,
                         retrievalRouter = com.example.data.intelligence.RetrievalRouter(
@@ -1193,89 +1065,63 @@ class MediaRepository(
                     intelligenceCore = initialCore
                     hybridSearchEngine = DefaultHybridSearchEngine(initialCore)
 
-                    // PHASE 7: MobileCLIP Activation (Hardened and Decoupled)
-                    var mClipTextProvider: MobileCLIPTextEmbeddingProvider? = null
-                    var mClipVisualRetriever: MobileCLIPVisualRetriever? = null
-                    
+                    // PHASE 7: MobileCLIP Activation
                     try {
-                        // 1. Image Encoder (Primary for See Similar / Multi-Visual)
                         val mobileClipPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_image.onnx")
                         val mobileClipEngine = OnnxRuntimeMobileCLIPInferenceEngine(modelPath = mobileClipPath)
                         mobileCLIPProvider = MobileCLIPEmbeddingProvider(engine = mobileClipEngine)
-                        Log.i("MediaRepository", "MobileCLIP image engine initialized SUCCESSFULLY.")
-                    } catch (e: Exception) {
-                        Log.e("MediaRepository", "Failed to load MobileCLIP image model. Using fallback for indexing/similarity.", e)
-                        mobileCLIPProvider = MobileCLIPEmbeddingProvider(engine = LocalMobileCLIPInferenceEngine())
-                    }
-
-                    // 2. Text Encoder & Visual Retriever (Secondary for Cross-modal search)
-                    try {
-                        val clipVocabPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_vocab.json")
-                        val clipVocab = java.io.File(clipVocabPath).readText()
-                        val clipMergesPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_merges.txt")
-                        val clipMerges = java.io.File(clipMergesPath).readText()
+                        
+                        // Text Provider for query embedding
+                        val clipVocab = context.assets.open("models/mobileclip_vocab.json").use { it.bufferedReader().readText() }
+                        val clipMerges = context.assets.open("models/mobileclip_merges.txt").use { it.bufferedReader().readText() }
                         val clipTokenizer = ClipBpeTokenizer.fromAssets(clipVocab, clipMerges)
                         
                         val mobileClipTextPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_text.onnx")
                         val mobileClipTextEngine = OnnxRuntimeMobileCLIPTextInferenceEngine(modelPath = mobileClipTextPath)
-                        mClipTextProvider = MobileCLIPTextEmbeddingProvider(mobileClipTextEngine, clipTokenizer)
+                        val mobileClipTextProvider = MobileCLIPTextEmbeddingProvider(mobileClipTextEngine, clipTokenizer)
                         
-                        val mobileClipVisualSearchService = DefaultSemanticSearchService(mClipTextProvider!!, retriever)
-                        mClipVisualRetriever = DefaultMobileCLIPVisualRetriever(mobileClipVisualSearchService)
-                        Log.i("MediaRepository", "MobileCLIP text engine and visual retriever initialized SUCCESSFULLY.")
-                    } catch (e: Exception) {
-                        Log.e("MediaRepository", "Failed to load MobileCLIP text components. Cross-modal visual search will be unavailable.", e)
-                    }
+                        visualIndexingService = DefaultVisualIndexingService(
+                            visualProvider = mobileCLIPProvider!!,
+                            candidateRetriever = retriever,
+                            repository = semanticRepresentationRepository!!
+                        )
 
-                    // 3. Visual Indexing Service (MANDATORY DECOUPLED INITIALIZATION)
-                    val vIndexingService = DefaultVisualIndexingService(
-                        visualProvider = mobileCLIPProvider!!,
-                        candidateRetriever = retriever,
-                        repository = semanticRepresentationRepository!!
-                    )
-                    visualIndexingService = vIndexingService
-
-                    // AURA SEARCH: Reconstruct visual index from persistence (DECOUPLED)
-                    launch {
-                        try {
-                            vIndexingService.initializeIndex()
-                            Log.i("MediaRepository", "Visual index reconstructed from persistence.")
-                        } catch (e: Exception) {
-                            Log.e("MediaRepository", "Failed to reconstruct visual index", e)
+                        // AURA SEARCH: Proactively reconstruct visual index from persistence
+                        launch {
+                            try {
+                                visualIndexingService?.initializeIndex()
+                                Log.i("MediaRepository", "Visual index reconstructed from persistence.")
+                            } catch (e: Exception) {
+                                Log.e("MediaRepository", "Failed to reconstruct visual index", e)
+                            }
                         }
+
+                        val mobileClipVisualSearchService = DefaultSemanticSearchService(mobileClipTextProvider, retriever)
+                        val mobileClipVisualRetriever = DefaultMobileCLIPVisualRetriever(mobileClipVisualSearchService)
+
+                        // Re-initialize VisualContextEngine with the neural provider, repository, and retriever
+                        visualContextEngine = com.example.data.visual.VisualContextEngine(
+                            this@MediaRepository, 
+                            mobileCLIPProvider,
+                            semanticRepresentationRepository,
+                            semanticCandidateRetriever
+                        )
+                        Log.i("MediaRepository", "MobileCLIP image encoder and visual retriever activated.")
+                        
+                        // Final Unified Core (Stage 2: Multimodal Router)
+                        val finalCore = com.example.data.intelligence.AuraIntelligenceCore(
+                            repository = this@MediaRepository,
+                            retrievalRouter = com.example.data.intelligence.RetrievalRouter(
+                                lexicalRetriever = lexicalRetriever,
+                                semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
+                                visualProvider = mobileClipVisualRetriever as? com.example.data.intelligence.VisualRetrievalProvider
+                            )
+                        )
+                        intelligenceCore = finalCore
+                        hybridSearchEngine = DefaultHybridSearchEngine(finalCore)
+                    } catch (e: Exception) {
+                        Log.e("MediaRepository", "Failed to load MobileCLIP model from assets.", e)
                     }
-
-                    // 4. Component Updates
-                    visualContextEngine = com.example.data.visual.VisualContextEngine(
-                        this@MediaRepository, 
-                        mobileCLIPProvider,
-                        semanticRepresentationRepository,
-                        semanticCandidateRetriever
-                    )
-                    
-                    // Phase 4: Intelligence Core Activation
-                    val core = com.example.data.intelligence.AuraIntelligenceCore(
-                        repository = this@MediaRepository,
-                        retrievalRouter = com.example.data.intelligence.RetrievalRouter(
-                            lexicalRetriever = lexicalRetriever,
-                            semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
-                            visualProvider = mClipVisualRetriever as? com.example.data.intelligence.VisualRetrievalProvider
-                        )
-                    )
-                    intelligenceCore = core
-
-                    // Update hybrid engine with visual channel and Stage 8 video intelligence
-                    hybridSearchEngine = DefaultHybridSearchEngine(core)
-
-                    // Phase 4: Intelligence Core Activation
-                    intelligenceCore = com.example.data.intelligence.AuraIntelligenceCore(
-                        repository = this@MediaRepository,
-                        retrievalRouter = com.example.data.intelligence.RetrievalRouter(
-                            lexicalRetriever = lexicalRetriever,
-                            semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
-                            visualProvider = mClipVisualRetriever as? com.example.data.intelligence.VisualRetrievalProvider
-                        )
-                    )
 
                     // AURA STABILITY: Ensure all mandatory repositories are initialized before marking READY
                     checkNotNull(intelligenceRepository) { "intelligenceRepository failed to initialize" }
@@ -1543,8 +1389,6 @@ class MediaRepository(
                     _databaseErrorMessage.value = "Initialization failed to complete normally."
                 }
             }
-
-
         }
     }
 
@@ -1588,15 +1432,24 @@ class MediaRepository(
                     dao.update(entity.copy(playCount = entity.playCount + 1, lastViewedTimestamp = timestamp))
                 }
             }
+        }
 
-            // Standardized Interaction Recording
-            interactionRepository?.let { iRepo ->
-                AuraInteractionService.logInteraction(
-                    mediaRepository = this@MediaRepository,
-                    interactionRepository = iRepo,
-                    type = AuraInteractionType.MEDIA_ENGAGEMENT,
-                    mediaId = item.id
-                )
+        // 2. Automatic Taste DNA Learning from meaningful engagement
+        val dna = _tasteDNA.value
+        if (dna.isFineTuningEnabled) {
+            val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
+            var updatedDna = dna
+            
+            // Engagement is a positive signal but should be very gradual (0.005)
+            val engagementIncrement = 0.005
+            
+            adjustments.forEach { (dim, multiplier) ->
+                val amount = multiplier * engagementIncrement
+                updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
+            }
+            
+            if (updatedDna != dna) {
+                updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Media Engagement (View)")
             }
         }
 
@@ -1643,9 +1496,29 @@ class MediaRepository(
                     dao.update(entity.copy(progress = 1.0f))
                 }
             }
-
-
         }
+
+        // 2. Automatic Taste DNA Learning from Completion (Strong Positive Signal)
+        val dna = _tasteDNA.value
+        if (dna.isFineTuningEnabled) {
+            val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
+            var updatedDna = dna
+            
+            // Completion is a strong positive signal (0.01)
+            val completionIncrement = 0.01
+            
+            adjustments.forEach { (dim, multiplier) ->
+                val amount = multiplier * completionIncrement
+                updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
+            }
+            
+            if (updatedDna != dna) {
+                updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Media Completion")
+            }
+        }
+        
+        // 3. Update Preference Profile Learning
+        learnPreferenceSignals(item, isCompletion = true, isSuccess = true)
     }
 
     private fun learnPreferenceSignals(
@@ -1928,10 +1801,10 @@ class MediaRepository(
 
     private val pairwiseWins = mutableMapOf<String, Int>()
     private val pairwiseLosses = mutableMapOf<String, Int>()
-    
+
     fun getPairwiseWins(): Map<String, Int> = pairwiseWins.toMap()
     fun getPairwiseLosses(): Map<String, Int> = pairwiseLosses.toMap()
-    
+
     private val comparisonCounts = mutableMapOf<String, Int>()
     private val recentPairs = mutableListOf<Pair<String, String>>()
     private val recentItemIds = mutableListOf<String>()
@@ -2158,15 +2031,13 @@ class MediaRepository(
         _isPlayerActive.value = true
         
         // AURA P1 STABILITY: Authoritative Playlist Sanitization
-        // We include PENDING/UNTESTED so users can play media as soon as it is found.
+        // Only verified playable terminal states are allowed in active playback.
         val visibleStatuses = listOf(
             CompatibilityStatus.PLAYABLE,
             CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE,
             CompatibilityStatus.PLAYABLE_AFTER_CONVERSION,
             CompatibilityStatus.THUMBNAIL_FAILED,
-            CompatibilityStatus.NEEDS_TRANSCODE,
-            CompatibilityStatus.ANALYSIS_PENDING,
-            CompatibilityStatus.UNTESTED
+            CompatibilityStatus.NEEDS_TRANSCODE
         )
         val sanitized = items.filter { item ->
             !item.isDeleted && item.compatibilityStatus in visibleStatuses
@@ -2397,16 +2268,15 @@ class MediaRepository(
             return false
         }
 
-        // Only allow one active scan at a time. If one is running, join it.
-        val currentJob = activeScanJob
-        if (currentJob?.isActive == true) {
+        // Only allow one active scan at a time. If one is running, join it or wait.
+        if (activeScanJob?.isActive == true) {
             Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Joining already active scan job.")
-            currentJob.join()
-            return true
+            activeScanJob?.join()
+            return false 
         }
         
         var changed = false
-        val job = scope.launch {
+        activeScanJob = scope.launch {
             try {
                 Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Scan coroutine started on thread: ${Thread.currentThread().name}")
                 val initialCount = _mediaItems.value.size
@@ -2516,9 +2386,6 @@ class MediaRepository(
                 }
             }
         }
-        activeScanJob = job
-        job.join()
-        return true
         activeScanJob?.join()
         Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] scanLocalMedia() joining complete. Returning changed=$changed")
         return changed
@@ -2870,7 +2737,7 @@ class MediaRepository(
             isComplete = true,
             processedCount = total,
             totalCount = total,
-            statusText = "Scan complete — $total items processed"
+            statusText = "Scan complete ΓÇö $total items processed"
         )
     }
 
@@ -3056,15 +2923,6 @@ class MediaRepository(
                     )
                 }
             }
-
-            // Standardized Interaction Recording
-            interactionRepository?.let { iRepo ->
-                iRepo.recordSignal(
-                    mediaId = id,
-                    type = AuraInteractionType.MEDIA_EXPOSURE.name,
-                    value = 1.0
-                )
-            }
         }
     }
 
@@ -3127,15 +2985,6 @@ class MediaRepository(
                         )
                     )
                 }
-
-                // Standardized Interaction Recording
-                interactionRepository?.let { iRepo ->
-                    iRepo.recordSignal(
-                        mediaId = id,
-                        type = AuraInteractionType.MEDIA_EXPOSURE.name,
-                        value = 1.0
-                    )
-                }
             }
             if (entitiesToUpdate.isNotEmpty()) {
                 Log.d("AuraPerformance", "Flushing ${entitiesToUpdate.size} exposures to database.")
@@ -3177,21 +3026,34 @@ class MediaRepository(
                 }
             }
 
-            // Standardized Interaction Recording
+            // Automatic Taste DNA Learning from explicit rating
             val item = updatedItem
-            if (item != null) {
-                interactionRepository?.let { iRepo ->
-                    AuraInteractionService.logInteraction(
-                        mediaRepository = this@MediaRepository,
-                        interactionRepository = iRepo,
-                        type = AuraInteractionType.RATING,
-                        mediaId = item.id,
-                        value = rating.toDouble()
-                    )
+            val dna = _tasteDNA.value
+            if (item != null && dna.isFineTuningEnabled && rating > 0) {
+                val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
+                var updatedDna = dna
+                
+                // Calibration direction based on star rating
+                // 4-5 stars: Positive reinforcement (1.0x)
+                // 3 stars: Neutral (0.0x)
+                // 1-2 stars: Negative reinforcement (-1.0x)
+                val sentimentDirection = when {
+                    rating >= 4f -> 1.0
+                    rating == 3f -> 0.0
+                    else -> -1.0
+                }
+
+                if (sentimentDirection != 0.0) {
+                    adjustments.forEach { (dim, multiplier) ->
+                        val amount = multiplier * MAX_ADJUSTMENT_PER_VOTE * sentimentDirection
+                        updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
+                    }
+                    
+                    if (updatedDna != dna) {
+                        updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Explicit Rating ($rating stars)")
+                    }
                 }
             }
-
-
         }
     }
 
@@ -3239,8 +3101,6 @@ class MediaRepository(
                     updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Cleanup Decision ($category)")
                 }
             }
-
-
         }
     }
 
@@ -3323,14 +3183,21 @@ class MediaRepository(
                 }
             }
 
-            // Standardized Interaction Recording
-            interactionRepository?.let { iRepo ->
-                AuraInteractionService.logInteraction(
-                    mediaRepository = this@MediaRepository,
-                    interactionRepository = iRepo,
-                    type = AuraInteractionType.FAVORITE,
-                    mediaId = updated.id
-                )
+            // Automatic Taste DNA Learning from Favorite addition (Priority 1 Invariant)
+            val dna = _tasteDNA.value
+            if (dna.isFineTuningEnabled) {
+                val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(updated)
+                var updatedDna = dna
+                val direction = 1.0
+
+                adjustments.forEach { (dim, multiplier) ->
+                    val amount = multiplier * MAX_ADJUSTMENT_PER_VOTE * direction
+                    updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
+                }
+
+                if (updatedDna != dna) {
+                    updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Favorite Added")
+                }
             }
         }
     }
@@ -3361,16 +3228,6 @@ class MediaRepository(
                         repo.enqueueRecommendationFeedback(payload)
                     }
                 }
-            }
-            
-            // Standardized Interaction Recording
-            interactionRepository?.let { iRepo ->
-                AuraInteractionService.logInteraction(
-                    mediaRepository = this@MediaRepository,
-                    interactionRepository = iRepo,
-                    type = AuraInteractionType.UNFAVORITE,
-                    mediaId = updated.id
-                )
             }
             // Invariant: NEVER delete or decrement micro_moments. Zero negative Taste DNA learning.
         }
@@ -3416,14 +3273,21 @@ class MediaRepository(
                 )
             }
 
-            // Standardized Interaction Recording
-            interactionRepository?.let { iRepo ->
-                AuraInteractionService.logInteraction(
-                    mediaRepository = this@MediaRepository,
-                    interactionRepository = iRepo,
-                    type = if (updated.isFavorite) AuraInteractionType.FAVORITE else AuraInteractionType.UNFAVORITE,
-                    mediaId = updated.id
-                )
+            // Automatic Taste DNA Learning from Favorite toggle
+            val dna = _tasteDNA.value
+            if (updated.isFavorite && dna.isFineTuningEnabled) {
+                val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(updated)
+                var updatedDna = dna
+                val direction = 1.0
+
+                adjustments.forEach { (dim, multiplier) ->
+                    val amount = multiplier * MAX_ADJUSTMENT_PER_VOTE * direction
+                    updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
+                }
+
+                if (updatedDna != dna) {
+                    updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Favorite Added")
+                }
             }
         }
     }
@@ -3549,22 +3413,7 @@ class MediaRepository(
         }
     }
 
-    suspend fun getSimilarMedia(item: MediaItem, requestId: String = "NONE", useCore: Boolean = true): List<MediaItem> {
-        val core = intelligenceCore
-        if (useCore && core != null) {
-            val request = com.example.data.intelligence.IntelligenceRequest(
-                mode = com.example.data.intelligence.IntelligenceMode.SIMILAR,
-                referenceItemId = item.id,
-                limit = 50,
-                requestId = if (requestId == "NONE") java.util.UUID.randomUUID().toString().take(8) else requestId
-            )
-            val response = core.processRequest(request)
-            if (response.isSuccess) {
-                return response.candidates.map { it.item }
-            }
-        }
-
-        // Legacy Fallback
+    suspend fun getSimilarMedia(item: MediaItem, requestId: String = "NONE"): List<MediaItem> {
         Log.d("SeeSimilarTrace", "STAGE=START requestId=$requestId sourceId=${item.id} title=\"${item.title}\"")
         val allItems = _mediaItems.value
         val all = allItems.filter { other ->
@@ -3678,8 +3527,8 @@ class MediaRepository(
             Log.d("SeeSimilarTrace", "rank=${i+1} id=${m.id} score=$s title=\"${m.title}\"")
         }
 
-        // Plan 1 Step 2: RESTORED 30-result take as per functional baseline requirements
-        return sortedMatches.take(30)
+        // Plan 1 Step 2: Removed forced 30-result take to allow zero or few results if relevance is low
+        return sortedMatches
     }
 
     fun setMediaItemsForTesting(items: List<MediaItem>) {
@@ -3751,22 +3600,6 @@ class MediaRepository(
                     kFactor = PairwiseEloEngine.K_FACTOR
                 )
                 db.pairwiseDao().insertOutcome(outcome)
-
-                // Standardized Interaction Recording
-                interactionRepository?.let { iRepo ->
-                    AuraInteractionService.logInteraction(
-                        mediaRepository = this@MediaRepository,
-                        interactionRepository = iRepo,
-                        type = AuraInteractionType.PAIRWISE_WIN,
-                        mediaId = chosenId
-                    )
-                    AuraInteractionService.logInteraction(
-                        mediaRepository = this@MediaRepository,
-                        interactionRepository = iRepo,
-                        type = AuraInteractionType.PAIRWISE_LOSS,
-                        mediaId = loserId
-                    )
-                }
 
                 // Phase 3B.2: Enqueue sanitized contribution if consent is granted
                 contributionQueueRepository?.let { repo ->
@@ -3888,22 +3721,6 @@ class MediaRepository(
                     )
                     db.pairwiseDao().insertOutcome(outcome)
 
-                    // Standardized Interaction Recording
-                    interactionRepository?.let { iRepo ->
-                        AuraInteractionService.logInteraction(
-                            mediaRepository = this@MediaRepository,
-                            interactionRepository = iRepo,
-                            type = AuraInteractionType.MEDIA_ABANDONED,
-                            mediaId = itemA.id
-                        )
-                        AuraInteractionService.logInteraction(
-                            mediaRepository = this@MediaRepository,
-                            interactionRepository = iRepo,
-                            type = AuraInteractionType.MEDIA_ABANDONED,
-                            mediaId = itemB.id
-                        )
-                    }
-
                     // Phase 3B.2: Enqueue sanitized contribution if consent is granted
                     contributionQueueRepository?.let { repo ->
                         if (repo.isConsentGranted()) {
@@ -3991,20 +3808,43 @@ class MediaRepository(
                 }
             }
 
-            // Standardized Interaction Recording
-            interactionRepository?.let { iRepo ->
-                AuraInteractionService.logInteraction(
-                    mediaRepository = this@MediaRepository,
-                    interactionRepository = iRepo,
-                    type = when (eventType) {
-                        "SKIP_FORWARD", "REPEATED_SKIP" -> AuraInteractionType.MEDIA_ABANDONED
-                        "WATCHED_DESTINATION" -> AuraInteractionType.MEDIA_ENGAGEMENT
-                        "SKIP_REVERSAL" -> AuraInteractionType.MEDIA_REPLAY
-                        else -> AuraInteractionType.MEDIA_ABANDONED
-                    },
-                    mediaId = mediaId,
-                    metadata = mapOf("fromPos" to fromPosMs.toString(), "toPos" to toPosMs.toString())
-                )
+            // Automatic Skip Sensitivity Learning (Individual Level Only)
+            val dna = _tasteDNA.value
+            if (dna.isFineTuningEnabled) {
+                var amount = 0.0
+                when (eventType) {
+                    "SKIP_REVERSAL" -> amount = -MAX_ADJUSTMENT_PER_SKIP
+                    "REPEATED_SKIP" -> amount = MAX_ADJUSTMENT_PER_SKIP
+                    "WATCHED_DESTINATION" -> amount = MAX_ADJUSTMENT_PER_SKIP / 2
+                }
+                
+                var updatedDna = dna
+                if (amount != 0.0) {
+                    updatedDna = updatedDna.updateLearnedDimension("skipSensitivity", amount, TOTAL_ADJUSTMENT_LIMIT)
+                }
+
+                // ALSO: Use traits of the skipped media as a negative signal (for SKIP_FORWARD/REPEATED_SKIP)
+                if (eventType == "SKIP_FORWARD" || eventType == "REPEATED_SKIP") {
+                    val item = getMediaItemById(mediaId)
+                    if (item != null) {
+                        val adjustments = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
+                        adjustments.forEach { (dim, multiplier) ->
+                            // Skips are negative signals
+                            val traitAmount = multiplier * MAX_ADJUSTMENT_PER_SKIP * -1.0
+                            updatedDna = updatedDna.updateLearnedDimension(dim, traitAmount, TOTAL_ADJUSTMENT_LIMIT)
+                        }
+                        
+                        // Update Preference Profile Learning - Negative engagement signal
+                        learnPreferenceSignals(item, isSuccess = false)
+                    }
+                }
+                
+                if (updatedDna != dna) {
+                    updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "AI Skip Behavior ($eventType)")
+                    
+                    // Emit Emotional Intelligence Signal
+                    momentDispatcher.onEvent(AuraMomentDispatcher.IntelligenceEvent.TasteCalibrated("Sensitivity", amount))
+                }
             }
 
             _intelligenceStats.update {
@@ -4122,8 +3962,6 @@ stats ->
         val items = inputItems.filter { item ->
             matchesFilterType(item, filterType) && isItemVisibleInLibrary(item)
         }
-        
-        android.util.Log.d("AURA_SORT_FLOW", "getFilteredAndSortedMedia: Filtered pool size: ${items.size} (from ${inputItems.size}) Filter: $filterType, Category: $sortCategory")
 
         return if (sortCategory == SortCategory.STANDARD) {
             val sorted = when (standardSort) {
@@ -4252,8 +4090,6 @@ stats ->
                     }.map { it.copy(selectionReason = "Surprise!") }
                 }
             }
-
-
         }
     }
 
@@ -4469,17 +4305,15 @@ stats ->
         }
     }
 
-    private fun isItemVisibleInLibrary(item: MediaItem): Boolean {
+    internal fun isItemVisibleInLibrary(item: MediaItem): Boolean {
         // AURA P1 STABILITY: Authoritative Visibility Gate
-        // We include PENDING and UNTESTED items so they appear in the visual browser as they are discovered.
+        // Only verified playable terminal states are allowed in the Library Flow.
         val visibleStatuses = listOf(
             CompatibilityStatus.PLAYABLE,
             CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE,
             CompatibilityStatus.PLAYABLE_AFTER_CONVERSION,
             CompatibilityStatus.THUMBNAIL_FAILED,
-            CompatibilityStatus.NEEDS_TRANSCODE,
-            CompatibilityStatus.ANALYSIS_PENDING,
-            CompatibilityStatus.UNTESTED
+            CompatibilityStatus.NEEDS_TRANSCODE
         )
         return !item.isDeleted && item.compatibilityStatus in visibleStatuses
     }
@@ -4689,10 +4523,10 @@ enum class SortCategory {
 enum class StandardSortOption(val displayName: String, val description: String) {
     NEWEST_FIRST("Recently Added", "Your latest additions to the archive."),
     RECENTLY_PLAYED("Recently Played", "Media you've watched or viewed recently."),
-    TITLE_ASC("Title A–Z", "Media sorted alphabetically by title."),
-    TITLE_DESC("Title Z–A", "Media sorted in reverse alphabetical order."),
-    SHORTEST_DURATION("Duration: Short → Long", "Your shortest clips and photos."),
-    LONGEST_DURATION("Duration: Long → Short", "Your longest videos."),
+    TITLE_ASC("Title AΓÇôZ", "Media sorted alphabetically by title."),
+    TITLE_DESC("Title ZΓÇôA", "Media sorted in reverse alphabetical order."),
+    SHORTEST_DURATION("Duration: Short ΓåÆ Long", "Your shortest clips and photos."),
+    LONGEST_DURATION("Duration: Long ΓåÆ Short", "Your longest videos."),
     MOST_PLAYED("Most Played", "Media you watch and interact with most often."),
     LEAST_PLAYED("Least Played", "Media with the lowest play count."),
     RANDOM("Random", "Browse your library in a fresh randomized order.")

@@ -15,6 +15,17 @@ enum class IntelligenceMode {
 }
 
 /**
+ * Surface-provided intent to guide Core decision making.
+ */
+enum class ContextualIntent {
+    LIBRARY_BROWSE,
+    DISCOVER_CATEGORY,
+    DETAIL_CONTEXT,
+    MENU_SHORTCUT,
+    MOMENTS_FLOW
+}
+
+/**
  * Epistemic status of intelligence evidence.
  */
 enum class EvidenceStatus {
@@ -41,6 +52,7 @@ enum class EvidenceType {
     METADATA_MATCH,
     TASTE_DNA_ALIGNMENT,
     PAIRWISE_PREFERENCE,
+    RELATIONSHIP_MATCH,
     EXPLORATION_VALUE,
     RECENCY_BONUS,
     DIVERSITY_PENALTY
@@ -63,8 +75,10 @@ data class EvidenceItem(
  */
 data class IntelligenceRequest(
     val mode: IntelligenceMode,
+    val contextualIntent: ContextualIntent = ContextualIntent.LIBRARY_BROWSE,
     val query: String? = null,
     val referenceItemId: String? = null,
+    val relatedMediaIds: List<String> = emptyList(),
     val visualVector: FloatArray? = null,
     val limit: Int = 40,
     val tasteDNA: TasteDNA? = null,

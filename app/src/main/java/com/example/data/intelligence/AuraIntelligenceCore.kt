@@ -5,6 +5,7 @@ import com.example.data.semantic.*
 import com.example.compatibility.AuraMediaCompatibilityEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 /**
  * Reusable orchestration layer for Aura's intelligence capabilities.
@@ -19,6 +20,9 @@ class AuraIntelligenceCore(
      * Processes a generalized intelligence request.
      */
     suspend fun processRequest(request: IntelligenceRequest): IntelligenceResponse = withContext(Dispatchers.Default) {
+        // 0. Cache Lookup
+        IntelligenceCache.getResponse(request)?.let { return@withContext it }
+
         val startTime = System.currentTimeMillis()
         
         val candidates = when(request.mode) {
@@ -28,14 +32,21 @@ class AuraIntelligenceCore(
             IntelligenceMode.DISCOVER -> handleDiscover(request)
         }
 
+        val sealedResults = seal(candidates)
+
         val latency = System.currentTimeMillis() - startTime
         
-        IntelligenceResponse(
+        val response = IntelligenceResponse(
             requestId = request.requestId,
             mode = request.mode,
-            candidates = candidates,
+            candidates = sealedResults,
             latencyMs = latency
         )
+
+        // 1. Cache Write
+        IntelligenceCache.putResponse(request, response)
+        
+        response
     }
 
     private suspend fun handleSearch(request: IntelligenceRequest): List<IntelligenceCandidate> {
@@ -74,7 +85,11 @@ class AuraIntelligenceCore(
             )
         }
 
-        return scoreAndRank(rerankedFused, request)
+        val results = scoreAndRank(rerankedFused, request)
+        
+        // Update 7: Style Annotation
+        val styleProfile = repository.signatureStyleProfile.value
+        return results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
     }
 
     private fun handleSort(request: IntelligenceRequest): List<IntelligenceCandidate> {
@@ -100,23 +115,35 @@ class AuraIntelligenceCore(
                     profile = request.profile ?: repository.preferenceProfile.value
                 )
 
-                items.map { item ->
+                val recentThreshold = 3600000L // 1 hour
+                items.filter { item ->
+                    // Standard Personalized Sort filter: Exclude already liked or recently viewed
+                    val isLiked = item.isFavorite || item.rating >= 4.0f
+                    val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
+                    !isLiked && !isRecent
+                }.map { item ->
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
                     val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
                     
                     val personalScore = scorePersonalization(item, tasteDNA)
-                    val evidenceItems = listOf(
-                        EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "ExplorationEngine"),
-                        EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, personalScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA")
-                    )
+                    val evidenceItems = mutableListOf<EvidenceItem>()
+                    evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "ExplorationEngine"))
+                    evidenceItems.add(EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, personalScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA"))
+                    
+                    // Update 9: Relationship Evidence
+                    val relBonus = scoreRelationships(item, request.relatedMediaIds, evidenceItems)
 
                     IntelligenceCandidate(
                         item = item,
                         evidence = evidenceItems,
-                        rankScore = score.toDouble(),
+                        rankScore = score.toDouble() + relBonus,
                         primaryRelevanceScore = score,
                         secondaryEvidenceScore = personalScore,
-                        provenance = "Personalized Sort"
+                        provenance = when {
+                            evidence.exploitationScore > 0.6 && evidence.familiarityScore > 0.4 -> "For You"
+                            evidence.exploitationScore > 0.5 && evidence.familiarityScore < 0.3 -> "Hidden Gem"
+                            else -> "Personalized"
+                        }
                     )
                 }
             }
@@ -134,13 +161,111 @@ class AuraIntelligenceCore(
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
                     val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
                     
+                    val evidenceItems = mutableListOf<EvidenceItem>()
+                    evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine"))
+                    
+                    // Update 9: Relationship Evidence
+                    val relBonus = scoreRelationships(item, request.relatedMediaIds, evidenceItems)
+
+                    IntelligenceCandidate(
+                        item = item,
+                        evidence = evidenceItems,
+                        rankScore = score.toDouble() + relBonus,
+                        primaryRelevanceScore = score,
+                        secondaryEvidenceScore = 0f,
+                        provenance = "Discover Sort"
+                    )
+                }
+            }
+            "REDISCOVER" -> {
+                val recentThreshold = 3600000L // 1 hour
+                items.filter { item ->
+                    val isLiked = item.isFavorite || item.rating >= 4.0f
+                    val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
+                    isLiked && !isRecent
+                }.map { item ->
+                    val ageBonus = if (item.lastViewedTimestamp != null) {
+                        (now - item.lastViewedTimestamp).toDouble() / (1000.0 * 60 * 60 * 24 * 7) // weeks
+                    } else 100.0
+                    
+                    val score = (item.rating.toDouble() * 20.0) + (item.viewCount.toDouble() * 2.0) + ageBonus
+                    
+                    IntelligenceCandidate(
+                        item = item,
+                        evidence = listOf(EvidenceItem(EvidenceType.RECENCY_BONUS, ageBonus.toFloat(), 1.0f, EvidenceStatus.KNOWN, "RediscoverAge")),
+                        rankScore = score,
+                        primaryRelevanceScore = item.rating,
+                        secondaryEvidenceScore = ageBonus.toFloat()
+                    )
+                }
+            }
+            "LEAST_INTERACTED" -> {
+                val winsMap = repository.getPairwiseWins()
+                val lossesMap = repository.getPairwiseLosses()
+                items.map { item ->
+                    val comparisonCount = (winsMap[item.id] ?: 0) + (lossesMap[item.id] ?: 0)
+                    val score = 100.0 / (item.exposureCount + comparisonCount + 1.0)
+                    IntelligenceCandidate(
+                        item = item,
+                        evidence = listOf(EvidenceItem(EvidenceType.EXPLORATION_VALUE, score.toFloat(), 1.0f, EvidenceStatus.KNOWN, "LeastInteracted")),
+                        rankScore = score,
+                        primaryRelevanceScore = score.toFloat(),
+                        secondaryEvidenceScore = 0f
+                    )
+                }
+            }
+            "EXPLORE" -> {
+                items.map { item ->
+                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
+                    val score = (evidence.uncertaintyScore * 5.0) + (evidence.noveltyScore * 5.0)
+                    IntelligenceCandidate(
+                        item = item,
+                        evidence = listOf(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.uncertaintyScore, 0.7f, EvidenceStatus.INFERRED, "Uncertainty")),
+                        rankScore = score,
+                        primaryRelevanceScore = score.toFloat(),
+                        secondaryEvidenceScore = 0f
+                    )
+                }
+            }
+            "HIDDEN_GEMS" -> {
+                val strategy = DiscoveryPolicyManager.resolveStrategy(
+                    policy = request.policy ?: DiscoveryPolicy(),
+                    intent = request.intent ?: UserIntent(),
+                    objective = RecommendationObjective.LIBRARY_INTELLIGENT_DISCOVERY,
+                    systemState = ConfidenceEngine.calculateDiscoveryState(allItems, stats),
+                    tasteDNA = tasteDNA,
+                    profile = request.profile ?: repository.preferenceProfile.value
+                )
+                
+                items.filter { item ->
+                    item.exposureCount < 5 && item.viewCount < 2 && item.rating == 0f
+                }.map { item ->
+                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
+                    val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
+                    
                     IntelligenceCandidate(
                         item = item,
                         evidence = listOf(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine")),
                         rankScore = score.toDouble(),
                         primaryRelevanceScore = score,
-                        secondaryEvidenceScore = 0f,
-                        provenance = "Discover Sort"
+                        secondaryEvidenceScore = 0f
+                    )
+                }
+            }
+            "FAVORITES" -> {
+                items.filter { item ->
+                    item.isFavorite || item.rating >= 4.0f
+                }.map { item ->
+                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
+                    // Favorites are already high quality, sort by newest added
+                    val score = evidence.exploitationScore * 10f + (item.dateAdded.toDouble() / 1e12).toFloat()
+                    
+                    IntelligenceCandidate(
+                        item = item,
+                        evidence = listOf(EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA")),
+                        rankScore = score.toDouble(),
+                        primaryRelevanceScore = evidence.exploitationScore,
+                        secondaryEvidenceScore = item.dateAdded.toFloat()
                     )
                 }
             }
@@ -158,35 +283,36 @@ class AuraIntelligenceCore(
 
     private suspend fun handleSimilar(request: IntelligenceRequest): List<IntelligenceCandidate> {
         val refId = request.referenceItemId ?: return emptyList()
-        val refItem = repository.getMediaItemById(refId) ?: return emptyList()
+        val refItem = repository.getMediaItemById(refId)
         
-        // Use existing similarity engine but wrap results (useCore = false to prevent recursion)
-        val legacySimilar = repository.getSimilarMedia(refItem, request.requestId, useCore = false)
+        // 1. Resolve context and embedding for reference item (Update 9.1 Consolidation)
+        val query = request.query ?: refItem?.title
+        val visualVector = request.visualVector ?: repository.let { repo ->
+            val provider = repo.mobileCLIPProvider
+            val semanticRepo = repo.semanticRepresentationRepository
+            if (provider != null && semanticRepo != null) {
+                 semanticRepo.getSpecificRepresentation(refId, SemanticRepresentationType.VISUAL, provider.descriptor)?.vector
+            } else null
+        }
         
-        return legacySimilar.mapNotNull { item ->
-            if (!isItemVisibleInLibrary(item)) return@mapNotNull null
-
-            // Re-score item using Core ranking for consistent ordering
-            val personalScore = scorePersonalization(item, request.tasteDNA ?: repository.tasteDNA.value)
-            val exploration = ExplorationEngine.calculateEvidence(item, request.tasteDNA ?: repository.tasteDNA.value)
-            
-            IntelligenceCandidate(
-                item = item,
-                evidence = emptyList(),
-                rankScore = if (request.useLegacyRanking) 1.0 else (1.0 * 0.5) + (personalScore * 0.3) + (exploration.exploitationScore * 0.2),
-                primaryRelevanceScore = 1.0f,
-                secondaryEvidenceScore = personalScore
-            )
-        }.sortedWith(
-            compareByDescending<IntelligenceCandidate> { it.rankScore }
-                .thenByDescending { it.primaryRelevanceScore }
-                .thenByDescending { it.secondaryEvidenceScore }
-                .thenBy { it.item.id }
-        ).take(request.limit)
+        // 2. Execute retrieval via Router (Unified Path)
+        val similarRequest = request.copy(visualVector = visualVector, query = query)
+        val channelResults = retrievalRouter.retrieve(similarRequest)
+        
+        // 3. Fusion and Ranking
+        val fused = RetrievalFusion.fuse(channelResults, HybridSearchConfig(topK = request.limit * 2))
+        
+        // Exclude the reference item itself
+        val filteredFused = fused.filter { it.mediaId != refId }
+        
+        val results = scoreAndRank(filteredFused, request)
+        
+        // Update 7: Style Annotation
+        val styleProfile = repository.signatureStyleProfile.value
+        return results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
     }
 
     private fun handleDiscover(request: IntelligenceRequest): List<IntelligenceCandidate> {
-        // Enforce visibility gate
         val allItems = repository.mediaItems.value
         val itemsOnly = allItems.filter { 
             it.itemCount == null && 
@@ -194,10 +320,46 @@ class AuraIntelligenceCore(
             !it.isDeleted &&
             isItemVisibleInLibrary(it)
         }
-        
-        // Return structured candidates for Discover categories (Phase 4 integration)
-        // For now returning empty as Discover UI still uses RecommendationEngine directly
-        return emptyList()
+
+        val stats = request.stats ?: repository.intelligenceStats.value
+        val dna = request.tasteDNA ?: repository.tasteDNA.value
+        val profile = request.profile ?: repository.preferenceProfile.value
+        val systemState = ConfidenceEngine.calculateDiscoveryState(allItems, stats)
+
+        // Map contextual intent to RecommendationObjective (Aura Phase 9 Alignment)
+        val objective = when (request.contextualIntent) {
+            ContextualIntent.DISCOVER_CATEGORY -> RecommendationObjective.GENERAL_DISCOVERY
+            ContextualIntent.MOMENTS_FLOW -> RecommendationObjective.GENERAL_DISCOVERY
+            else -> RecommendationObjective.GENERAL_DISCOVERY
+        }
+
+        val strategy = DiscoveryPolicyManager.resolveStrategy(
+            policy = request.policy ?: DiscoveryPolicy(),
+            intent = request.intent ?: UserIntent(),
+            objective = objective,
+            systemState = systemState,
+            tasteDNA = dna,
+            profile = profile
+        )
+
+        return itemsOnly.map { item ->
+            val evidence = ExplorationEngine.calculateEvidence(item, dna, stats, request.creatorProfiles ?: repository.creatorProfiles.value)
+            val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
+            
+            val evidenceItems = mutableListOf<EvidenceItem>()
+            evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine"))
+            
+            // Update 9: Relationship Evidence
+            val relBonus = scoreRelationships(item, request.relatedMediaIds, evidenceItems)
+
+            IntelligenceCandidate(
+                item = item,
+                evidence = evidenceItems,
+                rankScore = score.toDouble() + relBonus,
+                primaryRelevanceScore = score,
+                secondaryEvidenceScore = 0f
+            )
+        }.sortedByDescending { it.rankScore }.take(request.limit)
     }
 
     private fun scoreAndRank(
@@ -265,10 +427,13 @@ class AuraIntelligenceCore(
                 ))
             }
 
+            // Update 9: Relationship Evidence
+            val relBonus = scoreRelationships(item, request.relatedMediaIds, evidence)
+
             val rankScore = if (request.useLegacyRanking) {
                 fusedCandidate.rrfScore
             } else {
-                (fusedCandidate.rrfScore * 0.5) + (personalScore * 0.3) + (explorationEvidence.exploitationScore * 0.2) + pairwiseImpact
+                (fusedCandidate.rrfScore * 0.5) + (personalScore * 0.3) + (explorationEvidence.exploitationScore * 0.2) + pairwiseImpact + relBonus
             }
             
             IntelligenceCandidate(
@@ -287,6 +452,46 @@ class AuraIntelligenceCore(
         )
     }
 
+    private fun seal(candidates: List<IntelligenceCandidate>): List<IntelligenceCandidate> {
+        // Final Visibility Gate (Constraint: Defense-in-Depth)
+        return candidates.filter { isItemVisibleInLibrary(it.item) }
+    }
+
+    private fun scoreRelationships(
+        item: MediaItem,
+        relatedIds: List<String>,
+        evidence: MutableList<EvidenceItem>
+    ): Double {
+        if (relatedIds.isEmpty()) return 0.0
+        
+        // 1. Semantic Relationship (Shared Style Anchors)
+        val styleProfile = repository.signatureStyleProfile.value
+        var relationshipBonus = 0.0
+        
+        relatedIds.forEach { relatedId ->
+            val relatedItem = repository.getMediaItemById(relatedId) ?: return@forEach
+            
+            // If both items align with the same strong style anchor
+            styleProfile.activeStyles.forEach { style ->
+                val itemAffinity = SignatureStyleProvider.calculateMediaAffinity(item, style.anchor)
+                val relatedAffinity = SignatureStyleProvider.calculateMediaAffinity(relatedItem, style.anchor)
+                
+                if (itemAffinity > 0.8 && relatedAffinity > 0.8) {
+                    relationshipBonus += 0.05 // Bounded boost per shared style
+                    evidence.add(EvidenceItem(
+                        type = EvidenceType.RELATIONSHIP_MATCH,
+                        score = 0.05f,
+                        confidence = 0.9f,
+                        status = EvidenceStatus.INFERRED,
+                        provenance = "Shared Style: ${style.anchor.displayName}"
+                    ))
+                }
+            }
+        }
+        
+        return relationshipBonus.coerceAtMost(0.2) // Absolute ceiling for relationship boost
+    }
+
     private fun buildProvenance(evidence: List<EvidenceItem>, finalScore: Double): String {
         val topEvidence = evidence.sortedByDescending { Math.abs(it.score) }.take(3)
         return "Score ${"%.3f".format(finalScore)} via " + topEvidence.joinToString(" + ") { 
@@ -295,16 +500,7 @@ class AuraIntelligenceCore(
     }
 
     private fun isItemVisibleInLibrary(item: MediaItem): Boolean {
-        val visibleStatuses = listOf(
-            CompatibilityStatus.PLAYABLE,
-            CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE,
-            CompatibilityStatus.PLAYABLE_AFTER_CONVERSION,
-            CompatibilityStatus.THUMBNAIL_FAILED,
-            CompatibilityStatus.NEEDS_TRANSCODE,
-            CompatibilityStatus.ANALYSIS_PENDING,
-            CompatibilityStatus.UNTESTED
-        )
-        return !item.isDeleted && item.compatibilityStatus in visibleStatuses
+        return repository.isItemVisibleInLibrary(item)
     }
 
     private fun matchesFilterType(item: MediaItem, filterType: String): Boolean {
@@ -315,7 +511,7 @@ class AuraIntelligenceCore(
         }
     }
 
-    private fun scorePersonalization(item: MediaItem, tasteDNA: TasteDNA): Float {
+    internal fun scorePersonalization(item: MediaItem, tasteDNA: TasteDNA): Float {
         val traits = PersonalizationTraitMapper.getTraitAdjustments(item.moodTags)
         if (traits.isEmpty()) return 0.5f
         
@@ -323,7 +519,7 @@ class AuraIntelligenceCore(
         traits.forEach { (dim, presence) ->
             val itemTraitValue = (presence + 1.0) / 2.0
             val userPref = getDimensionValue(tasteDNA, dim)
-            val alignment = 1.0 - Math.abs(userPref - itemTraitValue)
+            val alignment = 1.0 - abs(userPref - itemTraitValue)
             sumAlignment += alignment
         }
         return (sumAlignment / traits.size).toFloat()

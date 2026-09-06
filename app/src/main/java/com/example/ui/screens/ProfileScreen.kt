@@ -113,6 +113,114 @@ private fun TasteSpectrumIndicator(spectrum: TasteSpectrum) {
 }
 
 @Composable
+private fun SignatureStylesPresentation(
+    profile: com.example.data.intelligence.SignatureStyleProfile
+) {
+    if (profile.activeStyles.isEmpty() && profile.emergingStyles.isEmpty()) {
+        Surface(
+            color = AuraSubtleSurface,
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(modifier = Modifier.padding(24.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    "Aura is still learning your unique visual styles. Keep viewing and rating your media.",
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AuraMutedSlate
+                )
+            }
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            profile.activeStyles.take(3).forEach { style ->
+                SignatureStyleCard(style = style, isEmerging = false)
+            }
+            if (profile.activeStyles.size < 3) {
+                profile.emergingStyles.take(3 - profile.activeStyles.size).forEach { style ->
+                    SignatureStyleCard(style = style, isEmerging = true)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SignatureStyleCard(
+    style: com.example.data.intelligence.SignatureStyle,
+    isEmerging: Boolean
+) {
+    Surface(
+        color = if (isEmerging) Color.Transparent else AuraSubtleSurface,
+        shape = RoundedCornerShape(24.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (isEmerging) AuraSubtleBorder.copy(alpha = 0.5f) else AuraSubtleBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isEmerging) "EMERGING STYLE" else "SIGNATURE STYLE",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (isEmerging) AuraMutedSlate else DiscoveryViolet,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = style.anchor.displayName,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AuraMidnight
+                    )
+                }
+                
+                Surface(
+                    color = if (isEmerging) AuraMutedSlate.copy(alpha = 0.1f) else DiscoveryViolet.copy(alpha = 0.1f),
+                    shape = CircleShape
+                ) {
+                    Text(
+                        text = "${(style.affinityScore * 100).toInt()}%",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isEmerging) AuraMutedSlate else DiscoveryViolet
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Text(
+                text = style.anchor.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = AuraSlate
+            )
+            
+            if (style.representativeMedia.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    style.representativeMedia.take(3).forEach { media ->
+                        AsyncImage(
+                            model = media.imageUrl,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(AuraSubtleBorder),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun VisualTasteSummary(
     tasteDNA: TasteDNA,
     aiDescription: String?
@@ -332,6 +440,8 @@ fun ProfileScreen(
         }
     )
     val errorLogs by diagnosticsViewModel.errorLogs.collectAsStateWithLifecycle()
+
+    val styleProfile by repository.signatureStyleProfile.collectAsStateWithLifecycle()
     
     var showFeedbackDialog by remember { mutableStateOf(false) }
     var selectedCluster by remember { mutableStateOf<TasteClusterEvidence?>(null) }
@@ -414,10 +524,7 @@ fun ProfileScreen(
                                 modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
                             )
                             
-                            VisualTasteSummary(
-                                tasteDNA = tasteDNA,
-                                aiDescription = report?.tasteProfile?.description
-                            )
+                            SignatureStylesPresentation(profile = styleProfile)
 
                             Spacer(modifier = Modifier.height(32.dp))
                             
@@ -662,10 +769,7 @@ fun ProfileScreen(
                             modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
                         )
                         
-                        VisualTasteSummary(
-                            tasteDNA = tasteDNA,
-                            aiDescription = report?.tasteProfile?.description
-                        )
+                        SignatureStylesPresentation(profile = styleProfile)
                         
                         Spacer(modifier = Modifier.height(48.dp))
                         Surface(

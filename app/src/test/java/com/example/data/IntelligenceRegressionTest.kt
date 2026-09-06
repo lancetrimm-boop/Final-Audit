@@ -24,7 +24,7 @@ class IntelligenceRegressionTest {
     @Before
     fun setup() {
         fakeDao = FakeIntelligenceDao()
-        repository = IntelligenceRepository(fakeDao)
+        repository = IntelligenceRepository(fakeDao, org.mockito.Mockito.mock(MediaRepository::class.java))
     }
 
     @Test

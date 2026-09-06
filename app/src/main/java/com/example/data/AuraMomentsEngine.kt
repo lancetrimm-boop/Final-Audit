@@ -1,5 +1,10 @@
 package com.example.data
 
+import com.example.data.intelligence.IntelligenceRequest
+import com.example.data.intelligence.IntelligenceMode
+import com.example.data.semantic.SemanticRepresentationType
+import android.util.Log
+
 enum class MomentsMode(
     val id: String,
     val title: String,
@@ -41,108 +46,98 @@ enum class MomentsMode(
 object AuraMomentsEngine {
 
     /**
-     * Generates a curated, visually-sequenced slideshow playlist from [allMedia] based on [mode].
-     * Degrades gracefully if metadata is sparse or library is small.
+     * Generates an intelligent, visually-sequenced slideshow playlist.
+     * Uses AuraIntelligenceCore for selection and SlideshowSequencer for pathfinding.
+     */
+    suspend fun generateIntelligentSlideshow(
+        repository: MediaRepository,
+        mode: MomentsMode,
+        limit: Int = 25
+    ): List<MediaItem> {
+        val totalStart = System.currentTimeMillis()
+        val core = repository.intelligenceCore ?: return generateSlideshow(repository.mediaItems.value, limit)
+        
+        Log.d("AuraMoments", "Generating intelligent slideshow for mode: ${mode.id}")
+        
+        // 1. Candidate Selection via Core
+        val selectionStart = System.currentTimeMillis()
+        val request = IntelligenceRequest(
+            mode = IntelligenceMode.SORT,
+            sortOption = when(mode) {
+                MomentsMode.SURPRISE_ME -> "DISCOVER"
+                else -> "PERSONALIZED"
+            },
+            limit = limit * 3 // Over-sample for sequencing variety
+        )
+        
+        val response = core.processRequest(request)
+        val selectionMs = System.currentTimeMillis() - selectionStart
+        if (!response.isSuccess) return generateSlideshow(repository.mediaItems.value, limit)
+
+        var candidates = response.candidates
+        
+        // 2. Mode-Specific Filtering
+        if (mode == MomentsMode.FAVORITES) {
+            candidates = candidates.filter { it.item.isFavorite }
+        }
+
+        if (candidates.isEmpty()) return emptyList()
+
+        // 3. Embedding Retrieval for Sequencing
+        val embeddingStart = System.currentTimeMillis()
+        val mediaIds = candidates.map { it.item.id }
+        val embeddings = repository.semanticRepresentationRepository?.let { repo ->
+            val clipProvider = repository.mobileCLIPProvider
+            if (clipProvider != null) {
+                repo.getCompatibleRepresentations(SemanticRepresentationType.VISUAL, clipProvider.descriptor)
+                    .filter { it.mediaId in mediaIds }
+                    .associate { it.mediaId to it.vector }
+            } else emptyMap()
+        } ?: emptyMap()
+        val embeddingMs = System.currentTimeMillis() - embeddingStart
+
+        // 4. Intelligent Sequencing (Transition Optimization)
+        val sequencingStart = System.currentTimeMillis()
+        val sequencedCandidates = SlideshowSequencer.sequence(
+            candidates = candidates,
+            embeddings = embeddings,
+            config = SlideshowSequencer.SequencingConfig(targetLength = limit)
+        )
+        val sequencingMs = System.currentTimeMillis() - sequencingStart
+
+        val totalMs = System.currentTimeMillis() - totalStart
+        
+        Log.i("AuraMomentsDiag", "--- Intelligent Slideshow Preparation Report ---")
+        Log.i("AuraMomentsDiag", "Mode: ${mode.id}")
+        Log.i("AuraMomentsDiag", "Stage 1: Selection: ${selectionMs}ms")
+        Log.i("AuraMomentsDiag", "Stage 2: Embedding Retrieval: ${embeddingMs}ms")
+        Log.i("AuraMomentsDiag", "Stage 3: Sequence Construction: ${sequencingMs}ms")
+        Log.i("AuraMomentsDiag", "Total Preparation Time: ${totalMs}ms")
+        Log.i("AuraMomentsDiag", "Candidates Evaluated: ${candidates.size}")
+        Log.i("AuraMomentsDiag", "------------------------------------------------")
+
+        return sequencedCandidates.map { it.item }
+    }
+
+    /**
+     * Legacy heuristic generator preserved as a functional fallback.
      */
     fun generateSlideshow(
         allMedia: List<MediaItem>,
-        mode: MomentsMode,
         limit: Int = 20
     ): List<MediaItem> {
-        // AURA PHASE 4: Filter to PHOTOS ONLY for Aura Moments
+        val repo = MediaRepository.instance
+        // AURA PHASE 4: Filter to PHOTOS ONLY for Aura Moments (Legacy)
         val photosOnly = allMedia.filter { 
-            it.mediaType.equals("PHOTO", ignoreCase = true) || it.mediaType.equals("Image", ignoreCase = true)
+            (it.mediaType.equals("PHOTO", ignoreCase = true) || it.mediaType.equals("Image", ignoreCase = true)) &&
+            repo.isItemVisibleInLibrary(it)
         }
         
         if (photosOnly.isEmpty()) return emptyList()
 
-        val candidates = when (mode) {
-            MomentsMode.FOR_YOU -> selectForYouCandidates(photosOnly, limit * 2)
-            MomentsMode.MEMORIES -> selectMemoriesCandidates(photosOnly, limit * 2)
-            MomentsMode.SURPRISE_ME -> selectSurpriseMeCandidates(photosOnly, limit * 2)
-            MomentsMode.FAVORITES -> selectFavoritesCandidates(photosOnly, limit * 2)
-            MomentsMode.AESTHETIC -> selectAestheticCandidates(photosOnly, limit * 2)
-        }
-
-        if (candidates.isEmpty()) {
-            return sequenceVisualStory(photosOnly.take(limit))
-        }
-
-        val bounded = candidates.distinctBy { it.id }.take(limit.coerceAtLeast(1))
-        return sequenceVisualStory(bounded)
-    }
-
-    private fun selectForYouCandidates(allMedia: List<MediaItem>, count: Int): List<MediaItem> {
-        // Personalization signals: rating, favorite status, playCount, moodTags
-        val scored = allMedia.map { item ->
-            var score = 0.0
-            if (item.rating > 0f) score += item.rating * 2.0
-            if (item.isFavorite) score += 5.0
-            score += (item.viewCount.coerceAtMost(10)) * 0.5
-            if (item.moodTags.isNotEmpty()) score += 2.0
-            item to score
-        }
-        return scored.sortedByDescending { it.second }.map { it.first }.take(count)
-    }
-
-    private fun selectMemoriesCandidates(allMedia: List<MediaItem>, count: Int): List<MediaItem> {
-        // Prioritize recency (dateAdded / year) and meaningfulness (rating, favorites, microMoments)
-        val meaningfulTags = setOf("nostalgic", "travel", "personal", "family", "memory", "vivid", "warm", "nature", "summer")
-        val scored = allMedia.map { item ->
-            var score = item.dateAdded.toDouble() / 1_000_000_000.0 // recency component
-            if (item.year > 0) score += (item.year - 2000) * 1.0
-            if (item.isFavorite) score += 4.0
-            if (item.rating > 0f) score += item.rating
-            if (item.moodTags.any { tag -> meaningfulTags.contains(tag.lowercase().trim()) }) {
-                score += 3.0
-            }
-            item to score
-        }
-        return scored.sortedByDescending { it.second }.map { it.first }.take(count)
-    }
-
-    private fun selectSurpriseMeCandidates(allMedia: List<MediaItem>, count: Int): List<MediaItem> {
-        // Less obvious items: lower playCount, moderate rating, or novel genres/tags
-        val scored = allMedia.map { item ->
-            var score = 0.0
-            // Inverse play/view count bonus
-            score += (10 - item.viewCount.coerceAtMost(10)) * 1.0
-            if (item.genre.isNotBlank() && item.genre != "General") score += 2.0
-            if (item.moodTags.isNotEmpty()) score += 1.5
-            if (item.rating in 1.0f..3.5f) score += 2.0
-            item to score
-        }
-        return scored.sortedByDescending { it.second }.map { it.first }.take(count)
-    }
-
-    private fun selectFavoritesCandidates(allMedia: List<MediaItem>, count: Int): List<MediaItem> {
-        val favorited = allMedia.filter { it.isFavorite }
-        if (favorited.isNotEmpty()) {
-            return favorited.take(count)
-        }
-        // Graceful fallback if no favorites exist
-        return allMedia.sortedByDescending { it.rating }.take(count)
-    }
-
-    private fun selectAestheticCandidates(allMedia: List<MediaItem>, count: Int): List<MediaItem> {
-        val aestheticTags = setOf(
-            "vivid", "warm", "cool", "cinematic", "minimal", "minimalist",
-            "monochrome", "vibrant", "crisp", "smooth", "spacious", "tactile"
-        )
-        val (richAesthetic, standard) = allMedia.partition { item ->
-            item.moodTags.any { tag -> aestheticTags.contains(tag.lowercase().trim()) } || item.genre.isNotBlank()
-        }
-
-        val grouped = richAesthetic.groupBy { item ->
-            item.moodTags.firstOrNull { aestheticTags.contains(it.lowercase().trim()) } ?: item.genre
-        }
-
-        val result = mutableListOf<MediaItem>()
-        grouped.values.forEach { group ->
-            result.addAll(group)
-        }
-        result.addAll(standard)
-        return result.take(count)
+        // Simplified Legacy Fallback (Update 9 Cleanup)
+        val result = photosOnly.sortedByDescending { it.rating }.take(limit)
+        return sequenceVisualStory(result)
     }
 
     /**

@@ -33,7 +33,8 @@ object PassphraseManager {
     private const val IV_KEY = "db_passphrase_iv"
 
     /**
-     * Retrieves or generates a persistent passphrase for database encryption.
+     * Retrieves or generates the persistent 32-byte raw passphrase for database encryption.
+     * This is the CANONICAL key material for binary open operations.
      */
     fun getPassphrase(context: Context): ByteArray {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -46,13 +47,10 @@ object PassphraseManager {
         val masterKey = getMasterKey()
 
         return if (encryptedBase64 != null && ivBase64 != null) {
-            // STATE B & D path: Ciphertext exists
             if (masterKey == null) {
-                Log.e("PassphraseManager", "STATE C: Stored ciphertext exists but Master Key is missing (ORPHANED_DATA)")
                 throw SecureStorageException.OrphanedDataException("Restored encryption state detected without hardware key.")
             }
             
-            // Decrypt existing passphrase
             try {
                 val encrypted = android.util.Base64.decode(encryptedBase64, android.util.Base64.NO_WRAP)
                 val iv = android.util.Base64.decode(ivBase64, android.util.Base64.NO_WRAP)
@@ -61,33 +59,19 @@ object PassphraseManager {
                 cipher.init(Cipher.DECRYPT_MODE, masterKey, GCMParameterSpec(128, iv))
                 cipher.doFinal(encrypted)
             } catch (e: javax.crypto.AEADBadTagException) {
-                Log.e("PassphraseManager", "STATE D: AES-GCM authentication failed (AUTH_FAILURE)")
                 throw SecureStorageException.AuthFailureException("Encryption key mismatch or corrupted state.", e)
             } catch (t: Throwable) {
-                Log.e("PassphraseManager", "STATE D: Unexpected decryption failure", t)
                 throw SecureStorageException.InconsistentStateException("Unexpected decryption failure: ${t.message}")
             }
         } else {
-            // STATE A, E, F path: No ciphertext exists
-            if (dbExists) {
-                // Check if it's plaintext before failing
-                if (isPlaintextSqlite(dbFile)) {
-                    Log.i("PassphraseManager", "STATE 5: Plaintext database detected. Allowing migration setup.")
-                } else {
-                    Log.e("PassphraseManager", "STATE F/6: Encrypted database exists but passphrase preference is missing (INCONSISTENT)")
-                    throw SecureStorageException.InconsistentStateException("Existing secure database found without a corresponding key.")
-                }
+            if (dbExists && !isPlaintextSqlite(dbFile)) {
+                throw SecureStorageException.InconsistentStateException("Existing secure database found without a corresponding key.")
             }
             
-            Log.i("PassphraseManager", "STATE 1/A: Initializing fresh secure storage.")
-            // Safe to create new material
             val newMasterKey = getOrCreateMasterKey()
-
-            // Generate new random passphrase
             val passphrase = ByteArray(32)
             SecureRandom().nextBytes(passphrase)
 
-            // Encrypt and store it
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, newMasterKey)
             val encrypted = cipher.doFinal(passphrase)
@@ -99,6 +83,40 @@ object PassphraseManager {
                 .apply()
 
             passphrase
+        }
+    }
+
+    /**
+     * Returns the passphrase as a SQLCipher-compatible raw key literal (x'HEX').
+     * Used ONLY for SQL statements like ATTACH or PRAGMA key.
+     */
+    fun getPassphraseAsHex(context: Context): String {
+        val bytes = getPassphrase(context)
+        val hexChars = CharArray(bytes.size * 2)
+        val hexArray = "0123456789ABCDEF".toCharArray()
+        for (i in bytes.indices) {
+            val v = bytes[i].toInt() and 0xFF
+            hexChars[i * 2] = hexArray[v ushr 4]
+            hexChars[i * 2 + 1] = hexArray[v and 0x0F]
+        }
+        return "x'${String(hexChars)}'"
+    }
+
+    /**
+     * Clears the persistent passphrase from storage.
+     * Use only during total library reset/quarantine.
+     */
+    fun clearPassphrase(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().clear().apply()
+        
+        try {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            if (keyStore.containsAlias(KEY_ALIAS)) {
+                keyStore.deleteEntry(KEY_ALIAS)
+            }
+        } catch (e: Exception) {
+            // Best effort
         }
     }
 
@@ -119,12 +137,9 @@ object PassphraseManager {
 
     private fun getMasterKey(): SecretKey? {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        
         return if (keyStore.containsAlias(KEY_ALIAS)) {
             (keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
-        } else {
-            null
-        }
+        } else null
     }
 
     private fun getOrCreateMasterKey(): SecretKey {
@@ -132,20 +147,13 @@ object PassphraseManager {
     }
 
     private fun createMasterKey(): SecretKey {
-        Log.i("PassphraseManager", "Generating new Android KeyStore Master Key: $KEY_ALIAS")
-        val keyGenerator = KeyGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_AES, 
-            ANDROID_KEYSTORE
-        )
+        val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         keyGenerator.init(
-            KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setUserAuthenticationRequired(false) // Required for background database access
-            .build()
+            KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setUserAuthenticationRequired(false)
+                .build()
         )
         return keyGenerator.generateKey()
     }

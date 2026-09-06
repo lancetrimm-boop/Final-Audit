@@ -60,32 +60,94 @@ import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraPurple
 import kotlinx.coroutines.delay
 
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.runtime.DisposableEffect
+import androidx.media3.common.Player
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.material3.CircularProgressIndicator
+import com.example.data.SlideshowPlaybackManager
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.ui.PlayerView
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun AuraMomentsSlideshowScreen(
+    mode: MomentsMode,
+    repository: MediaRepository,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+    onSeeSimilar: (MediaItem) -> Unit = {}
+) {
+    val context = LocalContext.current
+    val viewModel: SlideshowViewModel = viewModel(
+        factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                return SlideshowViewModel(repository) as T
+            }
+        }
+    )
+
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(mode) {
+        viewModel.generateSlideshow(mode)
+    }
+
+    BackHandler(onBack = onClose)
+
+    Crossfade<SlideshowViewModel.SlideshowUiState>(targetState = uiState, animationSpec = tween(500), label = "slideshow_state") { state ->
+        when (state) {
+            is SlideshowViewModel.SlideshowUiState.Loading -> {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AuraPurple)
+                }
+            }
+            is SlideshowViewModel.SlideshowUiState.Error -> {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = state.message, color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.padding(24.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        IconButton(onClick = onClose) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                        }
+                    }
+                }
+            }
+            is SlideshowViewModel.SlideshowUiState.Ready -> {
+                SlideshowRenderer(
+                    items = state.items,
+                    mode = mode,
+                    repository = repository,
+                    onClose = onClose,
+                    modifier = modifier,
+                    onSeeSimilar = onSeeSimilar
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SlideshowRenderer(
     items: List<MediaItem>,
     mode: MomentsMode,
     repository: MediaRepository,
     onClose: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSeeSimilar: (MediaItem) -> Unit = {}
 ) {
-    BackHandler(onBack = onClose)
+    val context = LocalContext.current
+    val playbackManager = remember { SlideshowPlaybackManager(context) }
 
-    if (items.isEmpty()) {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(AuraBackground),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "No media available for slideshow", color = AuraOnSurface)
-                Spacer(modifier = Modifier.height(16.dp))
-                IconButton(onClick = onClose) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = AuraOnSurface)
-                }
-            }
+    DisposableEffect(Unit) {
+        onDispose {
+            playbackManager.release()
         }
-        return
     }
 
     var currentIndex by remember { mutableIntStateOf(0) }
@@ -94,22 +156,40 @@ fun AuraMomentsSlideshowScreen(
     var showControls by remember { mutableStateOf(true) }
 
     val currentItem = items[currentIndex.coerceIn(0, items.size - 1)]
-    
-    // Auto-advance logic for photos
+    val isVideo = currentItem.mediaType == "VIDEO"
+
+    // Unified Pacing & Auto-advance logic
     LaunchedEffect(currentIndex, isPlaying) {
         if (!isPlaying) return@LaunchedEffect
         
         slideProgress = 0f
-        val totalSteps = 40
-        val stepDelayMs = 100L // 4 seconds total per slide
-        for (i in 1..totalSteps) {
-            delay(stepDelayMs)
-            if (!isPlaying) break
-            slideProgress = i.toFloat() / totalSteps.toFloat()
+        
+        if (isVideo) {
+            playbackManager.prepareVideo(currentItem)
+            val player = playbackManager.getPlayer()
+            
+            // Wait for video to end or 15s cap
+            val startTime = System.currentTimeMillis()
+            while (isPlaying && System.currentTimeMillis() - startTime < 15000) {
+                delay(200)
+                val duration = player.duration.coerceAtLeast(1)
+                slideProgress = (player.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
+                
+                if (player.playbackState == Player.STATE_ENDED) break
+            }
+            playbackManager.stop()
+        } else {
+            val totalSteps = 40
+            val stepDelayMs = 100L // 4 seconds total per slide
+            for (i in 1..totalSteps) {
+                delay(stepDelayMs)
+                if (!isPlaying) break
+                slideProgress = i.toFloat() / totalSteps.toFloat()
+            }
         }
         
         if (isPlaying) {
-            // Auto advance to next slide
+            // Auto advance
             if (currentIndex < items.size - 1) {
                 currentIndex++
             } else {
@@ -135,13 +215,28 @@ fun AuraMomentsSlideshowScreen(
             }
             .testTag("moments_slideshow_container")
     ) {
-        // Photo Renderer Only (Aura Phase 4)
-        AsyncImage(
-            model = currentItem.uriPath.ifBlank { currentItem.imageUrl },
-            contentDescription = currentItem.title,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize()
-        )
+        // Cross-modal Renderer
+        Crossfade(targetState = currentItem, animationSpec = tween(800)) { item ->
+            if (item.mediaType == "VIDEO") {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            player = playbackManager.getPlayer()
+                            useController = false
+                            resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                AsyncImage(
+                    model = item.uriPath.ifBlank { item.imageUrl },
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
 
         // Top Gradient & Progress Overlay
         Box(
@@ -193,7 +288,7 @@ fun AuraMomentsSlideshowScreen(
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
-                                text = "AURA SLIDESHOW • ${mode.title.uppercase()}",
+                                text = "AURA MOMENTS • ${mode.title.uppercase()}",
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -234,20 +329,23 @@ fun AuraMomentsSlideshowScreen(
                     .padding(horizontal = 20.dp, vertical = 24.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    // Item Title and Tags
+                    // Item Title and Style context
                     Text(
                         text = currentItem.title,
                         color = Color.White,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    if (currentItem.genre.isNotBlank() || currentItem.moodTags.isNotEmpty()) {
+                    
+                    val reasonText = currentItem.selectionReason?.takeIf { it.isNotBlank() } ?: 
+                                   listOfNotNull(currentItem.genre.takeIf { it.isNotBlank() }, 
+                                               currentItem.moodTags.takeIf { it.isNotEmpty() }?.joinToString(", "))
+                                   .joinToString(" • ")
+
+                    if (reasonText.isNotBlank()) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = listOfNotNull(
-                                currentItem.genre.takeIf { it.isNotBlank() },
-                                currentItem.moodTags.takeIf { it.isNotEmpty() }?.joinToString(", ")
-                            ).joinToString(" • "),
+                            text = reasonText,
                             color = Color.White.copy(alpha = 0.7f),
                             fontSize = 13.sp
                         )
@@ -334,9 +432,21 @@ fun AuraMomentsSlideshowScreen(
                                 modifier = Modifier.size(32.dp)
                             )
                         }
+
+                        // See Similar (Update 8)
+                        IconButton(onClick = {
+                            onSeeSimilar(currentItem)
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "See Similar",
+                                tint = Color.White
+                            )
+                        }
                     }
                 }
             }
         }
     }
 }
+

@@ -27,7 +27,10 @@ enum class AuraInteractionType {
     RATING,
     PAIRWISE_WIN,
     PAIRWISE_LOSS,
-    SAVE
+    SAVE,
+    
+    // LAYER 4: Intelligence Context
+    VISUAL_CONTEXT
 }
 
 /**

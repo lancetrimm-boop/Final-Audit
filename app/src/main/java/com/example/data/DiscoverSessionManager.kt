@@ -18,10 +18,9 @@ class DiscoverSessionManager {
      * LAYER 1: Generates the vertically scrolling obsession clusters and wraps them in a snapshot.
      */
     suspend fun generateSnapshot(
-        allMedia: List<MediaItem>,
+        repository: MediaRepository,
         tasteDNA: TasteDNA,
         profile: TasteDNA.PreferenceProfile,
-        policy: DiscoveryPolicy,
         stats: IntelligenceStats,
         creatorProfiles: Map<String, CreatorProfile>,
         forceNewSession: Boolean = false
@@ -33,15 +32,15 @@ class DiscoverSessionManager {
         }
 
         val obsessions = RecommendationEngine.computeObsessions(
-            allMedia, tasteDNA, profile, policy, stats, creatorProfiles
+            repository, tasteDNA, profile, stats, creatorProfiles
         )
 
-        val systemState = ConfidenceEngine.calculateDiscoveryState(allMedia, stats)
+        val systemState = ConfidenceEngine.calculateDiscoveryState(repository.mediaItems.value, stats)
 
         // Attach explanations and pre-mark previews as seen
         val explainedObsessions = obsessions.map { obsession ->
             val mainItem = obsession.previewItems.firstOrNull()
-            val strategy = resolveStrategy(obsession.strategy, policy, systemState, tasteDNA, profile)
+            val strategy = resolveStrategy(obsession.strategy, repository.discoveryPolicy.value, systemState, tasteDNA, profile)
             val explanation = if (mainItem != null) {
                 RecommendationExplanationGenerator.generate(mainItem, tasteDNA, stats, creatorProfiles, strategy)
             } else null
@@ -65,6 +64,7 @@ class DiscoverSessionManager {
      * LAYER 2: Realizes a finite batch of items for a specific obsession.
      */
     suspend fun realizeBatch(
+        repository: MediaRepository,
         obsession: ObsessionRecommendation,
         allMedia: List<MediaItem>,
         tasteDNA: TasteDNA,
@@ -74,15 +74,11 @@ class DiscoverSessionManager {
         creatorProfiles: Map<String, CreatorProfile>,
         existingItems: List<MediaItem> = emptyList()
     ): ObsessionContentBatch = withContext(Dispatchers.Default) {
-        val playableMedia = allMedia.filter {
-            it.itemCount == null && com.example.compatibility.AuraMediaCompatibilityEngine.isEligibleForImport(it.compatibilityStatus)
-        }
-
+        val core = repository.intelligenceCore
         val systemState = ConfidenceEngine.calculateDiscoveryState(allMedia, stats)
         val resolvedStrategy = resolveStrategy(obsession.strategy, policy, systemState, tasteDNA, profile)
 
         // Ensure preview items from the feed are included at the start of the first batch
-        // to prevent the "skipping first item" / "starts on next item" bug.
         val isFirstBatch = existingItems.isEmpty()
         val baseItems = if (isFirstBatch) {
             obsession.previewItems.map { item ->
@@ -95,19 +91,25 @@ class DiscoverSessionManager {
             }
         } else existingItems
 
-        val items = playableMedia
-            .filter { it.id !in sessionSeenIds && !isContentSeen(it) && it.id !in baseItems.map { it.id } }
-            .map { item ->
-                val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creatorProfiles)
-                val score = ExplorationEngine.calculatePolicyScore(evidence, resolvedStrategy)
-                
-                // Annotate with match percentage from exploitation score
-                val matchPercent = (evidence.exploitationScore * 100).toInt().coerceIn(10, 99)
-                item.copy(selectionReason = "$matchPercent% Match") to score
-            }
-            .sortedByDescending { it.second }
-            .take(12) // Smaller curated initial detail batch (Layer 2)
-            .map { it.first }
+        val items = if (core != null) {
+            val request = com.example.data.intelligence.IntelligenceRequest(
+                mode = com.example.data.intelligence.IntelligenceMode.DISCOVER,
+                contextualIntent = com.example.data.intelligence.ContextualIntent.DISCOVER_CATEGORY,
+                limit = 50, // Request larger pool for session filtering
+                tasteDNA = tasteDNA,
+                profile = profile,
+                stats = stats,
+                creatorProfiles = creatorProfiles
+            )
+            val response = core.processRequest(request)
+            response.candidates
+                .filter { it.item.id !in sessionSeenIds && !isContentSeen(it.item) && it.item.id !in baseItems.map { b -> b.id } }
+                .take(12)
+                .map { it.item.copy(selectionReason = "${(it.primaryRelevanceScore * 100).toInt().coerceIn(10, 99)}% Match") }
+        } else {
+            // Minimal Fallback
+            emptyList()
+        }
 
         items.forEach { markUsed(it) }
 

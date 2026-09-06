@@ -1,8 +1,9 @@
-package com.example
+package com.example.data.intelligence
 
 import com.example.data.*
 import org.junit.Assert.*
 import org.junit.Test
+import org.mockito.Mockito.mock
 
 class FinalReleaseHardeningTest {
 
@@ -85,9 +86,10 @@ class FinalReleaseHardeningTest {
         assertTrue("Learned vibrancy should increase", updatedDna.learnedVibrancy > initialDna.learnedVibrancy)
         assertTrue("Effective vibrancy should increase", updatedDna.effectiveVibrancy > initialDna.effectiveVibrancy)
         
-        // Verify scoring impact
-        val scoreInitial = RecommendationEngine.scoreItemForPairwise(itemA, tasteDNA = initialDna)
-        val scoreUpdated = RecommendationEngine.scoreItemForPairwise(itemA, tasteDNA = updatedDna)
+        // Verify scoring impact using Core (authoritative brain)
+        val core = AuraIntelligenceCore(mock(MediaRepository::class.java), mock(RetrievalRouter::class.java))
+        val scoreInitial = core.scorePersonalization(itemA, initialDna)
+        val scoreUpdated = core.scorePersonalization(itemA, updatedDna)
         
         assertTrue("Score for vibrant item should increase as vibrancy preference increases", scoreUpdated > scoreInitial)
     }

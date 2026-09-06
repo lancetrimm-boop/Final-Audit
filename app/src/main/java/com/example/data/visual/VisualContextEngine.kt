@@ -120,7 +120,7 @@ class VisualContextEngine(
 
             if (frameMetrics.isNotEmpty()) {
                 val aggregated = aggregateMetrics(frameMetrics)
-                applyTasteDnaAdjustment(aggregated, playbackPositionMs)
+                applyTasteDnaAdjustment(aggregated, playbackPositionMs, mediaId)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Visual context analysis failed", e)
@@ -218,17 +218,23 @@ class VisualContextEngine(
         list.map { it.texture }.average().coerceIn(0.0, 1.0)
     )
 
-    private fun applyTasteDnaAdjustment(f: VisualFeatures, pos: Long) {
-        val dna = repository.tasteDNA.value
-        if (!dna.isFineTuningEnabled) return
-        val step = MediaRepository.MAX_ADJUSTMENT_PER_VOTE
-        val limit = MediaRepository.TOTAL_ADJUSTMENT_LIMIT
-        fun adj(v: Double) = (v - 0.5) * 2.0 * step
-        var next = dna.updateLearnedDimension("lighting", adj(f.brightness), limit)
-        next = next.updateLearnedDimension("contrast", adj(f.contrast), limit)
-        next = next.updateLearnedDimension("warmth", adj(f.warmth), limit)
-        next = next.updateLearnedDimension("saturation", adj(f.saturation), limit)
-        if (next != dna) repository.updateTasteDNA(next, false, "Visual Context ($pos)")
+    private fun applyTasteDnaAdjustment(f: VisualFeatures, pos: Long, mediaId: String) {
+        repository.interactionRepository?.let { iRepo ->
+            com.example.data.AuraInteractionService.logInteraction(
+                mediaRepository = repository,
+                interactionRepository = iRepo,
+                type = com.example.data.AuraInteractionType.VISUAL_CONTEXT,
+                mediaId = mediaId,
+                value = 1.0,
+                metadata = mapOf(
+                    "brightness" to f.brightness.toString(),
+                    "contrast" to f.contrast.toString(),
+                    "warmth" to f.warmth.toString(),
+                    "saturation" to f.saturation.toString(),
+                    "pos" to pos.toString()
+                )
+            )
+        }
     }
 
     suspend fun enrichMedia(id: String, uri: String, dur: Long, ctx: Context): Boolean = withContext(Dispatchers.IO) {

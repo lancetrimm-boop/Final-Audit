@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AuraDatabase
 import com.example.data.db.MediaEntity
 import com.example.data.semantic.*
+import com.example.data.intelligence.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.launchIn
@@ -83,7 +84,15 @@ class HybridSearchIntegrationTest {
         lexicalConstructor.isAccessible = true
         val lexicalRetriever = lexicalConstructor.newInstance(repository) as LexicalCandidateRetriever
         
-        val hybridEngine = DefaultHybridSearchEngine(semanticService, lexicalRetriever)
+        val core = AuraIntelligenceCore(
+            repository = repository,
+            retrievalRouter = RetrievalRouter(
+                lexicalRetriever = lexicalRetriever,
+                semanticProvider = semanticService as? SemanticRetrievalProvider,
+                visualProvider = null
+            )
+        )
+        val hybridEngine = DefaultHybridSearchEngine(core)
 
         // Inject all components
         val fields = mapOf(
@@ -91,6 +100,7 @@ class HybridSearchIntegrationTest {
             "embeddingProvider" to mockProvider,
             "semanticCandidateRetriever" to retriever,
             "semanticSearchService" to semanticService,
+            "intelligenceCore" to core,
             "hybridSearchEngine" to hybridEngine
         )
         

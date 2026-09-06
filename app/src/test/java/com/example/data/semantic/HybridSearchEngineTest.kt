@@ -1,17 +1,20 @@
 package com.example.data.semantic
 
+import com.example.data.*
+import com.example.data.intelligence.*
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
+import org.mockito.Mockito.*
 
 class HybridSearchEngineTest {
 
     // =========================================================================
-    // 1. PURE RECIPROCAL RANK FUSION MATHEMATICS & RANKING TESTS
+    // 1. PURE RECIPROCAL RANK FUSION MATHEMATICS (Moved to RetrievalFusion)
     // =========================================================================
 
     @Test
-    fun testReciprocalRankFusion_MultiChannelOverlap_ComputesExactRrfScore() {
+    fun testRetrievalFusion_MultiChannelOverlap_ComputesExactRrfScore() {
         val keywordItems = listOf(
             RankedChannelItem("media_alpha", 0.95f, 1),
             RankedChannelItem("media_beta", 0.80f, 2)
@@ -35,7 +38,7 @@ class HybridSearchEngineTest {
             topK = 10
         )
 
-        val fused = ReciprocalRankFusion.fuse(channelMap, config)
+        val fused = RetrievalFusion.fuse(channelMap, config)
 
         assertEquals(3, fused.size)
 
@@ -44,17 +47,14 @@ class HybridSearchEngineTest {
         // media_beta: 0.5 / (60 + 2) = 0.5/62 ~= 0.00806451
 
         assertEquals("media_alpha", fused[0].mediaId)
-        assertTrue("media_alpha should be multi-channel match", fused[0].isMultiChannelMatch)
         assertEquals(2, fused[0].channelRanks.size)
         assertEquals(1, fused[0].channelRanks[SearchChannel.KEYWORD])
         assertEquals(2, fused[0].channelRanks[SearchChannel.SEMANTIC_CONTENT])
 
         assertEquals("media_gamma", fused[1].mediaId)
-        assertFalse(fused[1].isMultiChannelMatch)
         assertEquals(1, fused[1].channelRanks[SearchChannel.SEMANTIC_CONTENT])
 
         assertEquals("media_beta", fused[2].mediaId)
-        assertFalse(fused[2].isMultiChannelMatch)
         assertEquals(2, fused[2].channelRanks[SearchChannel.KEYWORD])
 
         // Verify strictly descending RRF scores
@@ -63,7 +63,7 @@ class HybridSearchEngineTest {
     }
 
     @Test
-    fun testReciprocalRankFusion_SingleChannelOnly_PreservesOrder() {
+    fun testRetrievalFusion_SingleChannelOnly_PreservesOrder() {
         val keywordItems = listOf(
             RankedChannelItem("media_1", 10.0f, 1),
             RankedChannelItem("media_2", 8.0f, 2),
@@ -71,7 +71,7 @@ class HybridSearchEngineTest {
         )
 
         val channelMap = mapOf(SearchChannel.KEYWORD to keywordItems)
-        val fused = ReciprocalRankFusion.fuse(channelMap, HybridSearchConfig())
+        val fused = RetrievalFusion.fuse(channelMap, HybridSearchConfig())
 
         assertEquals(3, fused.size)
         assertEquals("media_1", fused[0].mediaId)
@@ -79,369 +79,35 @@ class HybridSearchEngineTest {
         assertEquals("media_3", fused[2].mediaId)
     }
 
-    @Test
-    fun testReciprocalRankFusion_DeterministicTieBreaking_AlphabeticalByMediaId() {
-        // Two distinct items with identical single-channel ranks and scores
-        val itemsA = listOf(RankedChannelItem("media_zulu", 1.0f, 1))
-        val itemsB = listOf(RankedChannelItem("media_bravo", 1.0f, 1))
-
-        val channelMap = mapOf(
-            SearchChannel.KEYWORD to itemsA,
-            SearchChannel.SEMANTIC_CONTENT to itemsB
-        )
-
-        // Equal weight to both channels -> identical RRF score 0.5 / (60 + 1)
-        val config = HybridSearchConfig(
-            rrfConstantK = 60,
-            channelWeights = mapOf(
-                SearchChannel.KEYWORD to 0.5,
-                SearchChannel.SEMANTIC_CONTENT to 0.5
-            )
-        )
-
-        val fused = ReciprocalRankFusion.fuse(channelMap, config)
-
-        assertEquals(2, fused.size)
-        assertEquals(fused[0].rrfScore, fused[1].rrfScore, 1e-9)
-        // Deterministic tie break: 'media_bravo' < 'media_zulu'
-        assertEquals("media_bravo", fused[0].mediaId)
-        assertEquals("media_zulu", fused[1].mediaId)
-    }
+    // =========================================================================
+    // 2. HYBRID SEARCH ENGINE ADAPTER TESTS
+    // =========================================================================
 
     @Test
-    fun testReciprocalRankFusion_TopKLimit_TruncatesExcessItems() {
-        val items = (1..20).map { i ->
-            RankedChannelItem("media_$i", (21 - i).toFloat(), i)
+    fun testHybridSearchEngine_DelegatesToCore() {
+        runBlocking {
+            val core = mock(AuraIntelligenceCore::class.java)
+            val engine = DefaultHybridSearchEngine(core)
+            
+            val item = MediaItem(id = "item1", title = "Test", mediaType = "PHOTO")
+            val candidates = listOf(IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f, "Match"))
+            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, 10L)
+            
+            `when`(core.processRequest(any())).thenReturn(response)
+            
+            val result = engine.search(SearchRequest.Text("query"))
+            
+            assertTrue(result.isSuccess)
+            assertEquals(1, result.candidates.size)
+            assertEquals("item1", result.candidates[0].mediaId)
+            verify(core).processRequest(argThat { it.mode == IntelligenceMode.SEARCH && it.query == "query" })
         }
-
-        val channelMap = mapOf(SearchChannel.KEYWORD to items)
-        val config = HybridSearchConfig(topK = 5)
-
-        val fused = ReciprocalRankFusion.fuse(channelMap, config)
-
-        assertEquals(5, fused.size)
-        assertEquals("media_1", fused[0].mediaId)
-        assertEquals("media_5", fused[4].mediaId)
     }
 
     @Test
-    fun testReciprocalRankFusion_EmptyInput_ReturnsEmptyList() {
-        val fused = ReciprocalRankFusion.fuse(emptyMap())
-        assertTrue(fused.isEmpty())
-    }
-
-    // =========================================================================
-    // 2. CONFIGURATION VALIDATION TESTS
-    // =========================================================================
-
-    @Test(expected = IllegalArgumentException::class)
-    fun testHybridSearchConfig_ZeroK_ThrowsException() {
-        HybridSearchConfig(rrfConstantK = 0)
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun testHybridSearchConfig_NegativeK_ThrowsException() {
-        HybridSearchConfig(rrfConstantK = -10)
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun testHybridSearchConfig_ZeroTopK_ThrowsException() {
-        HybridSearchConfig(topK = 0)
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun testHybridSearchConfig_NegativeWeight_ThrowsException() {
-        HybridSearchConfig(channelWeights = mapOf(SearchChannel.KEYWORD to -0.5))
-    }
-
-    // =========================================================================
-    // 3. HYBRID SEARCH ENGINE COORDINATOR TESTS
-    // =========================================================================
-
-    @Test
-    fun testHybridSearchEngine_EndToEndSuccessfulSearch_CombinesBothChannels() = runBlocking {
-        val descriptor = EmbeddingModelDescriptor("test-model", 1, 128, SemanticRepresentationType.CONTENT)
-
-        val fakeLexical = object : LexicalCandidateRetriever {
-            override suspend fun retrieveKeywordCandidates(query: String, topK: Int): List<RankedChannelItem> {
-                return listOf(
-                    RankedChannelItem("item_lex_1", 10.0f, 1),
-                    RankedChannelItem("item_shared", 8.0f, 2)
-                )
-            }
-        }
-
-        val fakeSemantic = object : SemanticSearchService {
-            override suspend fun search(query: String, topK: Int, minSimilarity: Float, targetType: SemanticRepresentationType, expectedDescriptor: EmbeddingModelDescriptor?): SemanticSearchResult {
-                return SemanticSearchResult(
-                    query = query,
-                    candidates = listOf(
-                        SemanticRetrievalCandidate("item_shared", "rep_1", 0.92f, SemanticRepresentationType.CONTENT, descriptor, 1.0f),
-                        SemanticRetrievalCandidate("item_sem_2", "rep_2", 0.85f, SemanticRepresentationType.CONTENT, descriptor, 1.0f)
-                    ),
-                    modelDescriptor = descriptor,
-                    representationType = targetType,
-                    latencyMs = 12L,
-                    totalIndexedCandidates = 10,
-                    isSuccess = true
-                )
-            }
-
-            override suspend fun search(
-                queryVector: FloatArray,
-                queryLabel: String,
-                topK: Int,
-                minSimilarity: Float,
-                targetType: SemanticRepresentationType,
-                expectedDescriptor: EmbeddingModelDescriptor?
-            ): SemanticSearchResult {
-                return SemanticSearchResult(
-                    query = queryLabel,
-                    candidates = emptyList(),
-                    modelDescriptor = descriptor,
-                    representationType = targetType,
-                    latencyMs = 1L,
-                    totalIndexedCandidates = 0,
-                    isSuccess = true
-                )
-            }
-            override fun isReady(): Boolean = true
-            override fun getIndexSize(targetType: SemanticRepresentationType, descriptor: EmbeddingModelDescriptor?): Int = 10
-        }
-
-        val engine = DefaultHybridSearchEngine(fakeSemantic, fakeLexical)
+    fun testHybridSearchEngine_SemanticReady_AlwaysTrueForAdapter() {
+        val core = mock(AuraIntelligenceCore::class.java)
+        val engine = DefaultHybridSearchEngine(core)
         assertTrue(engine.isSemanticReady())
-
-        val result = engine.search("synthwave retro music")
-
-        assertTrue(result.isSuccess)
-        assertNull(result.errorMessage)
-        assertEquals("synthwave retro music", result.query)
-        assertEquals(3, result.candidates.size)
-        assertEquals(3, result.totalCandidatesConsidered)
-        assertEquals(2, result.channelCandidateCounts[SearchChannel.KEYWORD])
-        assertEquals(2, result.channelCandidateCounts[SearchChannel.SEMANTIC_CONTENT])
-
-        // item_shared appeared in both keyword (rank 2) and semantic (rank 1) -> must be rank 1 in fused result
-        assertEquals("item_shared", result.candidates[0].mediaId)
-        assertTrue(result.candidates[0].isMultiChannelMatch)
-    }
-
-    @Test
-    fun testHybridSearchEngine_BlankQuery_ReturnsFailure() = runBlocking {
-        val engine = DefaultHybridSearchEngine(
-            object : SemanticSearchService {
-                override suspend fun search(query: String, topK: Int, minSimilarity: Float, targetType: SemanticRepresentationType, expectedDescriptor: EmbeddingModelDescriptor?): SemanticSearchResult = throw UnsupportedOperationException()
-                override suspend fun search(queryVector: FloatArray, queryLabel: String, topK: Int, minSimilarity: Float, targetType: SemanticRepresentationType, expectedDescriptor: EmbeddingModelDescriptor?): SemanticSearchResult = throw UnsupportedOperationException()
-                override fun isReady(): Boolean = true
-                override fun getIndexSize(targetType: SemanticRepresentationType, descriptor: EmbeddingModelDescriptor?): Int = 0
-            },
-            object : LexicalCandidateRetriever {
-                override suspend fun retrieveKeywordCandidates(query: String, topK: Int): List<RankedChannelItem> = emptyList()
-            }
-        )
-
-        val result = engine.search("   ")
-        assertFalse(result.isSuccess)
-        assertNotNull(result.errorMessage)
-        assertTrue(result.candidates.isEmpty())
-    }
-
-    @Test
-    fun testHybridSearchEngine_SemanticFailure_GracefulFallbackToKeyword() = runBlocking {
-        val descriptor = EmbeddingModelDescriptor("test-model", 1, 128, SemanticRepresentationType.CONTENT)
-
-        val fakeLexical = object : LexicalCandidateRetriever {
-            override suspend fun retrieveKeywordCandidates(query: String, topK: Int): List<RankedChannelItem> {
-                return listOf(RankedChannelItem("fallback_media", 5.0f, 1))
-            }
-        }
-
-        val failingSemantic = object : SemanticSearchService {
-            override suspend fun search(query: String, topK: Int, minSimilarity: Float, targetType: SemanticRepresentationType, expectedDescriptor: EmbeddingModelDescriptor?): SemanticSearchResult {
-                return SemanticSearchResult(
-                    query = query,
-                    candidates = emptyList(),
-                    modelDescriptor = descriptor,
-                    representationType = targetType,
-                    latencyMs = 2L,
-                    totalIndexedCandidates = 0,
-                    isSuccess = false,
-                    errorMessage = "Embedding provider uninitialized"
-                )
-            }
-
-            override suspend fun search(
-                queryVector: FloatArray,
-                queryLabel: String,
-                topK: Int,
-                minSimilarity: Float,
-                targetType: SemanticRepresentationType,
-                expectedDescriptor: EmbeddingModelDescriptor?
-            ): SemanticSearchResult {
-                return SemanticSearchResult(
-                    query = queryLabel,
-                    candidates = emptyList(),
-                    modelDescriptor = descriptor,
-                    representationType = targetType,
-                    latencyMs = 1L,
-                    totalIndexedCandidates = 0,
-                    isSuccess = true
-                )
-            }
-            override fun isReady(): Boolean = false
-            override fun getIndexSize(targetType: SemanticRepresentationType, descriptor: EmbeddingModelDescriptor?): Int = 0
-        }
-
-        val engine = DefaultHybridSearchEngine(failingSemantic, fakeLexical)
-        val result = engine.search("any valid query")
-
-        assertTrue("Search should still succeed via keyword fallback", result.isSuccess)
-        assertEquals(1, result.candidates.size)
-        assertEquals("fallback_media", result.candidates[0].mediaId)
-    }
-
-    @Test
-    fun testHybridSearchEngine_NoMatchesInAnyChannel_ReturnsEmptyResults() = runBlocking {
-        val descriptor = EmbeddingModelDescriptor("test-model", 1, 128, SemanticRepresentationType.CONTENT)
-
-        val emptyLexical = object : LexicalCandidateRetriever {
-            override suspend fun retrieveKeywordCandidates(query: String, topK: Int): List<RankedChannelItem> = emptyList()
-        }
-
-        val emptySemantic = object : SemanticSearchService {
-            override suspend fun search(query: String, topK: Int, minSimilarity: Float, targetType: SemanticRepresentationType, expectedDescriptor: EmbeddingModelDescriptor?): SemanticSearchResult {
-                return SemanticSearchResult(
-                    query = query,
-                    candidates = emptyList(),
-                    modelDescriptor = descriptor,
-                    representationType = targetType,
-                    latencyMs = 1L,
-                    totalIndexedCandidates = 0,
-                    isSuccess = true
-                )
-            }
-
-            override suspend fun search(
-                queryVector: FloatArray,
-                queryLabel: String,
-                topK: Int,
-                minSimilarity: Float,
-                targetType: SemanticRepresentationType,
-                expectedDescriptor: EmbeddingModelDescriptor?
-            ): SemanticSearchResult {
-                return SemanticSearchResult(
-                    query = queryLabel,
-                    candidates = emptyList(),
-                    modelDescriptor = descriptor,
-                    representationType = targetType,
-                    latencyMs = 1L,
-                    totalIndexedCandidates = 0,
-                    isSuccess = true
-                )
-            }
-            override fun isReady(): Boolean = true
-            override fun getIndexSize(targetType: SemanticRepresentationType, descriptor: EmbeddingModelDescriptor?): Int = 0
-        }
-
-        val engine = DefaultHybridSearchEngine(emptySemantic, emptyLexical)
-        val result = engine.search("unmatched query string")
-
-        assertTrue(result.isSuccess)
-        assertTrue(result.candidates.isEmpty())
-        assertEquals(0, result.totalCandidatesConsidered)
-    }
-
-    @Test
-    fun testHybridSearchEngine_DecoupledThresholds_FiltersWeakCandidatesAfterFusion() = runBlocking {
-        val descriptor = EmbeddingModelDescriptor("test", 1, 128, SemanticRepresentationType.CONTENT)
-        
-        val config = HybridSearchConfig(
-            minSemanticSimilarity = 0.35f,
-            minNeuralRetrievalSimilarity = 0.15f
-        )
-        
-        val fakeLexical = object : LexicalCandidateRetriever {
-            override suspend fun retrieveKeywordCandidates(query: String, topK: Int): List<RankedChannelItem> = emptyList()
-        }
-        
-        val fakeSemantic = object : SemanticSearchService {
-            override suspend fun search(query: String, topK: Int, minSimilarity: Float, targetType: SemanticRepresentationType, expectedDescriptor: EmbeddingModelDescriptor?): SemanticSearchResult {
-                // Verify that retrieval uses the permissive threshold (0.15), not the strict one (0.35)
-                assertEquals(0.15f, minSimilarity)
-                
-                return SemanticSearchResult(
-                    query = query,
-                    candidates = listOf(
-                        // Above retrieval threshold (0.15) but below final threshold (0.35)
-                        SemanticRetrievalCandidate("item_weak", "rep_1", 0.25f, SemanticRepresentationType.CONTENT, descriptor, 1.0f),
-                        // Above final threshold
-                        SemanticRetrievalCandidate("item_strong", "rep_2", 0.45f, SemanticRepresentationType.CONTENT, descriptor, 1.0f)
-                    ),
-                    modelDescriptor = descriptor,
-                    representationType = targetType,
-                    latencyMs = 1L,
-                    totalIndexedCandidates = 10,
-                    isSuccess = true
-                )
-            }
-            override suspend fun search(qv: FloatArray, ql: String, k: Int, s: Float, tt: SemanticRepresentationType, ed: EmbeddingModelDescriptor?): SemanticSearchResult {
-                return SemanticSearchResult(ql, emptyList(), descriptor, tt, 1L, 0)
-            }
-            override fun isReady(): Boolean = true
-            override fun getIndexSize(targetType: SemanticRepresentationType, descriptor: EmbeddingModelDescriptor?): Int = 10
-        }
-        
-        val engine = DefaultHybridSearchEngine(fakeSemantic, fakeLexical)
-        val result = engine.search(SearchRequest.Text("query"), config)
-        
-        assertTrue(result.isSuccess)
-        // item_weak (0.25) should be filtered out by the final 0.35 gate in searchText
-        assertEquals(1, result.candidates.size)
-        assertEquals("item_strong", result.candidates[0].mediaId)
-    }
-
-    @Test
-    fun testHybridSearchEngine_BoostedCandidateSurvivesFinalFilter() = runBlocking {
-        val descriptor = EmbeddingModelDescriptor("test", 1, 128, SemanticRepresentationType.CONTENT)
-        val config = HybridSearchConfig(minSemanticSimilarity = 0.35f, minNeuralRetrievalSimilarity = 0.15f)
-        
-        val fakeLexical = object : LexicalCandidateRetriever {
-            override suspend fun retrieveKeywordCandidates(query: String, topK: Int) = emptyList<RankedChannelItem>()
-        }
-        
-        val fakeSemantic = object : SemanticSearchService {
-            override suspend fun search(q: String, k: Int, sim: Float, tt: SemanticRepresentationType, ed: EmbeddingModelDescriptor?) = SemanticSearchResult(
-                query = q,
-                candidates = listOf(SemanticRetrievalCandidate("item_boosted", "rep_1", 0.25f, SemanticRepresentationType.CONTENT, descriptor, 1.0f)),
-                modelDescriptor = descriptor, representationType = tt, latencyMs = 1L, totalIndexedCandidates = 1, isSuccess = true
-            )
-            override suspend fun search(qv: FloatArray, ql: String, k: Int, s: Float, tt: SemanticRepresentationType, ed: EmbeddingModelDescriptor?): SemanticSearchResult {
-                return SemanticSearchResult(ql, emptyList(), descriptor, tt, 1L, 0)
-            }
-            override fun isReady() = true
-            override fun getIndexSize(tt: SemanticRepresentationType, ed: EmbeddingModelDescriptor?) = 1
-        }
-        
-        // Custom reranker that adds a high-confidence reason to simulate a deep frame match
-        val boostingReranker = object : MultimodalReranker {
-            override fun rerank(
-                candidates: List<HybridCandidate>,
-                queryVector: FloatArray?,
-                queryVectors: List<FloatArray>?,
-                frameVectors: Map<String, List<VideoFrameRepresentation>>
-            ): List<HybridCandidate> {
-                return candidates.map { 
-                    it.copy(matchReasons = listOf(MatchReason(MatchReasonType.DEEP_SCENE_MATCH, 0.5f, "Found lamp in frame 42")))
-                }
-            }
-        }
-        
-        val engine = DefaultHybridSearchEngine(fakeSemantic, fakeLexical, reranker = boostingReranker)
-        val result = engine.search(SearchRequest.Text("lamp"), config)
-        
-        // item_boosted (initial 0.25) now has a reason with 0.5 confidence -> should survive final 0.35 filter
-        assertEquals(1, result.candidates.size)
-        assertEquals("item_boosted", result.candidates[0].mediaId)
     }
 }

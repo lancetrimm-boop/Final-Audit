@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import org.mockito.Mockito.mock
 import java.util.UUID
 
 /**
@@ -22,7 +23,7 @@ class IntelligenceExecutionPipelineTest {
     @Before
     fun setup() {
         fakeDao = FakeIntelligenceDao()
-        repository = IntelligenceRepository(fakeDao)
+        repository = IntelligenceRepository(fakeDao, mock(MediaRepository::class.java))
     }
 
     @Test

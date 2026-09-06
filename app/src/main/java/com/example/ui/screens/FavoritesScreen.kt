@@ -50,41 +50,34 @@ import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.DiscoveryGradient
 import com.example.ui.theme.DiscoveryViolet
 
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import com.example.data.intelligence.IntelligentSection
+import com.example.ui.components.AuraSectionHeader
+
 @Composable
 fun FavoritesScreen(
-    mediaItems: List<MediaItem>,
-    onMediaSelect: (MediaItem) -> Unit,
+    sections: List<IntelligentSection>,
+    isLoading: Boolean,
+    onMediaSelect: (MediaItem, List<MediaItem>) -> Unit,
     onFavoriteToggle: (String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    onLike: ((String) -> Unit)? = null
+    onLike: ((String) -> Unit)? = null,
+    onRefresh: () -> Unit = {}
 ) {
     BackHandler(onBack = onBack)
-    var selectedFilter by remember { mutableStateOf("ALL") }
-    val initialFavoriteIds = remember {
-        mediaItems
-            .filter { it.isFavorite }
-            .map { it.id }
-            .toSet()
-    }
-    val sessionMediaItems = mediaItems.filter {
-        it.id in initialFavoriteIds
-    }
-    val favorites = sessionMediaItems.filter {
-        when (selectedFilter) {
-            "PHOTO" -> it.mediaType.equals("PHOTO", ignoreCase = true) || it.mediaType.equals("Image", ignoreCase = true)
-            "VIDEO" -> it.mediaType.equals("VIDEO", ignoreCase = true) || it.mediaType.equals("Movie", ignoreCase = true)
-            else -> true
-        }
-    }
-
+    
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(AuraCrispWhite)
     ) {
         AuraTopBar(
-            title = "Favorites",
+            title = "Personal Favorites",
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(
@@ -93,87 +86,82 @@ fun FavoritesScreen(
                         tint = AuraMidnight
                     )
                 }
+            },
+            actions = {
+                IconButton(onClick = onRefresh, enabled = !isLoading) {
+                    Icon(Icons.Default.Sync, contentDescription = "Refresh", tint = DiscoveryViolet)
+                }
             }
         )
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("ALL" to "All", "PHOTO" to "Photo", "VIDEO" to "Video").forEach { (code, label) ->
-                val isSelected = selectedFilter == code
-                Surface(
-                    onClick = { selectedFilter = code },
-                    shape = androidx.compose.foundation.shape.CircleShape,
-                    modifier = Modifier.height(36.dp),
-                    color = if (isSelected) DiscoveryViolet.copy(alpha = 0.15f) else Color.Transparent,
-                    border = androidx.compose.foundation.BorderStroke(
-                        width = if (isSelected) 2.dp else 1.dp,
-                        brush = if (isSelected) DiscoveryGradient else androidx.compose.ui.graphics.SolidColor(AuraMutedSlate.copy(alpha = 0.5f))
-                    )
-                ) {
-                    Box(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                            color = if (isSelected) DiscoveryViolet else AuraMutedSlate
+        if (isLoading && sections.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.CircularProgressIndicator(color = DiscoveryViolet)
+            }
+        } else if (sections.isEmpty()) {
+            EmptyFavoritesView()
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 32.dp)
+            ) {
+                items(sections) { section ->
+                    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                        AuraSectionHeader(
+                            title = section.title,
+                            subtitle = section.subtitle
                         )
+                        
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.height(180.dp)
+                        ) {
+                            items(section.items, key = { it.id }) { item ->
+                                Box(modifier = Modifier.width(140.dp)) {
+                                    AuraMediaTile(
+                                        item = item,
+                                        onClick = { onMediaSelect(item, section.items) },
+                                        onLike = { onLike?.invoke(item.id) },
+                                        onLongClick = { onFavoriteToggle(item.id) }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+}
 
-        if (favorites.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    AuraLogoIcon(size = 64.dp)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "No Favorites Yet",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AuraMidnight
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Tap the heart icon on any media item to add it to your personal favorites collection.",
-                        fontSize = 13.sp,
-                        color = AuraMutedSlate,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-                }
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 120.dp),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(favorites, key = { it.id }) { item ->
-                    AuraMediaTile(
-                        item = item,
-                        onClick = { onMediaSelect(item) },
-                        onLike = { onLike?.invoke(item.id) },
-                        onLongClick = { onFavoriteToggle(item.id) }
-                    )
-                }
-            }
+@Composable
+private fun EmptyFavoritesView() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            AuraLogoIcon(size = 64.dp)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "No Favorites Yet",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = AuraMidnight
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Tap the heart icon on any media item to add it to your personal favorites collection.",
+                fontSize = 13.sp,
+                color = AuraMutedSlate,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
         }
     }
 }

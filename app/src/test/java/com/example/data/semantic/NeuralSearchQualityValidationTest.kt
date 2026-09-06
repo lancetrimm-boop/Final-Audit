@@ -7,6 +7,7 @@ import com.example.data.MediaItem
 import com.example.data.MediaRepository
 import com.example.data.db.AuraDatabase
 import com.example.data.db.MediaEntity
+import com.example.data.intelligence.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
@@ -78,13 +79,22 @@ class NeuralSearchQualityValidationTest {
         lexicalConstructor.isAccessible = true
         val lexicalRetriever = lexicalConstructor.newInstance(repository) as LexicalCandidateRetriever
         
-        val hybridEngine = DefaultHybridSearchEngine(searchService, lexicalRetriever)
+        val core = AuraIntelligenceCore(
+            repository = repository,
+            retrievalRouter = RetrievalRouter(
+                lexicalRetriever = lexicalRetriever,
+                semanticProvider = searchService as? SemanticRetrievalProvider,
+                visualProvider = null
+            )
+        )
+        val hybridEngine = DefaultHybridSearchEngine(core)
 
         val fields = mapOf(
             "semanticRepresentationRepository" to semanticRepo,
             "embeddingProvider" to provider,
             "semanticCandidateRetriever" to retriever,
             "semanticSearchService" to searchService,
+            "intelligenceCore" to core,
             "hybridSearchEngine" to hybridEngine
         )
         
@@ -93,6 +103,11 @@ class NeuralSearchQualityValidationTest {
             field.isAccessible = true
             field.set(repository, value)
         }
+        
+        // Setup signature styles mock if needed
+        val styleField = repoClass.getDeclaredField("_tasteDNA") // To avoid null profile
+        styleField.isAccessible = true
+        // Signature style profile is a combine flow, should be fine.
     }
 
     @After
