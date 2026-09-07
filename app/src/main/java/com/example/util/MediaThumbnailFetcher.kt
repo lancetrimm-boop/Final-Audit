@@ -57,14 +57,14 @@ object MediaThumbnailFetcher {
             if (cacheFile.exists()) {
                 try {
                     val bitmap = BitmapFactory.decodeFile(cacheFile.absolutePath)
-                    if (isValidBitmap(bitmap)) return@withContext bitmap
+                    if (isValidBitmap(bitmap) && !isBlackFrame(bitmap!!)) return@withContext bitmap
                 } catch (_: Exception) {}
             }
 
             try {
                 val uri = Uri.parse(uriString)
                 val bitmap = context.contentResolver.loadThumbnail(uri, Size(TARGET_THUMBNAIL_SIZE, TARGET_THUMBNAIL_SIZE), null)
-                if (isValidBitmap(bitmap)) {
+                if (isValidBitmap(bitmap) && !isBlackFrame(bitmap)) {
                     saveToDiskCache(cacheFile, bitmap)
                     return@withContext bitmap
                 }
@@ -74,7 +74,8 @@ object MediaThumbnailFetcher {
         }
 
         // 2. Secondary Path: MediaMetadataRetriever with retries for bad representative frames
-        return@withContext getFrameAtTime(context, uriString, 1_000_000L)
+        // Start at 2s instead of 1s to avoid common fade-ins from black
+        return@withContext getFrameAtTime(context, uriString, 2_000_000L)
     }
 
     /**
@@ -110,17 +111,17 @@ object MediaThumbnailFetcher {
                 if (isValidBitmap(bitmap) && isBlackFrame(bitmap!!)) {
                     val durationMs = getDuration(context, uriString)
                     if (durationMs > 0) {
-                        Log.d(TAG, "Detected black frame at 1s for $uriString. Retrying at midpoint...")
-                        // Attempt 2: Midpoint (clamped to 5s to avoid deep seeks in long videos)
-                        val retry1Us = min(durationMs * 500L, 5_000_000L)
+                        Log.d(TAG, "Detected black frame at ${timeUs/1000000}s for $uriString. Retrying at midpoint...")
+                        // Attempt 2: Midpoint (clamped to 10s to avoid deep seeks in very long videos)
+                        val retry1Us = min(durationMs * 500L, 10_000_000L)
                         if (retry1Us > timeUs) {
                             val retryBitmap = extractFrame(context, uriString, retry1Us)
                             if (isValidBitmap(retryBitmap)) {
                                 if (isBlackFrame(retryBitmap!!)) {
-                                    Log.d(TAG, "Midpoint frame also black for $uriString. Final retry at 80%...")
-                                    // Attempt 3: 80% (clamped to 10s)
-                                    val retry2Us = min(durationMs * 800L, 10_000_000L)
-                                    if (retry2Us > retry1Us) {
+                                    Log.d(TAG, "Midpoint frame also black for $uriString. Final retry at 20%...")
+                                    // Attempt 3: 20% point as an alternative to midpoint/start
+                                    val retry2Us = durationMs * 200L
+                                    if (retry2Us > 0 && retry2Us != retry1Us && retry2Us != timeUs) {
                                         val finalBitmap = extractFrame(context, uriString, retry2Us)
                                         if (isValidBitmap(finalBitmap)) {
                                             bitmap = finalBitmap

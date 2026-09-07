@@ -171,6 +171,7 @@ fun AuraMediaTile(
             mediaType = item.mediaType,
             imageUrl = item.imageUrl,
             uriPath = item.uriPath,
+            convertedUri = item.convertedUri,
             title = item.title,
             modifier = Modifier.fillMaxSize(),
             locationTag = locationTag
@@ -257,6 +258,7 @@ fun AuraMediaThumbnail(
     uriPath: String,
     title: String,
     modifier: Modifier = Modifier,
+    convertedUri: String? = null,
     locationTag: String = "generic"
 ) {
     val isVideo = mediaType.equals("VIDEO", ignoreCase = true) || mediaType.equals("Movie", ignoreCase = true)
@@ -265,8 +267,14 @@ fun AuraMediaThumbnail(
     // AURA REPAIR: Identity-safe state to prevent recycled cards from showing stale thumbnails
     var thumbnailResult by remember(itemId) { mutableStateOf<ThumbnailResult?>(null) }
 
-    LaunchedEffect(itemId, uriPath, imageUrl) {
-        val targetUri = if (imageUrl.isNotEmpty()) imageUrl else uriPath
+    LaunchedEffect(itemId, uriPath, imageUrl, convertedUri) {
+        // Preference: Converted > Original > Remote
+        val targetUri = when {
+            !convertedUri.isNullOrEmpty() -> convertedUri
+            imageUrl.isNotEmpty() -> imageUrl
+            else -> uriPath
+        }
+        
         if (targetUri.isNotEmpty()) {
             val bitmap = MediaThumbnailFetcher.getThumbnail(context, targetUri)
             
@@ -349,7 +357,7 @@ fun AuraMediaThumbnail(
         if (isVideo && thumbnailResult?.bitmap != null && thumbnailResult?.itemId == itemId) {
             VideoTilePreview(
                 itemId = itemId,
-                videoUri = uriPath,
+                videoUri = convertedUri ?: uriPath,
                 imageUrl = imageUrl,
                 locationTag = locationTag,
                 modifier = Modifier
@@ -608,8 +616,9 @@ fun AuraContinueWatchingCard(
     }
 }
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object VideoPreviewPool {
-    private const val MAX_ACTIVE_PREVIEWS = 3
+    private const val MAX_ACTIVE_PREVIEWS = 16 // Increased for "Simultaneous Playback"
     
     // Key is "itemId_locationTag" to prevent player stealing between different UI contexts
     private val activePlayers = mutableMapOf<String, ExoPlayer>()
@@ -654,7 +663,25 @@ object VideoPreviewPool {
         }
         
         return try {
-            val exoPlayer = ExoPlayer.Builder(context.applicationContext).build().apply {
+            // Optimized LoadControl for fast-starting, low-buffer previews
+            val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    2500, // minBuffer
+                    5000, // maxBuffer
+                    1000, // bufferForPlayback
+                    1500  // bufferForPlaybackAfterRebuffer
+                )
+                .build()
+
+            // Force low-resolution track selection for grid performance
+            val trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context).apply {
+                setParameters(buildUponParameters().setMaxVideoSize(480, 480))
+            }
+
+            val exoPlayer = ExoPlayer.Builder(context.applicationContext)
+                .setLoadControl(loadControl)
+                .setTrackSelector(trackSelector)
+                .build().apply {
                 val uri = when {
                     uriString.isNotEmpty() && (uriString.startsWith("http") || uriString.startsWith("content") || uriString.startsWith("file") || uriString.startsWith("android.resource")) -> Uri.parse(uriString)
                     imageUrl.isNotEmpty() && (imageUrl.startsWith("http") || imageUrl.startsWith("content") || imageUrl.startsWith("file") || imageUrl.startsWith("android.resource")) -> Uri.parse(imageUrl)

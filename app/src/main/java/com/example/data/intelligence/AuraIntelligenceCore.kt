@@ -258,13 +258,16 @@ class AuraIntelligenceCore(
                     item.isFavorite || item.rating >= 4.0f
                 }.map { item ->
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
-                    // Favorites are already high quality, sort by newest added
-                    val score = evidence.exploitationScore * 10f + (item.dateAdded.toDouble() / 1e12).toFloat()
+                    
+                    // AURA REPAIR: Explicit favorites must always be highly ranked, 
+                    // regardless of DNA alignment. User intent is authoritative.
+                    val favoriteBoost = if (item.isFavorite) 50.0 else 0.0
+                    val score = favoriteBoost + (evidence.exploitationScore * 10f) + (item.dateAdded.toDouble() / 1e12).toFloat()
                     
                     IntelligenceCandidate(
                         item = item,
                         evidence = listOf(EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA")),
-                        rankScore = score.toDouble(),
+                        rankScore = score,
                         primaryRelevanceScore = evidence.exploitationScore,
                         secondaryEvidenceScore = item.dateAdded.toFloat()
                     )

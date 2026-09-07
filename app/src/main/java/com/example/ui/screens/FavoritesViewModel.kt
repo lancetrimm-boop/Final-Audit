@@ -9,31 +9,28 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+
 class FavoritesViewModel(
     private val repository: MediaRepository
 ) : ViewModel() {
 
-    private val _sections = MutableStateFlow<List<IntelligentSection>>(emptyList())
-    val sections: StateFlow<List<IntelligentSection>> = _sections.asStateFlow()
-
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    init {
-        refreshFavorites()
-    }
+    val sections: StateFlow<List<IntelligentSection>> = repository.favoritesSections
+        .onEach { _isLoading.value = false }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     fun refreshFavorites() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.getIntelligentFavorites()
-                _sections.value = result
-            } catch (e: Exception) {
-                // Fallback to empty list or handle error
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        // Now handled by the reactive flow, but we can trigger a re-rank if needed
+        _isLoading.value = true
+        repository.refreshSort()
     }
 }

@@ -870,6 +870,58 @@ class MediaRepository(
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /**
+     * REACTIVE INTELLIGENT FAVORITES (Update 9 Consolidation)
+     * Provides a grouped and ranked view of favorites that updates instantly on interaction.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val favoritesSections: StateFlow<List<com.example.data.intelligence.IntelligentSection>> = combine(
+        _mediaItems, signatureStyleProfile, tasteDNA, _intelligenceStats, _creatorProfiles, databaseState, _librarySessionSeed
+    ) { args ->
+        args.toList()
+    }
+    .transformLatest { args ->
+        @Suppress("UNCHECKED_CAST")
+        val items = args[0] as List<MediaItem>
+        val style = args[1] as com.example.data.intelligence.SignatureStyleProfile
+        val dna = args[2] as TasteDNA
+        val stats = args[3] as IntelligenceStats
+        @Suppress("UNCHECKED_CAST")
+        val creators = args[4] as Map<String, CreatorProfile>
+        val dbState = args[5] as DatabaseState
+        val seed = args[6] as Long
+
+        val core = intelligenceCore
+        if (core != null && dbState == DatabaseState.READY) {
+            val request = com.example.data.intelligence.IntelligenceRequest(
+                mode = com.example.data.intelligence.IntelligenceMode.SORT,
+                sortOption = "FAVORITES",
+                tasteDNA = dna,
+                stats = stats,
+                creatorProfiles = creators,
+                seed = seed,
+                requestId = "favorites_reactive_refresh" // Use stable ID to allow cache-over-state optimization
+            )
+            val response = core.processRequest(request)
+            emit(com.example.data.intelligence.IntelligentPresentationProvider.transformFavorites(
+                response.candidates,
+                style
+            ))
+        } else {
+            // Minimal Fallback while core is initializing
+            val favs = items.filter { it.isFavorite }.sortedByDescending { it.rating }
+            emit(listOf(
+                com.example.data.intelligence.IntelligentSection(
+                    title = "Your Favorites",
+                    subtitle = "Hand-picked by you",
+                    items = favs.take(20)
+                )
+            ))
+        }
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private fun MediaItem.toLibraryItemUi(): LibraryItemUi {
         return LibraryItemUi(
             id = id,
@@ -3197,6 +3249,10 @@ class MediaRepository(
         }
 
         val updated = updatedItem ?: return
+        
+        // Invalidate intelligence cache immediately to prevent race conditions in reactive flows
+        com.example.data.intelligence.IntelligenceCache.invalidateAll()
+
         scope.launch {
             database?.mediaDao()?.update(updated.toEntity())
 
@@ -3244,6 +3300,10 @@ class MediaRepository(
         }
 
         val updated = updatedItem ?: return
+        
+        // Invalidate intelligence cache immediately to prevent race conditions in reactive flows
+        com.example.data.intelligence.IntelligenceCache.invalidateAll()
+
         scope.launch {
             database?.mediaDao()?.update(updated.toEntity())
 
@@ -3275,11 +3335,12 @@ class MediaRepository(
         }
 
         val updated = updatedItem ?: return
+        
+        // Invalidate intelligence cache immediately to prevent race conditions in reactive flows
+        com.example.data.intelligence.IntelligenceCache.invalidateAll()
+
         scope.launch {
             database?.mediaDao()?.update(updated.toEntity())
-            
-            // Invalidate intelligence cache on high-weight interaction
-            com.example.data.intelligence.IntelligenceCache.invalidateAll()
             
             // Phase 3A: Enqueue sanitized telemetry if consent is granted
             contributionQueueRepository?.let { repo ->
