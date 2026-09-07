@@ -108,6 +108,41 @@ interface MediaDao {
 
     @Query("SELECT COUNT(*) FROM media_items")
     suspend fun getCount(): Int
+
+    @Query("""
+        SELECT 
+            COALESCE(SUM(exposureCount), 0) as totalExposures, 
+            COALESCE(SUM(playCount), 0) as totalViews, 
+            COUNT(CASE WHEN isFavorite = 1 THEN 1 END) as favoriteCount,
+            COALESCE(SUM(durationMs), 0) as totalDurationMs,
+            COUNT(*) as itemCount
+        FROM media_items 
+        WHERE isDeleted = 0 AND compatibilityStatus NOT IN ('CORRUPT', 'UNSUPPORTED', 'DELETED')
+    """)
+    suspend fun getEngagementMetrics(): EngagementMetrics
+
+    @Query("""
+        SELECT 
+            COUNT(*) as totalEligible,
+            COUNT(CASE WHEN enrichmentStatus IN ('COMPLETE', 'TEXT_ONLY') THEN 1 END) as textCount,
+            COUNT(CASE WHEN enrichmentStatus IN ('COMPLETE', 'VISUAL_ONLY') THEN 1 END) as visualCount,
+            COUNT(CASE WHEN enrichmentStatus = 'COMPLETE' THEN 1 END) as completeCount,
+            COUNT(CASE WHEN enrichmentStatus = 'TEXT_ONLY' THEN 1 END) as textOnlyCount,
+            COUNT(CASE WHEN enrichmentStatus IN ('FAILED_RETRYABLE', 'FAILED_PERMANENT') THEN 1 END) as failedCount
+        FROM media_items
+        WHERE isDeleted = 0 AND compatibilityStatus NOT IN ('CORRUPT', 'UNSUPPORTED', 'DELETED')
+    """)
+    suspend fun getEnrichmentMetrics(): EnrichmentMetrics
+
+    @Query("""
+        SELECT COUNT(*) FROM media_items
+        WHERE isDeleted = 0 AND compatibilityStatus NOT IN ('CORRUPT', 'UNSUPPORTED', 'DELETED')
+        AND (exposureCount > 0 OR rating > 0)
+    """)
+    suspend fun getInteractedItemCount(): Int
+
+    @Query("SELECT * FROM media_items ORDER BY id ASC LIMIT :limit OFFSET :offset")
+    suspend fun getMediaBatch(limit: Int, offset: Int): List<MediaEntity>
 }
 
 @Dao

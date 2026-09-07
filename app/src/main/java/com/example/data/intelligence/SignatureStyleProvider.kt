@@ -1,7 +1,6 @@
 package com.example.data.intelligence
 
 import com.example.data.MediaItem
-import com.example.data.MediaRepository
 import com.example.data.TasteDNA
 import com.example.data.PersonalizationTraitMapper
 import kotlin.math.abs
@@ -19,10 +18,13 @@ object SignatureStyleProvider {
      */
     fun calculateStyleProfile(
         tasteDNA: TasteDNA,
-        repository: MediaRepository
+        items: List<MediaItem>
     ): SignatureStyleProfile {
+        // Pre-calculate traits for all items once to improve performance (Phase 8 Scalability)
+        val itemTraits = items.associateWith { PersonalizationTraitMapper.getEffectiveTraitAdjustments(it) }
+        
         val allStyles = StyleAnchors.ALL_ANCHORS.map { anchor ->
-            deriveStyle(anchor, tasteDNA, repository)
+            deriveStyle(anchor, tasteDNA, items, itemTraits)
         }
 
         val active = allStyles.filter { it.affinityScore >= STYLE_CONFIRMED_THRESHOLD && it.confidence > 0.4 }
@@ -42,16 +44,20 @@ object SignatureStyleProvider {
     /**
      * Scores a single media item's affinity with a specific style anchor.
      */
-    fun calculateMediaAffinity(item: MediaItem, anchor: StyleAnchor): Double {
-        val traits = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
-        if (traits.isEmpty()) return 0.5
+    fun calculateMediaAffinity(
+        item: MediaItem, 
+        anchor: StyleAnchor,
+        traits: Map<String, Double>? = null
+    ): Double {
+        val effectiveTraits = traits ?: PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
+        if (effectiveTraits.isEmpty()) return 0.5
 
         var weightedSum = 0.0
         var totalWeight = 0.0
 
         anchor.dimensionWeights.forEach { (dim, weight) ->
             val target = anchor.dimensionTargets[dim] ?: 0.5
-            val presence = traits[dim] ?: 0.0
+            val presence = effectiveTraits[dim] ?: 0.0
             val traitValue = (presence + 1.0) / 2.0 // Map -1..1 to 0..1
             
             val alignment = 1.0 - abs(target - traitValue)
@@ -65,7 +71,8 @@ object SignatureStyleProvider {
     private fun deriveStyle(
         anchor: StyleAnchor,
         tasteDNA: TasteDNA,
-        repository: MediaRepository
+        items: List<MediaItem>,
+        itemTraits: Map<MediaItem, Map<String, Double>>
     ): SignatureStyle {
         // 1. Calculate Aesthetic Affinity from DNA
         var weightedSum = 0.0
@@ -88,14 +95,12 @@ object SignatureStyleProvider {
 
         // 2. Incorporate Behavioral Evidence (Wins/Losses)
         // This is a placeholder for more complex behavioral aggregation
-        // We look for media that matches this anchor and see user performance
-        val behavioralBoost = 0.0 // To be implemented with Interaction Memory analysis
+        val behavioralBoost = 0.0 
 
         val finalAffinity = (dnaAffinity + behavioralBoost).coerceIn(0.0, 1.0)
         
         // 3. Find Supporting Media
-        val items = repository.mediaItems.value
-        val scoredItems = items.map { it to calculateMediaAffinity(it, anchor) }
+        val scoredItems = items.map { it to calculateMediaAffinity(it, anchor, itemTraits[it]) }
             .filter { it.second > 0.7 }
             .sortedByDescending { it.second }
         

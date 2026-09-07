@@ -53,6 +53,7 @@ class DefaultHybridSearchEngine(
             mode = IntelligenceMode.SEARCH,
             query = request.query,
             visualVector = request.visualVector,
+            queryVectors = if (request is SearchRequest.MultiVisual) request.visualVectors else null,
             limit = config.topK,
             useLegacyRanking = true, // Force legacy equivalence during initial migration
             requestId = request.requestId

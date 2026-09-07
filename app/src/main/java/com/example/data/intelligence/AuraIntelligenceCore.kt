@@ -51,12 +51,30 @@ class AuraIntelligenceCore(
     }
 
     private suspend fun handleSearch(request: IntelligenceRequest): List<IntelligenceCandidate> {
-        val channelResults = retrievalRouter.retrieve(request)
-        val fusionConfig = HybridSearchConfig(topK = request.limit * 2)
+        // AURA SEARCH REPAIR 3.3: Resolve CLIP text vector for both retrieval AND post-retrieval reranking.
+        // This ensures text-based conceptual searches (e.g. "car") can undergo deep frame analysis
+        // without redundant inference.
+        var searchRequest = request
+        if (request.visualVector == null && request.query != null && request.query.isNotBlank()) {
+            val textProvider = repository.mobileClipTextProvider
+            if (textProvider != null && textProvider.isReady()) {
+                val result = textProvider.generateEmbedding(
+                    mediaId = "query_search_${request.requestId}",
+                    input = SemanticInput.Text(request.query, SemanticRepresentationType.VISUAL),
+                    sourceDataHash = "query_${request.query.hashCode()}"
+                )
+                if (result is EmbeddingResult.Success) {
+                    searchRequest = request.copy(visualVector = result.representation.vector)
+                }
+            }
+        }
+
+        val channelResults = retrievalRouter.retrieve(searchRequest)
+        val fusionConfig = HybridSearchConfig(topK = searchRequest.limit * 2)
         val fused = RetrievalFusion.fuse(channelResults, fusionConfig)
         
         // Post-retrieval Reranking (Stage 8 Video Intelligence Integration)
-        val queryVector = request.visualVector
+        val queryVector = searchRequest.visualVector
         val topForRerank = fused.take(50).map { fc ->
             HybridCandidate(
                 mediaId = fc.mediaId,
@@ -73,6 +91,7 @@ class AuraIntelligenceCore(
         val reranked = reranker.rerank(
             candidates = topForRerank,
             queryVector = queryVector,
+            queryVectors = searchRequest.queryVectors, // Support multi-reference if present
             frameVectors = frameVectors
         )
         
@@ -86,7 +105,7 @@ class AuraIntelligenceCore(
             )
         }
 
-        val results = scoreAndRank(rerankedFused, request)
+        val results = scoreAndRank(rerankedFused, searchRequest)
         
         // Update 7: Style Annotation
         val styleProfile = repository.signatureStyleProfile.value
@@ -415,10 +434,24 @@ class AuraIntelligenceCore(
         val stats = request.stats ?: repository.intelligenceStats.value
         val creators = request.creatorProfiles ?: repository.creatorProfiles.value
 
+        // AURA SEARCH REPAIR 3.4: Use principled precision threshold from config
+        val config = HybridSearchConfig()
+        val precisionThreshold = config.minSemanticSimilarity
+
         return fused.mapNotNull { fusedCandidate ->
             val item = repository.getMediaItemById(fusedCandidate.mediaId) ?: return@mapNotNull null
             if (!isItemVisibleInLibrary(item)) return@mapNotNull null
             
+            // Precision Gate: Items must exceed precision threshold (0.35f) in at least one neural channel 
+            // OR be authoritative lexical matches (exact filename).
+            val maxNeuralSimilarity = fusedCandidate.channelScores.filter { (channel, _) ->
+                channel == SearchChannel.SEMANTIC_CONTENT || channel == SearchChannel.SEMANTIC_VISUAL
+            }.values.maxOrNull() ?: 0f
+
+            if (maxNeuralSimilarity < precisionThreshold && !fusedCandidate.isAuthoritative) {
+                return@mapNotNull null
+            }
+
             val evidence = mutableListOf<EvidenceItem>()
             
             // a. Retrieval Evidence

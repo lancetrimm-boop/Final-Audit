@@ -23,7 +23,7 @@ import kotlin.math.min
 object MediaThumbnailFetcher {
     private const val TAG = "MediaThumbnailFetcher"
     private const val THUMBNAIL_DIR = "thumbnails"
-    private const val MAX_CONCURRENT_EXTRACTIONS = 4
+    private const val MAX_CONCURRENT_EXTRACTIONS = 2
     private const val TARGET_THUMBNAIL_SIZE = 512
     private const val BLACK_FRAME_LUMINANCE_THRESHOLD = 15.0
     private const val BLACK_FRAME_PERCENTAGE_THRESHOLD = 0.98f

@@ -618,11 +618,15 @@ fun AuraContinueWatchingCard(
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object VideoPreviewPool {
-    private const val MAX_ACTIVE_PREVIEWS = 16 // Increased for "Simultaneous Playback"
+    private const val MAX_ACTIVE_PREVIEWS = 3 // Reduced for performance and thermal stability
     
     // Key is "itemId_locationTag" to prevent player stealing between different UI contexts
     private val activePlayers = mutableMapOf<String, ExoPlayer>()
     private val accessOrder = mutableListOf<String>()
+    private val idlePlayers = mutableListOf<ExoPlayer>()
+
+    // Track listeners to avoid leaks during reuse
+    private val playerListeners = mutableMapOf<ExoPlayer, Player.Listener>()
 
     @Synchronized
     fun acquirePlayer(
@@ -650,47 +654,32 @@ object VideoPreviewPool {
             return existing
         }
 
-        if (activePlayers.size >= MAX_ACTIVE_PREVIEWS && accessOrder.isNotEmpty()) {
-            val oldestKey = accessOrder.removeAt(0)
-            val oldestPlayer = activePlayers.remove(oldestKey)
-            oldestPlayer?.apply {
-                try {
-                    clearVideoTextureView(null)
-                    stop()
-                    release()
-                } catch (_: Exception) {}
+        // Performance Fix: Reuse players from idle pool or evict oldest active
+        val player = when {
+            idlePlayers.isNotEmpty() -> idlePlayers.removeAt(0)
+            activePlayers.size < MAX_ACTIVE_PREVIEWS -> buildNewPlayer(context)
+            accessOrder.isNotEmpty() -> {
+                val oldestKey = accessOrder.removeAt(0)
+                activePlayers.remove(oldestKey)
             }
-        }
+            else -> buildNewPlayer(context)
+        } ?: buildNewPlayer(context)
         
         return try {
-            // Optimized LoadControl for fast-starting, low-buffer previews
-            val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
-                .setBufferDurationsMs(
-                    2500, // minBuffer
-                    5000, // maxBuffer
-                    1000, // bufferForPlayback
-                    1500  // bufferForPlaybackAfterRebuffer
-                )
-                .build()
-
-            // Force low-resolution track selection for grid performance
-            val trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context).apply {
-                setParameters(buildUponParameters().setMaxVideoSize(480, 480))
-            }
-
-            val exoPlayer = ExoPlayer.Builder(context.applicationContext)
-                .setLoadControl(loadControl)
-                .setTrackSelector(trackSelector)
-                .build().apply {
+            player.apply {
                 val uri = when {
                     uriString.isNotEmpty() && (uriString.startsWith("http") || uriString.startsWith("content") || uriString.startsWith("file") || uriString.startsWith("android.resource")) -> Uri.parse(uriString)
                     imageUrl.isNotEmpty() && (imageUrl.startsWith("http") || imageUrl.startsWith("content") || imageUrl.startsWith("file") || imageUrl.startsWith("android.resource")) -> Uri.parse(imageUrl)
                     else -> Uri.parse("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
                 }
-                setMediaItem(Media3Item.fromUri(uri))
-                volume = 0f // Muted preview
-                repeatMode = Player.REPEAT_MODE_ONE // Looping preview
-                addListener(object : Player.Listener {
+                
+                // Reset player state for reuse
+                stop()
+                clearMediaItems()
+                
+                // Replace listener safely
+                playerListeners[this]?.let { removeListener(it) }
+                val listener = object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_ENDED) {
                             seekTo(0)
@@ -700,21 +689,52 @@ object VideoPreviewPool {
 
                     override fun onPlayerError(error: PlaybackException) {
                         Log.e("VideoPreviewPool", "Preview error for $itemId: ${error.message}", error)
-                        // Capture diagnostics for preview failures
                         val repo = com.example.data.MediaRepository.instance
                         val mediaItem = repo.getMediaItemById(itemId)
                         repo.recordPlaybackError(error, this@apply, mediaItem)
                     }
-                })
+                }
+                addListener(listener)
+                playerListeners[this] = listener
+                
+                setMediaItem(Media3Item.fromUri(uri))
+                volume = 0f // Muted preview
+                repeatMode = Player.REPEAT_MODE_ONE // Looping preview
+                
                 prepare()
                 playWhenReady = true
             }
-            activePlayers[poolKey] = exoPlayer
+            activePlayers[poolKey] = player
             accessOrder.add(poolKey)
-            exoPlayer
+            player
         } catch (e: Exception) {
+            Log.e("VideoPreviewPool", "Failed to configure player for $itemId", e)
             null
         }
+    }
+
+    private fun buildNewPlayer(context: Context): ExoPlayer {
+        // Optimized LoadControl for fast-starting, low-buffer previews
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(1500, 3000, 500, 1000)
+            .build()
+
+        // Performance Fix: Disable Audio Renderers for Grid Previews to save decoders (Stage 9 Architecture)
+        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
+            .setEnableAudioTrackPlaybackParams(false)
+        
+        // Force low-resolution track selection and EXPLICITLY DISABLE AUDIO TRACKS
+        val trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context).apply {
+            setParameters(buildUponParameters()
+                .setMaxVideoSize(360, 360)
+                .setForceLowestBitrate(true)
+                .setDisabledTrackTypes(setOf(androidx.media3.common.C.TRACK_TYPE_AUDIO)))
+        }
+
+        return ExoPlayer.Builder(context.applicationContext, renderersFactory)
+            .setLoadControl(loadControl)
+            .setTrackSelector(trackSelector)
+            .build()
     }
 
     @Synchronized
@@ -724,9 +744,10 @@ object VideoPreviewPool {
         val player = activePlayers.remove(poolKey)
         player?.apply {
             try {
-                clearVideoTextureView(null)
                 stop()
-                release()
+                clearMediaItems()
+                // Move to idle pool for reuse
+                idlePlayers.add(this)
             } catch (_: Exception) {}
         }
     }
@@ -734,14 +755,11 @@ object VideoPreviewPool {
     @Synchronized
     fun releaseAll() {
         accessOrder.clear()
-        activePlayers.values.forEach { player ->
-            try {
-                player.clearVideoTextureView(null)
-                player.stop()
-                player.release()
-            } catch (_: Exception) {}
-        }
+        activePlayers.values.forEach { it.release() }
         activePlayers.clear()
+        idlePlayers.forEach { it.release() }
+        idlePlayers.clear()
+        playerListeners.clear()
     }
 }
 
@@ -758,8 +776,13 @@ fun VideoTilePreview(
     var playerState by remember(itemId, locationTag) { mutableStateOf<ExoPlayer?>(null) }
     var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
 
-    DisposableEffect(itemId, locationTag) {
+    // Performance Fix: Debounce player acquisition during fast scrolling
+    LaunchedEffect(itemId, locationTag) {
+        delay(400) // Only start preview if visible for > 400ms
         playerState = VideoPreviewPool.acquirePlayer(context, itemId, locationTag, videoUri, imageUrl)
+    }
+
+    DisposableEffect(itemId, locationTag) {
         onDispose {
             playerViewRef?.player = null
             VideoPreviewPool.releasePlayer(itemId, locationTag)

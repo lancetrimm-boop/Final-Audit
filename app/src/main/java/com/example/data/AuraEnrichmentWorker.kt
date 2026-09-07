@@ -191,18 +191,22 @@ class AuraEnrichmentWorker(
     private suspend fun logStats(repository: MediaRepository) {
         val db = repository.getDatabase() ?: return
         val mediaDao = db.mediaDao()
-        val total = mediaDao.getEligibleEnrichmentCount()
-        val allItems = mediaDao.getAllMediaSync()
         
-        val textCount = allItems.count { it.enrichmentStatus == EnrichmentStatus.TEXT_ONLY.name || it.enrichmentStatus == EnrichmentStatus.COMPLETE.name }
-        val visualCount = allItems.count { it.enrichmentStatus == EnrichmentStatus.VISUAL_ONLY.name || it.enrichmentStatus == EnrichmentStatus.COMPLETE.name }
-        val complete = allItems.count { it.enrichmentStatus == EnrichmentStatus.COMPLETE.name }
-        val textOnly = allItems.count { it.enrichmentStatus == EnrichmentStatus.TEXT_ONLY.name }
-        val failed = allItems.count { it.enrichmentStatus == EnrichmentStatus.FAILED_RETRYABLE.name || it.enrichmentStatus == EnrichmentStatus.FAILED_PERMANENT.name }
-        
-        val usableCoverage = if (total > 0) (textCount.toFloat() / total * 100) else 100f
-        val coverageStr = String.format(java.util.Locale.US, "%.2f%%", usableCoverage)
-        
-        android.util.Log.i("AuraSemanticTrace", "EMBEDDING_PROGRESS total=$total text=$textCount visual=$visualCount complete=$complete textOnly=$textOnly usableCoverage=$coverageStr failed=$failed")
+        try {
+            val metrics = mediaDao.getEnrichmentMetrics()
+            val total = metrics.totalEligible
+            val textCount = metrics.textCount
+            val visualCount = metrics.visualCount
+            val complete = metrics.completeCount
+            val textOnly = metrics.textOnlyCount
+            val failed = metrics.failedCount
+            
+            val usableCoverage = if (total > 0) (textCount.toFloat() / total * 100) else 100f
+            val coverageStr = String.format(java.util.Locale.US, "%.2f%%", usableCoverage)
+            
+            android.util.Log.i("AuraSemanticTrace", "EMBEDDING_PROGRESS total=$total text=$textCount visual=$visualCount complete=$complete textOnly=$textOnly usableCoverage=$coverageStr failed=$failed")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to log enrichment stats", e)
+        }
     }
 }

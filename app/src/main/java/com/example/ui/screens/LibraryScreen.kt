@@ -159,7 +159,7 @@ fun LibraryScreen(
     val isUnstableMode = activeCategory == SortCategory.INTELLIGENT && intelligentSort == IntelligentSortOption.DISCOVER
 
     LaunchedEffect(latestSortedItemsFromRepo) {
-        if (!isUnstableMode || stableItems.isEmpty()) {
+        if (!isUnstableMode || stableItems.isEmpty() || latestSortedItemsFromRepo.size != stableItems.size) {
             stableItems = latestSortedItemsFromRepo
         }
     }
@@ -390,12 +390,14 @@ fun LibraryScreen(
             }
 
             PullToRefreshBox(
-                isRefreshing = scanProgress.isScanning,
+                isRefreshing = scanProgress.isScanning && scanProgress.isManual,
                 onRefresh = { 
                     repository.refreshSort()
                     stableItems = emptyList() // Force reload on manual refresh
                     if (dbState == com.example.data.DatabaseState.READY) {
-                        scanPermissionLauncher.launch(permissionsToRequest)
+                        coroutineScope.launch {
+                            repository.scanLocalMedia(context, isManual = true)
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxSize()

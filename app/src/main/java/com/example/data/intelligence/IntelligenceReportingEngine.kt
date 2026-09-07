@@ -24,8 +24,7 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
      * Generates a complete IntelligenceSnapshotReport by aggregating various local signals.
      */
     suspend fun generateSnapshotReport(currentTasteDNA: TasteDNA): IntelligenceSnapshotReport = withContext(Dispatchers.IO) {
-        val media = database.mediaDao().getAllMediaSync()
-        val tasteProfile = generateTasteProfileSnapshot(currentTasteDNA, media)
+        val tasteProfile = generateTasteProfileSnapshot(currentTasteDNA)
         val engagement = generateEngagementSnapshot()
         val maturity = generateMaturitySnapshot()
 
@@ -109,7 +108,7 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
         )
     }
 
-    private fun generateTasteProfileSnapshot(dna: TasteDNA, library: List<com.example.data.db.MediaEntity>): TasteProfileSnapshot {
+    private fun generateTasteProfileSnapshot(dna: TasteDNA): TasteProfileSnapshot {
         val dimensions = mutableMapOf<String, Double>()
         val confidence = mutableMapOf<String, Double>()
 
@@ -154,7 +153,8 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
             }
 
         // --- Update 7: Use SignatureStyleProvider ---
-        val styleProfile = SignatureStyleProvider.calculateStyleProfile(dna, com.example.data.MediaRepository.instance)
+        val items = com.example.data.MediaRepository.instance.mediaItems.value
+        val styleProfile = SignatureStyleProvider.calculateStyleProfile(dna, items)
         val tasteClusters = styleProfile.activeStyles.map { style ->
             TasteClusterEvidence(
                 categoryId = style.anchor.id,
@@ -266,8 +266,8 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
      * Aggregates interaction history into an engagement snapshot.
      */
     private suspend fun generateEngagementSnapshot(): EngagementSnapshot {
-        val media = database.mediaDao().getAllMediaSync()
-        if (media.isEmpty()) {
+        val metrics = database.mediaDao().getEngagementMetrics()
+        if (metrics.itemCount == 0) {
             return EngagementSnapshot(
                 schemaVersion = CURRENT_SCHEMA_VERSION,
                 completionRate = 0.0,
@@ -280,17 +280,17 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
         }
 
         // 1. Completion Rate (Simplified: viewCount vs exposureCount)
-        val totalExposures = media.sumOf { it.exposureCount }.coerceAtLeast(1)
-        val totalViews = media.sumOf { it.playCount }.coerceAtLeast(0)
+        val totalExposures = metrics.totalExposures.coerceAtLeast(1)
+        val totalViews = metrics.totalViews
         val completionRate = (totalViews.toDouble() / totalExposures).coerceIn(0.0, 1.0)
 
         // 2. Favorite Density
-        val favoriteCount = media.count { it.isFavorite }
-        val favoriteDensity = (favoriteCount.toDouble() / media.size).coerceIn(0.0, 1.0)
+        val favoriteCount = metrics.favoriteCount
+        val favoriteDensity = (favoriteCount.toDouble() / metrics.itemCount).coerceIn(0.0, 1.0)
 
         // 3. Skip Velocity
         val totalSkips = database.aiSkipDao().getTotalSkipForwards()
-        val totalViewMinutes = (media.sumOf { it.durationMs } / 60000.0).coerceAtLeast(1.0)
+        val totalViewMinutes = (metrics.totalDurationMs / 60000.0).coerceAtLeast(1.0)
         val skipVelocity = totalSkips.toDouble() / totalViewMinutes
 
         // 4. Activity Hour (Dummy logic for now)
@@ -335,8 +335,7 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
         
         // Data Coverage - Signal Quantity
         // Proportion of items that have been at least exposed once or rated
-        val media = database.mediaDao().getAllMediaSync()
-        val itemsInteractedWith = media.count { it.exposureCount > 0 || it.rating > 0 }
+        val itemsInteractedWith = database.mediaDao().getInteractedItemCount()
         val coverage = if (itemCount > 0) itemsInteractedWith.toDouble() / itemCount else 0.0
 
         return AuraMaturitySnapshot(

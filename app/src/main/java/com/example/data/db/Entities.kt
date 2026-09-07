@@ -64,6 +64,23 @@ data class MediaEntity(
     val enrichmentFailureCount: Int = 0
 )
 
+data class EngagementMetrics(
+    val totalExposures: Long,
+    val totalViews: Long,
+    val favoriteCount: Int,
+    val totalDurationMs: Long,
+    val itemCount: Int
+)
+
+data class EnrichmentMetrics(
+    val totalEligible: Int,
+    val textCount: Int,
+    val visualCount: Int,
+    val completeCount: Int,
+    val textOnlyCount: Int,
+    val failedCount: Int
+)
+
 @Entity(tableName = "pairwise_outcomes")
 data class PairwiseOutcomeEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

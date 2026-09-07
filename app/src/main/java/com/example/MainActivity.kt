@@ -581,7 +581,7 @@ fun AuraMainContent(repository: MediaRepository) {
                                     repository.importMediaFromUris(context, uris)
                                 },
                                 onScanDevice = {
-                                    repository.scanLocalMedia(context)
+                                    repository.scanLocalMedia(context, isManual = true)
                                 },
                                 deleteLauncher = deleteRequestLauncher
                             )

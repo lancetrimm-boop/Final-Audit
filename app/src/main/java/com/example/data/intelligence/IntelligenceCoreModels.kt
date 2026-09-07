@@ -80,6 +80,7 @@ data class IntelligenceRequest(
     val referenceItemId: String? = null,
     val relatedMediaIds: List<String> = emptyList(),
     val visualVector: FloatArray? = null,
+    val queryVectors: List<FloatArray>? = null,
     val limit: Int = 40,
     val tasteDNA: TasteDNA? = null,
     val profile: TasteDNA.PreferenceProfile? = null,

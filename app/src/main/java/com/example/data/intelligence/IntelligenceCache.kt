@@ -1,6 +1,8 @@
 package com.example.data.intelligence
 
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.*
+import android.util.Log
 
 /**
  * Bounded evidence cache for intelligence results.
@@ -11,6 +13,9 @@ object IntelligenceCache {
     private val evidenceCache = ConcurrentHashMap<String, List<EvidenceItem>>()
     private val responseCache = ConcurrentHashMap<Int, IntelligenceResponse>()
     
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var invalidationJob: Job? = null
+
     /**
      * Cache results of a specific request.
      */
@@ -36,18 +41,27 @@ object IntelligenceCache {
 
     /**
      * Invalidate entire cache (e.g. on Taste DNA update).
+     * Performance Fix: Implements debounced invalidation to prevent re-computation storms.
      */
+    @Synchronized
     fun invalidateAll() {
-        evidenceCache.clear()
-        responseCache.clear()
+        invalidationJob?.cancel()
+        invalidationJob = scope.launch {
+            delay(400) // Debounce burst events (taps, batch updates)
+            evidenceCache.clear()
+            responseCache.clear()
+            Log.d("IntelligenceCache", "Cache fully invalidated (debounced)")
+        }
     }
 
     /**
      * Invalidate specific item (e.g. on metadata update).
      */
+    @Synchronized
     fun invalidateMedia(mediaId: String) {
         evidenceCache.remove(mediaId)
-        // Responses might still contain this item, easier to clear responses
+        // Responses might still contain this item, clear responses to ensure fresh ranking
         responseCache.clear() 
+        Log.d("IntelligenceCache", "Invalidated media: $mediaId")
     }
 }

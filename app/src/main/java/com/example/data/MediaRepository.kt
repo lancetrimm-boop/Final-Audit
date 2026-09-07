@@ -144,6 +144,7 @@ data class ImportProgressState(
 data class ScanProgressState(
     val scanSessionId: Long = 0L,
     val isScanning: Boolean = false,
+    val isManual: Boolean = false,
     val discoveredCount: Int = 0,
     val processedCount: Int = 0,
     val failedCount: Int = 0,
@@ -293,6 +294,10 @@ class MediaRepository(
 
     @Volatile
     var visualIndexingService: VisualIndexingService? = null
+        private set
+
+    @Volatile
+    var mobileClipTextProvider: MobileCLIPTextEmbeddingProvider? = null
         private set
     
     @Volatile
@@ -1113,7 +1118,8 @@ class MediaRepository(
                     
                     // Start data collectors from database
                     launch { collectDataFlows(db) }
-
+                    startStyleMonitoring()
+                    
                     // ASYNCHRONOUS AI INITIALIZATION (Database Ready != AI Ready)
                     initAI(context)
                     
@@ -1216,6 +1222,7 @@ class MediaRepository(
                         val mobileClipTextPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_text.onnx")
                         val mobileClipTextEngine = OnnxRuntimeMobileCLIPTextInferenceEngine(modelPath = mobileClipTextPath)
                         val mobileClipTextProvider = MobileCLIPTextEmbeddingProvider(mobileClipTextEngine, clipTokenizer)
+                        this@MediaRepository.mobileClipTextProvider = mobileClipTextProvider
                         
                         visualIndexingService = DefaultVisualIndexingService(mobileCLIPProvider!!, retriever, semanticRepresentationRepository!!)
                         
@@ -1266,6 +1273,30 @@ class MediaRepository(
                     _aiState.value = AIState.FAILED
                 }
             }
+        }
+    }
+
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private fun startStyleMonitoring() {
+        scope.launch {
+            combine(_mediaItems, _tasteDNA) { items, dna -> items to dna }
+                .debounce(3000L) // Don't thrash on rapid ingestion or slider moves (Phase 8 Performance)
+                .collectLatest { (items, dna) ->
+                    if (items.isEmpty()) {
+                        _signatureStyleProfile.value = com.example.data.intelligence.SignatureStyleProfile(emptyList(), emptyList())
+                        return@collectLatest
+                    }
+                    
+                    Log.d("AuraStyles", "Recalculating Signature Styles for ${items.size} items...")
+                    val startTime = System.currentTimeMillis()
+                    
+                    val profile = withContext(Dispatchers.Default) {
+                        com.example.data.intelligence.SignatureStyleProvider.calculateStyleProfile(dna, items)
+                    }
+                    
+                    _signatureStyleProfile.value = profile
+                    Log.i("AuraStyles", "Signature Styles updated in ${System.currentTimeMillis() - startTime}ms. Active: ${profile.activeStyles.size}")
+                }
         }
     }
 
@@ -2223,9 +2254,9 @@ class MediaRepository(
         }
     }
 
-    suspend fun scanLocalMedia(context: Context): Boolean {
+    suspend fun scanLocalMedia(context: Context, isManual: Boolean = false): Boolean {
         val scanId = System.currentTimeMillis()
-        Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] scanLocalMedia() called.")
+        Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] scanLocalMedia() called (isManual=$isManual).")
 
         // 0. Database Readiness Gate
         if (_databaseState.value != DatabaseState.READY) {
@@ -2233,6 +2264,7 @@ class MediaRepository(
             _scanProgress.value = ScanProgressState(
                 scanSessionId = scanId,
                 isScanning = false,
+                isManual = isManual,
                 errorCode = ScanError.DATABASE_ERROR,
                 statusText = "Secure database is initializing. Please wait."
             )
@@ -2252,6 +2284,7 @@ class MediaRepository(
             _scanProgress.value = ScanProgressState(
                 scanSessionId = scanId,
                 isScanning = false, 
+                isManual = isManual,
                 errorCode = ScanError.PERMISSION_DENIED,
                 statusText = "Permissions required to scan media."
             )
@@ -2272,7 +2305,12 @@ class MediaRepository(
                 val initialCount = _mediaItems.value.size
                 Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Initial _mediaItems count: $initialCount")
                 
-                _scanProgress.value = ScanProgressState(scanSessionId = scanId, isScanning = true, statusText = "Discovering media...")
+                _scanProgress.value = ScanProgressState(
+                    scanSessionId = scanId, 
+                    isScanning = true, 
+                    isManual = isManual,
+                    statusText = "Discovering media..."
+                )
                 
                 // Yield to allow cancellation to be processed
                 kotlinx.coroutines.yield()
@@ -2283,7 +2321,13 @@ class MediaRepository(
                     discoverLocalMedia(context)
                 } catch (e: SecurityException) {
                     Log.e("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Storage Access Blocked by System", e)
-                    _scanProgress.value = ScanProgressState(scanSessionId = scanId, isScanning = false, errorCode = ScanError.STORAGE_ACCESS_FAILED, statusText = "Storage access blocked.")
+                    _scanProgress.value = ScanProgressState(
+                        scanSessionId = scanId, 
+                        isScanning = false, 
+                        isManual = isManual,
+                        errorCode = ScanError.STORAGE_ACCESS_FAILED, 
+                        statusText = "Storage access blocked."
+                    )
                     return@launch
                 }
                 
@@ -2292,6 +2336,7 @@ class MediaRepository(
                     _scanProgress.value = ScanProgressState(
                         scanSessionId = scanId,
                         isScanning = false,
+                        isManual = isManual,
                         errorCode = discoveryResult.errorCode,
                         statusText = discoveryResult.reason
                     )
@@ -2341,17 +2386,29 @@ class MediaRepository(
                 _isLibraryReady.value = true
 
                 Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] processPendingMedia() starting.")
-                processPendingMedia(context, scanId, result.scannedVolumes)
+                processPendingMedia(context, scanId, result.scannedVolumes, isManual)
                 Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] processPendingMedia() complete.")
                 
                 val finalCount = database?.mediaDao()?.getCount() ?: 0
                 Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Scan lifecycle complete. Final DB count: $finalCount, changed=$changed")
-                _scanProgress.value = ScanProgressState(scanSessionId = scanId, isScanning = false, isComplete = true, totalCount = finalCount, statusText = "Scan complete.")
+                _scanProgress.value = ScanProgressState(
+                    scanSessionId = scanId, 
+                    isScanning = false, 
+                    isManual = isManual,
+                    isComplete = true, 
+                    totalCount = finalCount, 
+                    statusText = "Scan complete."
+                )
 
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException || e is java.util.concurrent.CancellationException) {
                     Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Scan coroutine CANCELLED. Cause: ${e.message}")
-                    _scanProgress.value = _scanProgress.value.copy(scanSessionId = scanId, isScanning = false, isComplete = false, statusText = "Scan cancelled")
+                    _scanProgress.value = _scanProgress.value.copy(
+                        scanSessionId = scanId, 
+                        isScanning = false, 
+                        isComplete = false, 
+                        statusText = "Scan cancelled"
+                    )
                 } else {
                     Log.e("AURA_SCAN_RUNTIME", "[$scanId] [REPO] Scan lifecycle EXCEPTION: ${e.javaClass.simpleName}", e)
                     
@@ -2374,6 +2431,7 @@ class MediaRepository(
                     _scanProgress.value = ScanProgressState(
                         scanSessionId = scanId,
                         isScanning = false, 
+                        isManual = isManual,
                         errorCode = errorCode, 
                         statusText = causeChain.toString()
                     )
@@ -2567,34 +2625,41 @@ class MediaRepository(
         val scannedVolumes = result.scannedVolumes
         val scannedMediaTypes = result.scannedMediaTypes
 
-        val currentItems = db.mediaDao().getAllMediaSync()
         val toDelete = mutableListOf<String>()
         var skippedCount = 0
         
-        currentItems.forEach { item ->
-            // Periodic cancellation check for large libraries
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            
-            // Only reconcile local items
-            if (item.id.startsWith("local_")) {
-                val itemVolume = extractVolumeFromUri(item.uriPath)
-                val itemType = item.mediaType // "PHOTO" or "VIDEO"
-                
-                val isVolumeVerified = itemVolume != null && scannedVolumes.contains(itemVolume)
-                val isTypeVerified = scannedMediaTypes.contains(itemType)
+        val pageSize = 500
+        var offset = 0
+        while (true) {
+            val currentBatch = db.mediaDao().getMediaBatch(pageSize, offset)
+            if (currentBatch.isEmpty()) break
 
-                if (isVolumeVerified && isTypeVerified) {
-                    // Item belongs to an authoritatively scanned scope.
-                    // If it was not discovered, it is a legitimate deletion.
-                    if (item.id !in allDiscoveredIds) {
-                        toDelete.add(item.id)
+            currentBatch.forEach { item ->
+                // Periodic cancellation check for large libraries
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                
+                // Only reconcile local items
+                if (item.id.startsWith("local_")) {
+                    val itemVolume = extractVolumeFromUri(item.uriPath)
+                    val itemType = item.mediaType // "PHOTO" or "VIDEO"
+                    
+                    val isVolumeVerified = itemVolume != null && scannedVolumes.contains(itemVolume)
+                    val isTypeVerified = scannedMediaTypes.contains(itemType)
+
+                    if (isVolumeVerified && isTypeVerified) {
+                        // Item belongs to an authoritatively scanned scope.
+                        // If it was not discovered, it is a legitimate deletion.
+                        if (item.id !in allDiscoveredIds) {
+                            toDelete.add(item.id)
+                        }
+                    } else {
+                        // Item is outside the verified scan scope (e.g. unmounted volume or missing media type)
+                        // PRESERVE to prevent data loss due to incomplete scan.
+                        skippedCount++
                     }
-                } else {
-                    // Item is outside the verified scan scope (e.g. unmounted volume or missing media type)
-                    // PRESERVE to prevent data loss due to incomplete scan.
-                    skippedCount++
                 }
             }
+            offset += pageSize
         }
         
         if (toDelete.isNotEmpty()) {
@@ -2623,19 +2688,20 @@ class MediaRepository(
         }
     }
 
-    internal suspend fun processPendingMedia(context: Context, scanSessionId: Long, scannedVolumes: Set<String>) {
+    internal suspend fun processPendingMedia(context: Context, scanSessionId: Long, scannedVolumes: Set<String>, isManual: Boolean = false) {
         val db = database ?: return
         val pending = db.mediaDao().getPendingAnalysis()
         val total = pending.size
         
         if (total == 0) {
-            _scanProgress.value = ScanProgressState(scanSessionId = scanSessionId, isScanning = false, isComplete = true, statusText = "Library up to date")
+            _scanProgress.value = ScanProgressState(scanSessionId = scanSessionId, isScanning = false, isManual = isManual, isComplete = true, statusText = "Library up to date")
             return
         }
 
         _scanProgress.value = ScanProgressState(
             scanSessionId = scanSessionId,
             isScanning = true,
+            isManual = isManual,
             totalCount = total,
             statusText = "Analyzing $total new files..."
         )
@@ -2687,7 +2753,11 @@ class MediaRepository(
                     
                     if (batch.size >= batchSize) {
                         db.mediaDao().updateAll(batch)
-                        processSemanticsForBatch(batch)
+                        
+                        // Performance Fix: Process semantics asynchronously to avoid blocking ingestion loop
+                        val batchToEnrich = batch.toList()
+                        scope.launch { processSemanticsForBatch(batchToEnrich) }
+                        
                         batch.clear()
                     }
                 } else {
@@ -2722,16 +2792,18 @@ class MediaRepository(
 
         if (batch.isNotEmpty()) {
             db.mediaDao().updateAll(batch)
-            processSemanticsForBatch(batch)
+            val finalBatch = batch.toList()
+            scope.launch { processSemanticsForBatch(finalBatch) }
         }
 
         _scanProgress.value = ScanProgressState(
             scanSessionId = scanSessionId,
             isScanning = false,
+            isManual = isManual,
             isComplete = true,
             processedCount = total,
             totalCount = total,
-            statusText = "Scan complete ΓÇö $total items processed"
+            statusText = "Scan complete — $total items processed"
         )
     }
 
@@ -3163,8 +3235,8 @@ class MediaRepository(
 
         val updated = updatedItem ?: return
         
-        // Invalidate intelligence cache immediately to prevent race conditions in reactive flows
-        com.example.data.intelligence.IntelligenceCache.invalidateAll()
+        // Performance Fix: Use targeted invalidation for single-item updates
+        com.example.data.intelligence.IntelligenceCache.invalidateMedia(id)
 
         scope.launch {
             database?.mediaDao()?.update(updated.toEntity())
@@ -3214,8 +3286,8 @@ class MediaRepository(
 
         val updated = updatedItem ?: return
         
-        // Invalidate intelligence cache immediately to prevent race conditions in reactive flows
-        com.example.data.intelligence.IntelligenceCache.invalidateAll()
+        // Performance Fix: Use targeted invalidation for single-item updates
+        com.example.data.intelligence.IntelligenceCache.invalidateMedia(id)
 
         scope.launch {
             database?.mediaDao()?.update(updated.toEntity())
@@ -3249,8 +3321,8 @@ class MediaRepository(
 
         val updated = updatedItem ?: return
         
-        // Invalidate intelligence cache immediately to prevent race conditions in reactive flows
-        com.example.data.intelligence.IntelligenceCache.invalidateAll()
+        // Performance Fix: Use targeted invalidation for single-item updates
+        com.example.data.intelligence.IntelligenceCache.invalidateMedia(id)
 
         scope.launch {
             database?.mediaDao()?.update(updated.toEntity())
@@ -3332,8 +3404,8 @@ class MediaRepository(
             database?.mediaDao()?.deleteById(id)
             deleteSemanticDataForMedia(id)
             
-            // Invalidate intelligence cache on library structure change
-            com.example.data.intelligence.IntelligenceCache.invalidateAll()
+            // Performance Fix: Use targeted invalidation
+            com.example.data.intelligence.IntelligenceCache.invalidateMedia(id)
         }
         
         // AURA P1 STABILITY: Identity-Aware Playlist Deletion
@@ -3411,8 +3483,8 @@ class MediaRepository(
             database?.mediaDao()?.deleteById(id)
             deleteSemanticDataForMedia(id)
             
-            // Invalidate intelligence cache on library structure change
-            com.example.data.intelligence.IntelligenceCache.invalidateAll()
+            // Performance Fix: Use targeted invalidation
+            com.example.data.intelligence.IntelligenceCache.invalidateMedia(id)
         }
 
         // 4. Clean up active playlist
@@ -3495,8 +3567,9 @@ class MediaRepository(
             comparisonCounts[itemA.id] = (comparisonCounts[itemA.id] ?: 0) + 1
             comparisonCounts[itemB.id] = (comparisonCounts[itemB.id] ?: 0) + 1
 
-            // Invalidate intelligence cache on high-weight interaction
-            com.example.data.intelligence.IntelligenceCache.invalidateAll()
+            // Performance Fix: Use targeted invalidation for high-weight interaction
+            com.example.data.intelligence.IntelligenceCache.invalidateMedia(itemA.id)
+            com.example.data.intelligence.IntelligenceCache.invalidateMedia(itemB.id)
 
             // True Elo Update
             val expectedA = PairwiseEloEngine.calculateExpectedScore(itemA.eloRating, itemB.eloRating)
@@ -4097,18 +4170,26 @@ stats ->
 
     private suspend fun backfillSemantics() {
         val db = database ?: return
-        val allEntities = db.mediaDao().getAllMediaSync()
         
-        val toProcess = allEntities.filter { entity ->
-            // Process items that are authoritative and visible
-            entity.compatibilityStatus == CompatibilityStatus.PLAYABLE.name && !entity.isDeleted
-        }
+        Log.i("MediaRepository", "Starting batch semantic backfill...")
+        val pageSize = 500
+        var offset = 0
+        while (true) {
+            val batch = db.mediaDao().getMediaBatch(pageSize, offset)
+            if (batch.isEmpty()) break
 
-        if (toProcess.isNotEmpty()) {
-            Log.i("MediaRepository", "Performing incremental semantic indexing for ${toProcess.size} items.")
-            processSemanticsForBatch(toProcess)
-            Log.i("MediaRepository", "Backfill semantics complete.")
+            val toProcess = batch.filter { entity ->
+                // Process items that are authoritative and visible
+                entity.compatibilityStatus == CompatibilityStatus.PLAYABLE.name && !entity.isDeleted
+            }
+
+            if (toProcess.isNotEmpty()) {
+                Log.i("MediaRepository", "Performing incremental semantic indexing for ${toProcess.size} items in batch.")
+                processSemanticsForBatch(toProcess)
+            }
+            offset += pageSize
         }
+        Log.i("MediaRepository", "Batch semantic backfill complete.")
     }
 
     private suspend fun processSemanticsForBatch(entities: List<MediaEntity>) {
@@ -4152,13 +4233,15 @@ stats ->
 
     internal fun isItemVisibleInLibrary(item: MediaItem): Boolean {
         // AURA P1 STABILITY: Authoritative Visibility Gate
-        // Only verified playable terminal states are allowed in the Library Flow.
+        // Evolved in Phase 5: Allow ANALYSIS_PENDING to ensure newly ingested items appear immediately.
         val visibleStatuses = listOf(
             CompatibilityStatus.PLAYABLE,
             CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE,
             CompatibilityStatus.PLAYABLE_AFTER_CONVERSION,
             CompatibilityStatus.THUMBNAIL_FAILED,
-            CompatibilityStatus.NEEDS_TRANSCODE
+            CompatibilityStatus.NEEDS_TRANSCODE,
+            CompatibilityStatus.ANALYSIS_PENDING,
+            CompatibilityStatus.ANALYSIS_IN_PROGRESS
         )
         return !item.isDeleted && item.compatibilityStatus in visibleStatuses
     }
@@ -4294,7 +4377,6 @@ stats ->
         }
 
         Log.d("MediaRepository", "Starting media reconciliation...")
-        val allItems = db.mediaDao().getAllMediaSync()
         
         val mountedVolumes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.getExternalVolumeNames(context)
@@ -4302,60 +4384,79 @@ stats ->
             setOf("external")
         }
 
-        allItems.forEach { entity ->
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            
-            // Re-validate if it was pending, untested, or known to be unplayable but still in the table
-            val status = try { CompatibilityStatus.valueOf(entity.compatibilityStatus) } catch (e: Exception) { CompatibilityStatus.UNSUPPORTED }
-            val isPending = status == CompatibilityStatus.ANALYSIS_PENDING
-            val isUntested = status == CompatibilityStatus.UNTESTED
-            val isUnplayable = !AuraMediaCompatibilityEngine.isEligibleForImport(status)
+        val pageSize = 500
+        var offset = 0
+        while (true) {
+            val batch = db.mediaDao().getMediaBatch(pageSize, offset)
+            if (batch.isEmpty()) break
 
-            if (isPending || isUntested || isUnplayable) {
-                try {
-                    val report = AuraMediaCompatibilityEngine.analyzeMedia(context, entity.uriPath, entity.mediaType)
-                    if (AuraMediaCompatibilityEngine.isEligibleForImport(report.status)) {
-                        db.mediaDao().update(entity.copy(
-                            compatibilityStatus = report.status.name,
-                            compatibilityReason = report.compatibilityReason,
-                            containerFormat = report.containerFormat,
-                            videoCodec = report.videoCodec,
-                            audioCodec = report.audioCodec,
-                            lastCompatibilityCheckTimestamp = System.currentTimeMillis()
-                        ))
-                    } else {
-                        // ONLY reject if the status is explicitly ineligible (unsupported/corrupt)
-                        val isPermanentFailure = report.status == CompatibilityStatus.UNSUPPORTED || 
-                                                report.status == CompatibilityStatus.CORRUPT || 
-                                                report.status == CompatibilityStatus.UNREADABLE
-                                                
-                        if (isPermanentFailure) {
-                            // Safety: If it's UNREADABLE, verify the volume is actually mounted
-                            val itemVolume = extractVolumeFromUri(entity.uriPath)
-                            if (report.status == CompatibilityStatus.UNREADABLE && itemVolume != null && !mountedVolumes.contains(itemVolume)) {
-                                Log.w("MediaRepository", "Reconciliation: Item ${entity.title} unreadable but volume $itemVolume not mounted. Skipping deletion.")
-                                return@forEach
-                            }
+            batch.forEach { entity ->
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                
+                // Re-validate if it was pending, untested, or known to be unplayable but still in the table
+                val status = try { CompatibilityStatus.valueOf(entity.compatibilityStatus) } catch (e: Exception) { CompatibilityStatus.UNSUPPORTED }
+                val isPending = status == CompatibilityStatus.ANALYSIS_PENDING
+                val isUntested = status == CompatibilityStatus.UNTESTED
+                val isUnplayable = !AuraMediaCompatibilityEngine.isEligibleForImport(status)
 
-                            Log.w("MediaRepository", "Reconciliation: Permanently rejecting invalid existing item: ${entity.title}")
-                            rejectMedia(entity.uriPath, entity.title, entity.mediaType, report)
-                            db.mediaDao().deleteById(entity.id)
-                            deleteSemanticDataForMedia(entity.id)
+                if (isPending || isUntested || isUnplayable) {
+                    try {
+                        val report = AuraMediaCompatibilityEngine.analyzeMedia(context, entity.uriPath, entity.mediaType)
+                        if (AuraMediaCompatibilityEngine.isEligibleForImport(report.status)) {
+                            db.mediaDao().update(entity.copy(
+                                compatibilityStatus = report.status.name,
+                                compatibilityReason = report.compatibilityReason,
+                                containerFormat = report.containerFormat,
+                                videoCodec = report.videoCodec,
+                                audioCodec = report.audioCodec,
+                                lastCompatibilityCheckTimestamp = System.currentTimeMillis()
+                            ))
                         } else {
-                            Log.w("MediaRepository", "Reconciliation: Transient failure for ${entity.title} (${report.status}). Retaining.")
+                            // ONLY reject if the status is explicitly ineligible (unsupported/corrupt)
+                            val isPermanentFailure = report.status == CompatibilityStatus.UNSUPPORTED || 
+                                                    report.status == CompatibilityStatus.CORRUPT || 
+                                                    report.status == CompatibilityStatus.UNREADABLE
+                                                    
+                            if (isPermanentFailure) {
+                                // Safety: If it's UNREADABLE, verify the volume is actually mounted
+                                val itemVolume = extractVolumeFromUri(entity.uriPath)
+                                if (report.status == CompatibilityStatus.UNREADABLE && itemVolume != null && !mountedVolumes.contains(itemVolume)) {
+                                    Log.w("MediaRepository", "Reconciliation: Item ${entity.title} unreadable but volume $itemVolume not mounted. Skipping deletion.")
+                                    return@forEach
+                                }
+
+                                Log.w("MediaRepository", "Reconciliation: Permanently rejecting invalid existing item: ${entity.title}")
+                                rejectMedia(entity.uriPath, entity.title, entity.mediaType, report)
+                                db.mediaDao().deleteById(entity.id)
+                                deleteSemanticDataForMedia(entity.id)
+                            } else {
+                                Log.w("MediaRepository", "Reconciliation: Transient failure for ${entity.title} (${report.status}). Retaining.")
+                            }
                         }
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException || e is java.util.concurrent.CancellationException) throw e
+                        Log.e("MediaRepository", "Failed to reconcile ${entity.title}: ${e.message}. Skipping rejection.")
                     }
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException || e is java.util.concurrent.CancellationException) throw e
-                    Log.e("MediaRepository", "Failed to reconcile ${entity.title}: ${e.message}. Skipping rejection.")
                 }
             }
+            offset += pageSize
         }
 
         // Trigger semantic regeneration for all valid library items (Phase 4 Migration)
         // Since we bumped modelVersion to 2, this will naturally replace deterministic v1 baseline vectors.
-        val validItems = db.mediaDao().getAllMediaSync()
-        processSemanticsForBatch(validItems)
+        offset = 0
+        while (true) {
+            val batch = db.mediaDao().getMediaBatch(pageSize, offset)
+            if (batch.isEmpty()) break
+            
+            val validItems = batch.filter { entity ->
+                !entity.isDeleted && entity.compatibilityStatus == CompatibilityStatus.PLAYABLE.name
+            }
+            if (validItems.isNotEmpty()) {
+                processSemanticsForBatch(validItems)
+            }
+            offset += pageSize
+        }
 
         Log.d("MediaRepository", "Media reconciliation complete.")
     }
