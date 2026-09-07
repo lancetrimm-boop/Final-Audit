@@ -360,7 +360,7 @@ class AuraIntelligenceCore(
         // Category-specific pre-filtering (if applicable)
         val filteredItems = when (request.sortOption) {
             "FROM_YOUR_FAVORITES" -> itemsOnly.filter { it.isFavorite || it.rating >= 4.0f }
-            "DEEP_DISCOVERY" -> itemsOnly.filter { it.exposureCount < 2 && it.viewCount == 0 }
+            "DEEP_DISCOVERY", "UNDER_THE_RADAR" -> itemsOnly.filter { it.exposureCount < 2 && it.viewCount == 0 }
             "FRESH_FOR_YOU" -> {
                 val recentThreshold = 7 * 24 * 60 * 60 * 1000L // 1 week
                 itemsOnly.filter { now - it.dateAdded < recentThreshold }
@@ -369,8 +369,8 @@ class AuraIntelligenceCore(
         }
 
         val objective = when (request.sortOption) {
-            "A_LITTLE_DIFFERENT" -> RecommendationObjective.WILDCARD_DISCOVERY
-            "UNDER_THE_RADAR" -> RecommendationObjective.DEEP_DISCOVERY
+            "A_LITTLE_DIFFERENT", "WILDCARD" -> RecommendationObjective.WILDCARD_DISCOVERY
+            "UNDER_THE_RADAR", "DEEP_DISCOVERY" -> RecommendationObjective.DEEP_DISCOVERY
             "FRESH_FOR_YOU" -> RecommendationObjective.NOVELTY_INJECTION
             "FROM_YOUR_FAVORITES" -> RecommendationObjective.CHILL_EXPLOITATION
             else -> RecommendationObjective.GENERAL_DISCOVERY

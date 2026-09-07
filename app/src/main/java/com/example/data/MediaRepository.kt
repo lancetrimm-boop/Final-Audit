@@ -4469,5 +4469,7 @@ enum class IntelligentSortOption(val displayName: String, val description: Strin
     REDISCOVER("Rediscover", "Enjoy your favorites and past gems again."),
     HIDDEN_GEMS("Hidden Gems", "High quality items you might have missed."),
     FAVORITES("Favorites", "Everything you've liked and rated highly."),
+    EXPLORE("Explore", "Broaden your taste with something new."),
+    LEAST_INTERACTED("Least Interacted", "Surface items that need your rating."),
     SURPRISE_ME("Surprise Me", "A fresh random selection from your library.")
 }

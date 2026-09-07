@@ -77,10 +77,27 @@ object IntelligentPresentationProvider {
         // 4. Everything Else (Remaining favorites)
         val remaining = candidates.filter { it.item.id !in usedIds }
         if (remaining.isNotEmpty()) {
+            // AURA REPAIR: "More Favorites" video ordering by Like Density (Likes / (duration + 10s smoothing))
+            // Using viewCount as proxy for Likes per user request example (1,000 Likes).
+            val videoIndices = remaining.indices.filter { remaining[it].item.mediaType == "VIDEO" }
+            val sortedVideos = videoIndices.map { remaining[it] }
+                .sortedWith(
+                    compareByDescending<IntelligenceCandidate> { 
+                        val likes = it.item.viewCount.toDouble()
+                        val durationSec = it.item.durationMs / 1000.0
+                        likes / (durationSec + 10.0)
+                    }.thenByDescending { it.rankScore }
+                )
+            
+            val finalItems = remaining.map { it.item }.toMutableList()
+            videoIndices.forEachIndexed { i, originalIndex ->
+                finalItems[originalIndex] = sortedVideos[i].item
+            }
+
             sections.add(IntelligentSection(
                 title = "More Favorites",
                 subtitle = "The rest of your saved collection.",
-                items = remaining.map { it.item }
+                items = finalItems
             ))
         }
 

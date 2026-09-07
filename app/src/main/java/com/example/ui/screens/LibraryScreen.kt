@@ -855,6 +855,8 @@ private fun CompactControlsRow(
                     IntelligentSortOption.REDISCOVER -> "Rediscover"
                     IntelligentSortOption.HIDDEN_GEMS -> "Hidden Gems"
                     IntelligentSortOption.FAVORITES -> "Favorites"
+                    IntelligentSortOption.EXPLORE -> "Explore"
+                    IntelligentSortOption.LEAST_INTERACTED -> "Least Interacted"
                     IntelligentSortOption.SURPRISE_ME -> "Surprise Me"
                 },
                 isSelected = (activeCategory == SortCategory.INTELLIGENT),
