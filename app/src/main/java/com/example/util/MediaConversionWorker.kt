@@ -22,9 +22,11 @@ class MediaConversionWorker(
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
-    private val dao = AuraDatabase.getInstance(context).conversionJobDao()
-
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        val repository = MediaRepository.getInstance(applicationContext)
+        val db = repository.getDatabase() ?: return@withContext Result.retry()
+        val dao = db.conversionJobDao()
+
         val jobId = inputData.getLong("jobId", -1L)
         if (jobId == -1L) return@withContext Result.failure()
 
@@ -36,7 +38,7 @@ class MediaConversionWorker(
         }
 
         try {
-            updateJob(job.copy(
+            db.conversionJobDao().update(job.copy(
                 status = ConversionJobStatus.PREPARING.name,
                 startedTimestamp = System.currentTimeMillis(),
                 updatedTimestamp = System.currentTimeMillis()
@@ -127,10 +129,6 @@ class MediaConversionWorker(
             ))
             return@withContext Result.failure()
         }
-    }
-
-    private suspend fun updateJob(job: ConversionJobEntity) {
-        dao.update(job)
     }
 
     private fun mapStageToStatus(stage: ConversionStage): ConversionJobStatus {

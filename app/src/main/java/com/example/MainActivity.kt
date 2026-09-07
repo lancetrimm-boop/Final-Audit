@@ -19,12 +19,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -80,6 +84,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AuraApp(repository: MediaRepository) {
     val databaseState by repository.databaseState.collectAsStateWithLifecycle()
+    val initializationDetail by repository.initializationDetail.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     when (databaseState) {
         DatabaseState.READY -> {
@@ -87,7 +93,41 @@ fun AuraApp(repository: MediaRepository) {
         }
         DatabaseState.INITIALIZING, DatabaseState.VERIFYING, DatabaseState.TRANSITIONING, DatabaseState.TRANSITION_REQUIRED -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = AuraPurple)
+                androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = AuraPurple)
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = initializationDetail,
+                        color = AuraMidnight.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+        DatabaseState.TIMEOUT -> {
+            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Initialization Stalled",
+                        color = AuraMidnight,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Aura is taking longer than usual to secure your library. This might happen during heavy system load.",
+                        color = AuraMidnight.copy(alpha = 0.7f),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = { repository.initDatabase(context) },
+                        colors = ButtonDefaults.buttonColors(containerColor = AuraPurple)
+                    ) {
+                        Text("Retry Initialization")
+                    }
+                }
             }
         }
         DatabaseState.TRANSITION_FAILED, DatabaseState.CORRUPTED, DatabaseState.ENCRYPTION_FAILED -> {

@@ -39,11 +39,8 @@ import com.example.data.semantic.*
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
-import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -97,6 +94,15 @@ data class AISkipStats(
     val totalWatchedDestinations: Int = 0
 )
 
+data class StartupDiagnostics(
+    val startTime: Long = 0,
+    val databaseState: DatabaseState = DatabaseState.NOT_INITIALIZED,
+    val aiState: AIState = AIState.NOT_INITIALIZED,
+    val detail: String = "",
+    val error: String? = null,
+    val elapsedTime: Long = 0
+)
+
 data class EngagementMetrics(
     val totalPlays: Int = 0,
     val favoriteCount: Int = 0,
@@ -110,7 +116,8 @@ data class EngagementMetrics(
     val totalClipExports: Int = 0,
     val topEngagedClips: List<ClipInteractionSummary> = emptyList(),
     val pairwiseDiagnostics: PairwiseDiagnostics = PairwiseDiagnostics(),
-    val aiSkipStats: AISkipStats = AISkipStats()
+    val aiSkipStats: AISkipStats = AISkipStats(),
+    val startupDiagnostics: StartupDiagnostics = StartupDiagnostics()
 )
 
 data class PairwiseDiagnostics(
@@ -198,7 +205,18 @@ enum class DatabaseState {
     READY,
     TRANSITION_FAILED,
     CORRUPTED,
-    ENCRYPTION_FAILED
+    ENCRYPTION_FAILED,
+    TIMEOUT
+}
+
+enum class AIState {
+    NOT_INITIALIZED,
+    INITIALIZING,
+    LOADING_MODELS,
+    RECONSTRUCTING_INDEX,
+    READY,
+    FAILED,
+    DISABLED
 }
 
 class MediaRepository(
@@ -955,6 +973,27 @@ class MediaRepository(
     }
 
     private var initJob: Job? = null
+    private var aiInitJob: Job? = null
+
+    private val _aiState = MutableStateFlow(AIState.NOT_INITIALIZED)
+    val aiState: StateFlow<AIState> = _aiState.asStateFlow()
+
+    private val _initializationDetail = MutableStateFlow("Initializing...")
+    val initializationDetail: StateFlow<String> = _initializationDetail.asStateFlow()
+
+    private val _startupStartTime = MutableStateFlow(0L)
+    
+    fun getStartupDiagnostics(): StartupDiagnostics {
+        val start = _startupStartTime.value
+        return StartupDiagnostics(
+            startTime = start,
+            databaseState = _databaseState.value,
+            aiState = _aiState.value,
+            detail = _initializationDetail.value,
+            error = _databaseErrorMessage.value,
+            elapsedTime = if (start > 0) System.currentTimeMillis() - start else 0
+        )
+    }
 
     fun resetDatabase(context: Context) {
         scope.launch {
@@ -992,30 +1031,14 @@ class MediaRepository(
             // Set state to INITIALIZING immediately to signal that the process has started
             _databaseErrorMessage.value = null
             _databaseState.value = DatabaseState.INITIALIZING
+            _startupStartTime.value = System.currentTimeMillis()
+            _initializationDetail.value = "Starting secure database initialization..."
             Log.d("AURA_INIT", "Starting secure database initialization...")
 
             initJob = scope.launch {
                 try {
                     // 1. Initialize SQLCipher native libraries before ANY database operations
                     SQLCipherInitializer.initialize(context)
-
-                    val dbPath = context.getDatabasePath("aura_intelligence.db")
-                    if (dbPath.exists()) {
-                        try {
-                            val rawKey = com.example.data.db.PassphraseManager.getPassphrase(context)
-                            net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(dbPath.absolutePath, rawKey, null, net.zetetic.database.sqlcipher.SQLiteDatabase.OPEN_READWRITE, null).use { rawDb ->
-                                Log.d("AURA_INIT", "Current raw DB version: ${rawDb.version}")
-                                if (rawDb.version == 0) {
-                                    // RECOVERY: If version is 0 (likely due to export without version preservation), 
-                                    // set to a safe baseline that matches the found schema (v12 includes contentHash)
-                                    Log.w("AURA_INIT", "Detected version 0 database (export remnant). Repairing to version 12.")
-                                    rawDb.version = 12
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.w("AURA_INIT", "Could not check/repair raw DB version: ${e.message}")
-                        }
-                    }
 
                     // 2. Handle Encryption Transition if required
                     val transitionResult = LegacyDatabaseEncryptionMigrator.ensureEncryption(context)
@@ -1045,10 +1068,12 @@ class MediaRepository(
                     }
 
                     _databaseState.value = DatabaseState.VERIFYING
+                    _initializationDetail.value = "Opening library..."
                     // 3. Initialize Room
                     val db = AuraDatabase.getInstance(context)
                     database = db
 
+                    _initializationDetail.value = "Connecting services..."
                     val consentStorage = SharedPreferencesConsentStorage(context)
                     val consentManager = ContributionConsentManager(consentStorage)
                     contributionQueueRepository = ContributionQueueRepository(db.contributionQueueDao(), consentManager)
@@ -1072,355 +1097,26 @@ class MediaRepository(
                     )
                     semanticRepresentationRepository = RoomSemanticRepresentationRepository(db.semanticRepresentationDao())
                     
-                    // ONNX MODEL ACTIVATION (Phase 4)
-                    val realEngine = try {
-                        val modelPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/all-minilm-l6-v2.onnx")
-                        OnnxRuntimeMiniLMInferenceEngine(modelPath = modelPath)
-                    } catch (e: Exception) {
-                        Log.e("MediaRepository", "Failed to load ONNX model from assets. Falling back to local engine.", e)
-                        LocalMiniLMInferenceEngine()
-                    }
-
-                    val realTokenizer = try {
-                        val vocabText = context.assets.open("models/vocab.txt").use { it.bufferedReader().readText() }
-                        BertWordPieceTokenizer.fromVocabText(vocabText)
-                    } catch (e: Exception) {
-                        Log.e("MediaRepository", "Failed to load vocab.txt from assets. Using standard vocab.", e)
-                        BertWordPieceTokenizer()
-                    }
-
-                    embeddingProvider = MiniLMEmbeddingProvider(engine = realEngine, tokenizer = realTokenizer)
-                    
-                    val retriever = DefaultSemanticCandidateRetriever(semanticRepresentationRepository!!)
-                    semanticCandidateRetriever = retriever
-
-                    semanticSearchService = DefaultSemanticSearchService(embeddingProvider!!, retriever)
-
-                    semanticIndexingService = DefaultSemanticIndexingService(
-                        embeddingProvider = embeddingProvider!!,
-                        candidateRetriever = retriever,
-                        repository = semanticRepresentationRepository!!
-                    )
-
-                    // AURA SEARCH: Proactively reconstruct semantic index from persistence
-                    launch {
-                        try {
-                            retriever.initializeIndex(
-                                type = embeddingProvider!!.descriptor.primaryType,
-                                descriptor = embeddingProvider!!.descriptor
-                            )
-                            Log.i("MediaRepository", "Semantic index reconstructed from persistence.")
-                        } catch (e: Exception) {
-                            Log.e("MediaRepository", "Failed to reconstruct semantic index", e)
-                        }
-                    }
-                    
-                    val lexicalRetriever = ProductionLexicalRetriever()
-                    
-                    // Initial Core (Stage 1: Content Lexical + Content Semantic)
-                    val initialCore = com.example.data.intelligence.AuraIntelligenceCore(
-                        repository = this@MediaRepository,
-                        retrievalRouter = com.example.data.intelligence.RetrievalRouter(
-                            lexicalRetriever = lexicalRetriever,
-                            semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
-                            visualProvider = null
-                        )
-                    )
-                    intelligenceCore = initialCore
-                    hybridSearchEngine = DefaultHybridSearchEngine(initialCore)
-
-                    // PHASE 7: MobileCLIP Activation
-                    try {
-                        val mobileClipPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_image.onnx")
-                        val mobileClipEngine = OnnxRuntimeMobileCLIPInferenceEngine(modelPath = mobileClipPath)
-                        mobileCLIPProvider = MobileCLIPEmbeddingProvider(engine = mobileClipEngine)
-                        
-                        // Text Provider for query embedding
-                        val clipVocab = context.assets.open("models/mobileclip_vocab.json").use { it.bufferedReader().readText() }
-                        val clipMerges = context.assets.open("models/mobileclip_merges.txt").use { it.bufferedReader().readText() }
-                        val clipTokenizer = ClipBpeTokenizer.fromAssets(clipVocab, clipMerges)
-                        
-                        val mobileClipTextPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_text.onnx")
-                        val mobileClipTextEngine = OnnxRuntimeMobileCLIPTextInferenceEngine(modelPath = mobileClipTextPath)
-                        val mobileClipTextProvider = MobileCLIPTextEmbeddingProvider(mobileClipTextEngine, clipTokenizer)
-                        
-                        visualIndexingService = DefaultVisualIndexingService(
-                            visualProvider = mobileCLIPProvider!!,
-                            candidateRetriever = retriever,
-                            repository = semanticRepresentationRepository!!
-                        )
-
-                        // AURA SEARCH: Proactively reconstruct visual index from persistence
-                        launch {
-                            try {
-                                visualIndexingService?.initializeIndex()
-                                Log.i("MediaRepository", "Visual index reconstructed from persistence.")
-                            } catch (e: Exception) {
-                                Log.e("MediaRepository", "Failed to reconstruct visual index", e)
-                            }
-                        }
-
-                        val mobileClipVisualSearchService = DefaultSemanticSearchService(mobileClipTextProvider, retriever)
-                        val mobileClipVisualRetriever = DefaultMobileCLIPVisualRetriever(mobileClipVisualSearchService)
-
-                        // Re-initialize VisualContextEngine with the neural provider, repository, and retriever
-                        visualContextEngine = com.example.data.visual.VisualContextEngine(
-                            this@MediaRepository, 
-                            mobileCLIPProvider,
-                            semanticRepresentationRepository,
-                            semanticCandidateRetriever
-                        )
-                        Log.i("MediaRepository", "MobileCLIP image encoder and visual retriever activated.")
-                        
-                        // Final Unified Core (Stage 2: Multimodal Router)
-                        val finalCore = com.example.data.intelligence.AuraIntelligenceCore(
-                            repository = this@MediaRepository,
-                            retrievalRouter = com.example.data.intelligence.RetrievalRouter(
-                                lexicalRetriever = lexicalRetriever,
-                                semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
-                                visualProvider = mobileClipVisualRetriever as? com.example.data.intelligence.VisualRetrievalProvider
-                            )
-                        )
-                        intelligenceCore = finalCore
-                        hybridSearchEngine = DefaultHybridSearchEngine(finalCore)
-                    } catch (e: Exception) {
-                        Log.e("MediaRepository", "Failed to load MobileCLIP model from assets.", e)
-                    }
-
                     // AURA STABILITY: Ensure all mandatory repositories are initialized before marking READY
                     checkNotNull(intelligenceRepository) { "intelligenceRepository failed to initialize" }
                     checkNotNull(playbackErrorLogRepository) { "playbackErrorLogRepository failed to initialize" }
                     checkNotNull(conversionQueueRepository) { "conversionQueueRepository failed to initialize" }
                     checkNotNull(semanticRepresentationRepository) { "semanticRepresentationRepository failed to initialize" }
-                    checkNotNull(hybridSearchEngine) { "hybridSearchEngine failed to initialize" }
 
+                    // DATABASE IS READY. UI can now proceed to show the library.
                     _databaseState.value = DatabaseState.READY
+                    _initializationDetail.value = "Library ready."
+
+                    // Trigger non-blocking maintenance tasks
+                    launch { reconcileExistingMedia(context) }
+                    launch { scanLocalMedia(context) }
                     
-                    // AURA SEARCH FIX: Backfill semantics for existing media items and start background worker
-                    launch {
-                        backfillSemantics()
-                        AuraEnrichmentWorker.schedule(context)
-                    }
+                    // Start data collectors from database
+                    launch { collectDataFlows(db) }
 
-                    // Cleanup legacy backups if transition was stable
-                    LegacyDatabaseEncryptionMigrator.cleanupLegacyBackups(context)
-
-                    try {
-                        db.mediaDao().deleteSampleMedia()
-                        db.mediaDao().purgeUnsupportedMedia()
-                    } catch (e: Exception) {
-                        // Ignore non-critical cleanup failures
-                    }
-
-                    // Launch non-blocking data collection immediately
-                    launch {
-                        Log.d("AURA_SCAN_RUNTIME", "[REPO] mediaItems Flow collection starting.")
-                        db.mediaDao().getAllMedia()
-                            .conflate()
-                            .transform { entities ->
-                                emit(entities)
-                                // AURA P1 STABILITY: Batch UI updates during heavy ingestion.
-                                // If a scan is active, we introduce a cooldown to prevent
-                                // UI list churn and excessive recomposition.
-                                if (_scanProgress.value.isScanning) {
-                                    delay(3000)
-                                }
-                            }
-                            .collect { entities ->
-                            Log.d("AURA_SCAN_RUNTIME", "[REPO] mediaItems Flow emitted. Raw entity count: ${entities.size}")
-                            val items = entities.map { it.toMediaItem() }.filter { item ->
-                                // Enforce Photos and Videos ONLY
-                                val isCorrectType = item.mediaType in listOf("PHOTO", "VIDEO", "Photo", "Movie")
-                                
-                                // AURA PHASE 1: Validity Filtering (Secondary check for safety)
-                                val isValid = !item.isDeleted && item.compatibilityStatus !in listOf(
-                                    CompatibilityStatus.CORRUPT,
-                                    CompatibilityStatus.UNSUPPORTED,
-                                    CompatibilityStatus.DELETED
-                                )
-                                
-                                val keep = isCorrectType && isValid
-                                if (!keep) {
-                                    Log.v("AURA_SCAN_RUNTIME", "[REPO] Flow: Filtering out item: ${item.title} (Type: ${item.mediaType}, Status: ${item.compatibilityStatus})")
-                                }
-                                keep
-                            }
-                            Log.d("AURA_SCAN_RUNTIME", "[REPO] mediaItems Flow processing complete. Final item count: ${items.size}")
-                            _mediaItems.value = items
-
-                            // AURA P1 STABILITY: Identity-Authoritative Atomic Update
-                            // Preserves authoritativeMediaId and re-derives currentIndex based on ID location.
-                            _activePlaylist.update { current ->
-                                if (current == null) return@update null
-
-                                val updatedItems = current.items.map { snapshotItem ->
-                                    items.find { it.id == snapshotItem.id } ?: snapshotItem
-                                }
-
-                                // Locate current ID in the updated list to derive new index
-                                val authoritativeId = current.authoritativeMediaId
-                                val newIndex = if (authoritativeId != null) {
-                                    val idx = updatedItems.indexOfFirst { it.id == authoritativeId }
-                                    if (idx != -1) idx else current.currentIndex.coerceAtMost(updatedItems.size - 1)
-                                } else {
-                                    current.currentIndex.coerceAtMost(updatedItems.size - 1)
-                                }
-
-                                current.copy(
-                                    items = updatedItems,
-                                    currentIndex = newIndex,
-                                    authoritativeMediaId = updatedItems.getOrNull(newIndex)?.id
-                                )
-                            }
-
-                            // Update pairwise options if available
-                            val available = items.filter { it.itemCount == null }
-                            if (available.size >= 2) {
-                                scope.launch {
-                                    scope.launch {
-                refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
-            }
-                                }
-                            }
-                        }
-                    }
-
-                    launch {
-                        db.mediaDao().getWatchHistory().collect { entities ->
-                            _watchHistory.value = entities.map { it.toMediaItem() }
-                        }
-                    }
-
-                    launch {
-                        db.searchHistoryDao().getRecentSearches().collect { entities ->
-                            _recentSearches.value = entities.map { it.query }
-                        }
-                    }
-
-                    // Load Past Pairwise Outcomes
-                    launch {
-                        db.pairwiseDao().getAllOutcomes().collect { outcomes ->
-                            outcomes.forEach { outcome ->
-                                if (outcome.outcomeType == "VOTE" && outcome.chosenId.isNotEmpty()) {
-                                    pairwiseWins[outcome.chosenId] = (pairwiseWins[outcome.chosenId] ?: 0) + 1
-                                    val loser = if (outcome.chosenId == outcome.optionAId) outcome.optionBId else outcome.optionAId
-                                    pairwiseLosses[loser] = (pairwiseLosses[loser] ?: 0) + 1
-                                }
-                                comparisonCounts[outcome.optionAId] = (comparisonCounts[outcome.optionAId] ?: 0) + 1
-                                comparisonCounts[outcome.optionBId] = (comparisonCounts[outcome.optionBId] ?: 0) + 1
-                            }
-                        }
-                    }
-
-                    // Load Taste DNA and Preference Profile from database
-                    launch {
-                        val tasteJson = db.userPreferenceDao().getPreference("taste_dna")?.value
-                        if (tasteJson != null) {
-                            try {
-                                tasteDnaAdapter.fromJson(tasteJson)?.let { 
-                                    _tasteDNA.value = it.sanitize() 
-                                }
-                            } catch (e: Exception) {
-                                Log.e("MediaRepository", "Failed to load Taste DNA", e)
-                            }
-                        }
-
-                        val profileJson = db.userPreferenceDao().getPreference("preference_profile")?.value
-                        if (profileJson != null) {
-                            try {
-                                profileAdapter.fromJson(profileJson)?.let { 
-                                    _preferenceProfile.value = it.sanitize() 
-                                }
-                            } catch (e: Exception) {
-                                Log.e("MediaRepository", "Failed to load Preference Profile", e)
-                            }
-                        }
-
-                        val policyJson = db.userPreferenceDao().getPreference("discovery_policy")?.value
-                        if (policyJson != null) {
-                            try {
-                                discoveryPolicyAdapter.fromJson(policyJson)?.let { _discoveryPolicy.value = it }
-                            } catch (e: Exception) {
-                                Log.e("MediaRepository", "Failed to load Discovery Policy", e)
-                            }
-                        }
-
-                        // Load Sort Preferences
-                        db.userPreferenceDao().getPreference("active_sort_category")?.value?.let { name ->
-                            try { _activeSortCategory.value = SortCategory.valueOf(name) } catch (e: Exception) {}
-                        }
-                        db.userPreferenceDao().getPreference("selected_standard_sort")?.value?.let { name ->
-                            try { _selectedStandardSort.value = StandardSortOption.valueOf(name) } catch (e: Exception) {}
-                        }
-                        db.userPreferenceDao().getPreference("selected_intelligent_sort")?.value?.let { name ->
-                            val migratedName = when (name) {
-                                "EXPLORE", "LEAST_INTERACTED" -> "DISCOVER"
-                                "BEST_MATCH" -> "PERSONALIZED"
-                                else -> name
-                            }
-                            try { 
-                                _selectedIntelligentSort.value = IntelligentSortOption.valueOf(migratedName) 
-                            } catch (e: Exception) {
-                                // Fallback for other obsolete sort options
-                                _selectedIntelligentSort.value = IntelligentSortOption.PERSONALIZED
-                            }
-                        }
-                    }
-
-                    // Load Creator Profiles from structured table
-                    launch {
-                        db.creatorDao().getAllCreators().collect { entities ->
-                            _creatorProfiles.value = entities.associate { entity ->
-                                entity.id to CreatorProfile(
-                                    id = entity.id,
-                                    name = entity.name,
-                                    platform = entity.platform,
-                                    affinityScore = entity.affinityScore,
-                                    interactionCount = entity.interactionCount,
-                                    lastInteractionTimestamp = entity.lastInteractionTimestamp,
-                                    topMoodTags = if (entity.topMoodTagsJson.isBlank()) emptyList() else entity.topMoodTagsJson.split(",")
-                                )
-                            }
-                        }
-                    }
-
-                    // Collect stored evidence
-                    launch {
-                        db.evidenceDao().getAllEvidence().collect { entities ->
-                            _storedEvidence.value = entities.map {
-                                EvidenceRecord(
-                                    id = it.id,
-                                    tier = EvidenceTier.valueOf(it.tier),
-                                    sampleCount = it.sampleCount,
-                                    score = it.score,
-                                    quality = it.quality,
-                                    source = it.source,
-                                    timestamp = it.timestamp,
-                                    associatedManifestId = it.associatedManifestId
-                                )
-                            }
-                        }
-                    }
-
-                    // Heavy background processing starts AFTER data flows are active
-                    launch {
-                        try {
-                            reconcileExistingMedia(context)
-
-                            // AURA P1 STABILITY: Startup Readiness Logic
-                            // If database already contains items, mark as ready immediately.
-                            // Cached data is valid for interaction while reconciliation/scan continues.
-                            val existingCount = db.mediaDao().getCount()
-                            if (existingCount > 0) {
-                                _isLibraryReady.value = true
-                                Log.d("AURA_INIT", "Library marked READY (Cached data found: $existingCount items)")
-                            }
-
-                            scanLocalMedia(context)
-                        } catch (e: Exception) {
-                            Log.e("MediaRepository", "Background maintenance failed", e)
-                        }
-                    }
+                    // ASYNCHRONOUS AI INITIALIZATION (Database Ready != AI Ready)
+                    initAI(context)
+                    
                 } catch (t: Throwable) {
                     if (t is kotlinx.coroutines.CancellationException) {
                         Log.w("AURA_INIT", "Database initialization coroutine was cancelled.")
@@ -1455,6 +1151,223 @@ class MediaRepository(
                     Log.w("AURA_INIT", "Initialization job completed unexpectedly. Forcing FAILURE state.")
                     _databaseState.value = DatabaseState.TRANSITION_FAILED
                     _databaseErrorMessage.value = "Initialization failed to complete normally."
+                }
+            }
+        }
+    }
+
+    private fun initAI(context: Context) {
+        if (_aiState.value == AIState.READY || _aiState.value == AIState.DISABLED) return
+        
+        synchronized(this) {
+            if (aiInitJob?.isActive == true) return
+            
+            _aiState.value = AIState.INITIALIZING
+            Log.d("AURA_AI_INIT", "Starting AI background initialization...")
+
+            aiInitJob = scope.launch(Dispatchers.IO) {
+                try {
+                    val db = database ?: return@launch
+                    
+                    // 1. MiniLM ONNX activation
+                    _aiState.value = AIState.LOADING_MODELS
+                    val realEngine = try {
+                        val modelPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/all-minilm-l6-v2.onnx")
+                        OnnxRuntimeMiniLMInferenceEngine(modelPath = modelPath)
+                    } catch (e: Exception) {
+                        Log.e("AURA_AI_INIT", "Failed to load ONNX model. Falling back to local engine.", e)
+                        LocalMiniLMInferenceEngine()
+                    }
+
+                    val realTokenizer = try {
+                        val vocabText = context.assets.open("models/vocab.txt").use { it.bufferedReader().readText() }
+                        BertWordPieceTokenizer.fromVocabText(vocabText)
+                    } catch (e: Exception) {
+                        Log.e("AURA_AI_INIT", "Failed to load vocab.txt. Using default.", e)
+                        BertWordPieceTokenizer()
+                    }
+
+                    embeddingProvider = MiniLMEmbeddingProvider(engine = realEngine, tokenizer = realTokenizer)
+                    
+                    val retriever = DefaultSemanticCandidateRetriever(semanticRepresentationRepository!!)
+                    semanticCandidateRetriever = retriever
+                    semanticSearchService = DefaultSemanticSearchService(embeddingProvider!!, retriever)
+                    semanticIndexingService = DefaultSemanticIndexingService(embeddingProvider!!, retriever, semanticRepresentationRepository!!)
+
+                    // Reconstruct semantic index from persistence
+                    _aiState.value = AIState.RECONSTRUCTING_INDEX
+                    try {
+                        retriever.initializeIndex(embeddingProvider!!.descriptor.primaryType, embeddingProvider!!.descriptor)
+                        Log.i("AURA_AI_INIT", "Semantic index reconstructed.")
+                    } catch (e: Exception) {
+                        Log.e("AURA_AI_INIT", "Semantic index reconstruction failed", e)
+                    }
+
+                    // 2. MobileCLIP activation
+                    try {
+                        val mobileClipPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_image.onnx")
+                        val mobileClipEngine = OnnxRuntimeMobileCLIPInferenceEngine(modelPath = mobileClipPath)
+                        mobileCLIPProvider = MobileCLIPEmbeddingProvider(engine = mobileClipEngine)
+                        
+                        val clipVocab = context.assets.open("models/mobileclip_vocab.json").use { it.bufferedReader().readText() }
+                        val clipMerges = context.assets.open("models/mobileclip_merges.txt").use { it.bufferedReader().readText() }
+                        val clipTokenizer = ClipBpeTokenizer.fromAssets(clipVocab, clipMerges)
+                        
+                        val mobileClipTextPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_text.onnx")
+                        val mobileClipTextEngine = OnnxRuntimeMobileCLIPTextInferenceEngine(modelPath = mobileClipTextPath)
+                        val mobileClipTextProvider = MobileCLIPTextEmbeddingProvider(mobileClipTextEngine, clipTokenizer)
+                        
+                        visualIndexingService = DefaultVisualIndexingService(mobileCLIPProvider!!, retriever, semanticRepresentationRepository!!)
+                        
+                        launch {
+                            try {
+                                visualIndexingService?.initializeIndex()
+                                Log.i("AURA_AI_INIT", "Visual index reconstructed.")
+                            } catch (e: Exception) {
+                                Log.e("AURA_AI_INIT", "Visual index reconstruction failed", e)
+                            }
+                        }
+
+                        val mobileClipVisualSearchService = DefaultSemanticSearchService(mobileClipTextProvider, retriever)
+                        val mobileClipVisualRetriever = DefaultMobileCLIPVisualRetriever(mobileClipVisualSearchService)
+
+                        visualContextEngine = com.example.data.visual.VisualContextEngine(
+                            this@MediaRepository, 
+                            mobileCLIPProvider,
+                            semanticRepresentationRepository,
+                            semanticCandidateRetriever
+                        )
+                        
+                        // Final Unified Core (Stage 2: Multimodal Router)
+                        val lexicalRetriever = ProductionLexicalRetriever()
+                        intelligenceCore = com.example.data.intelligence.AuraIntelligenceCore(
+                            repository = this@MediaRepository,
+                            retrievalRouter = com.example.data.intelligence.RetrievalRouter(
+                                lexicalRetriever = lexicalRetriever,
+                                semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
+                                visualProvider = mobileClipVisualRetriever as? com.example.data.intelligence.VisualRetrievalProvider
+                            )
+                        )
+                        hybridSearchEngine = DefaultHybridSearchEngine(intelligenceCore!!)
+                        Log.i("AURA_AI_INIT", "Unified Intelligence Core activated.")
+
+                    } catch (e: Exception) {
+                        Log.e("AURA_AI_INIT", "MobileCLIP activation failed", e)
+                    }
+
+                    _aiState.value = AIState.READY
+                    
+                    // Once AI is ready, trigger semantic backfill
+                    backfillSemantics()
+                    AuraEnrichmentWorker.schedule(context)
+
+                } catch (e: Exception) {
+                    Log.e("AURA_AI_INIT", "CRITICAL AI initialization failed", e)
+                    _aiState.value = AIState.FAILED
+                }
+            }
+        }
+    }
+
+    private suspend fun collectDataFlows(db: AuraDatabase) {
+        // Collect all DB-driven StateFlows here (moved from initDatabase for clarity)
+        coroutineScope {
+            launch {
+                db.mediaDao().getAllMedia().collect { entities ->
+                    _mediaItems.value = entities.map { it.toMediaItem() }.filter { item ->
+                        val isCorrectType = item.mediaType in listOf("PHOTO", "VIDEO", "Photo", "Movie")
+                        val isValid = !item.isDeleted && item.compatibilityStatus !in listOf(
+                            CompatibilityStatus.CORRUPT, CompatibilityStatus.UNSUPPORTED, CompatibilityStatus.DELETED
+                        )
+                        isCorrectType && isValid
+                    }
+                    _isLibraryReady.value = _mediaItems.value.isNotEmpty()
+                }
+            }
+            
+            launch {
+                db.mediaDao().getWatchHistory().collect { entities ->
+                    _watchHistory.value = entities.map { it.toMediaItem() }
+                }
+            }
+
+            launch {
+                db.searchHistoryDao().getRecentSearches().collect { entities ->
+                    _recentSearches.value = entities.map { it.query }
+                }
+            }
+
+            launch {
+                db.pairwiseDao().getAllOutcomes().collect { outcomes ->
+                    outcomes.forEach { outcome ->
+                        if (outcome.outcomeType == "VOTE" && outcome.chosenId.isNotEmpty()) {
+                            pairwiseWins[outcome.chosenId] = (pairwiseWins[outcome.chosenId] ?: 0) + 1
+                            val loser = if (outcome.chosenId == outcome.optionAId) outcome.optionBId else outcome.optionAId
+                            pairwiseLosses[loser] = (pairwiseLosses[loser] ?: 0) + 1
+                        }
+                        comparisonCounts[outcome.optionAId] = (comparisonCounts[outcome.optionAId] ?: 0) + 1
+                        comparisonCounts[outcome.optionBId] = (comparisonCounts[outcome.optionBId] ?: 0) + 1
+                    }
+                }
+            }
+
+            launch {
+                // Load and collect User Preferences
+                val preferences = db.userPreferenceDao().getAllPreferences()
+                preferences.collect { prefs ->
+                    prefs.forEach { pref ->
+                        when (pref.key) {
+                            "taste_dna" -> {
+                                try { tasteDnaAdapter.fromJson(pref.value)?.let { _tasteDNA.value = it.sanitize() } } catch (e: Exception) {}
+                            }
+                            "preference_profile" -> {
+                                try { profileAdapter.fromJson(pref.value)?.let { _preferenceProfile.value = it.sanitize() } } catch (e: Exception) {}
+                            }
+                            "discovery_policy" -> {
+                                try { discoveryPolicyAdapter.fromJson(pref.value)?.let { _discoveryPolicy.value = it } } catch (e: Exception) {}
+                            }
+                            "active_sort_category" -> {
+                                try { _activeSortCategory.value = SortCategory.valueOf(pref.value) } catch (e: Exception) {}
+                            }
+                            "selected_standard_sort" -> {
+                                try { _selectedStandardSort.value = StandardSortOption.valueOf(pref.value) } catch (e: Exception) {}
+                            }
+                            "selected_intelligent_sort" -> {
+                                val migratedName = when (pref.value) {
+                                    "EXPLORE", "LEAST_INTERACTED" -> "DISCOVER"
+                                    "BEST_MATCH" -> "PERSONALIZED"
+                                    else -> pref.value
+                                }
+                                try { _selectedIntelligentSort.value = IntelligentSortOption.valueOf(migratedName) } catch (e: Exception) {}
+                            }
+                        }
+                    }
+                }
+            }
+
+            launch {
+                db.creatorDao().getAllCreators().collect { entities ->
+                    _creatorProfiles.value = entities.associate { entity ->
+                        entity.id to CreatorProfile(
+                            id = entity.id, name = entity.name, platform = entity.platform,
+                            affinityScore = entity.affinityScore, interactionCount = entity.interactionCount,
+                            lastInteractionTimestamp = entity.lastInteractionTimestamp,
+                            topMoodTags = if (entity.topMoodTagsJson.isBlank()) emptyList() else entity.topMoodTagsJson.split(",")
+                        )
+                    }
+                }
+            }
+
+            launch {
+                db.evidenceDao().getAllEvidence().collect { entities ->
+                    _storedEvidence.value = entities.map {
+                        EvidenceRecord(
+                            id = it.id, tier = EvidenceTier.valueOf(it.tier),
+                            sampleCount = it.sampleCount, score = it.score, quality = it.quality,
+                            source = it.source, timestamp = it.timestamp,
+                            associatedManifestId = it.associatedManifestId
+                        )
+                    }
                 }
             }
         }
@@ -3921,7 +3834,8 @@ stats ->
                 totalSkipBacks = skipsBack,
                 totalSkipReversals = skipReversals,
                 totalWatchedDestinations = watchedDests
-            )
+            ),
+            startupDiagnostics = getStartupDiagnostics()
         )
 
     }

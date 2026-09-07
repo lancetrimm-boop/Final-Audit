@@ -24,17 +24,18 @@ class OriginalMediaCleanupWorker(
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
-    private val db = AuraDatabase.getInstance(context)
-    private val dao = db.conversionJobDao()
-    private val prefDao = db.userPreferenceDao()
-
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        val repository = MediaRepository.getInstance(applicationContext)
+        val db = repository.getDatabase() ?: return@withContext Result.retry()
+        val dao = db.conversionJobDao()
+        val prefDao = db.userPreferenceDao()
+
         val specificJobId = inputData.getLong("jobId", -1L)
         
         if (specificJobId != -1L) {
             Log.i("AuraCleanupWorker", "[$specificJobId] Manual cleanup request initiated.")
             val job = dao.getJobById(specificJobId) ?: return@withContext Result.failure()
-            return@withContext if (processCleanup(job, isManual = true)) Result.success() else Result.failure()
+            return@withContext if (processCleanup(db, job, isManual = true)) Result.success() else Result.failure()
         }
 
         Log.d("AuraCleanupWorker", "Starting scheduled background cleanup check.")
@@ -55,7 +56,7 @@ class OriginalMediaCleanupWorker(
         var allSuccess = true
         pendingJobs.forEach { job ->
             try {
-                val result = processCleanup(job, isManual = false)
+                val result = processCleanup(db, job, isManual = false)
                 if (!result) {
                     allSuccess = false
                 }
@@ -68,7 +69,8 @@ class OriginalMediaCleanupWorker(
         return@withContext if (allSuccess) Result.success() else Result.retry()
     }
 
-    private suspend fun processCleanup(job: ConversionJobEntity, isManual: Boolean): Boolean {
+    private suspend fun processCleanup(db: AuraDatabase, job: ConversionJobEntity, isManual: Boolean): Boolean {
+        val dao = db.conversionJobDao()
         val jobId = job.id
         val now = System.currentTimeMillis()
         
@@ -82,27 +84,27 @@ class OriginalMediaCleanupWorker(
         }
 
         // 2. Final Safety Gate - Verify Replacement Integrity (Mandatory every run)
-        val finalUriStr = job.finalMediaUri ?: return failJob(job, "Final media URI is missing from record.")
+        val finalUriStr = job.finalMediaUri ?: return failJob(dao, job, "Final media URI is missing from record.")
         val finalUri = Uri.parse(finalUriStr)
         
         Log.d("AuraCleanupWorker", "[$jobId] Performing pre-cleanup replacement verification.")
         
         if (!uriExists(applicationContext, finalUri)) {
-            return failJob(job, "Replacement file missing from storage. Cleanup aborted for safety.", OriginalCleanupStatus.CLEANUP_BLOCKED)
+            return failJob(dao, job, "Replacement file missing from storage. Cleanup aborted for safety.", OriginalCleanupStatus.CLEANUP_BLOCKED)
         }
 
         // Fresh playback validation immediately before deletion
         val playbackOk = AuraPlaybackValidator.validatePlayback(applicationContext, finalUri)
         if (!playbackOk) {
-            return failJob(job, "Replacement file failed fresh playback validation. Cleanup aborted for safety.", OriginalCleanupStatus.CLEANUP_BLOCKED)
+            return failJob(dao, job, "Replacement file failed fresh playback validation. Cleanup aborted for safety.", OriginalCleanupStatus.CLEANUP_BLOCKED)
         }
 
         // 3. Verify Original Identity and Database Link
         val originalMedia = db.mediaDao().getMediaById(job.mediaId) 
-            ?: return failJob(job, "Original media record not found in Aura database.")
+            ?: return failJob(dao, job, "Original media record not found in Aura database.")
             
         if (originalMedia.replacedByMediaId != job.finalMediaId) {
-            return failJob(job, "Media identity relationship has changed. Cleanup blocked.", OriginalCleanupStatus.CLEANUP_BLOCKED)
+            return failJob(dao, job, "Media identity relationship has changed. Cleanup blocked.", OriginalCleanupStatus.CLEANUP_BLOCKED)
         }
 
         val sourceUri = Uri.parse(job.sourceUri)
@@ -143,9 +145,9 @@ class OriginalMediaCleanupWorker(
         } else {
             // Check if it was a permissions issue
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isAuthRequired(applicationContext, sourceUri)) {
-                failJob(job, "User authorization required for deletion.", OriginalCleanupStatus.CLEANUP_BLOCKED)
+                failJob(dao, job, "User authorization required for deletion.", OriginalCleanupStatus.CLEANUP_BLOCKED)
             } else {
-                failJob(job, "FileSystem/MediaStore reported failure during deletion.")
+                failJob(dao, job, "FileSystem/MediaStore reported failure during deletion.")
             }
         }
     }
@@ -162,6 +164,7 @@ class OriginalMediaCleanupWorker(
     }
 
     private suspend fun failJob(
+        dao: com.example.data.db.ConversionJobDao,
         job: ConversionJobEntity, 
         error: String, 
         status: OriginalCleanupStatus = OriginalCleanupStatus.CLEANUP_FAILED
