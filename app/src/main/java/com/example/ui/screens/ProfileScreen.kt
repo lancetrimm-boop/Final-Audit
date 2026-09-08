@@ -130,7 +130,8 @@ private fun TasteSpectrumIndicator(spectrum: TasteSpectrum) {
 
 @Composable
 private fun SignatureStylesPresentation(
-    profile: com.example.data.intelligence.SignatureStyleProfile
+    profile: com.example.data.intelligence.SignatureStyleProfile,
+    onMediaSelect: (MediaItem, List<MediaItem>) -> Unit
 ) {
     if (profile.activeStyles.isEmpty() && profile.emergingStyles.isEmpty()) {
         Surface(
@@ -151,11 +152,11 @@ private fun SignatureStylesPresentation(
     } else {
         Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             profile.activeStyles.take(3).forEach { style ->
-                SignatureStyleCard(style = style, isEmerging = false)
+                SignatureStyleCard(style = style, isEmerging = false, onMediaSelect = onMediaSelect)
             }
             if (profile.activeStyles.size < 3) {
                 profile.emergingStyles.take(3 - profile.activeStyles.size).forEach { style ->
-                    SignatureStyleCard(style = style, isEmerging = true)
+                    SignatureStyleCard(style = style, isEmerging = true, onMediaSelect = onMediaSelect)
                 }
             }
         }
@@ -165,7 +166,8 @@ private fun SignatureStylesPresentation(
 @Composable
 private fun SignatureStyleCard(
     style: com.example.data.intelligence.SignatureStyle,
-    isEmerging: Boolean
+    isEmerging: Boolean,
+    onMediaSelect: (MediaItem, List<MediaItem>) -> Unit
 ) {
     Surface(
         color = if (isEmerging) Color.Transparent else AuraSubtleSurface,
@@ -222,6 +224,7 @@ private fun SignatureStyleCard(
                 Spacer(modifier = Modifier.height(AuraSpacing.M))
                 Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
                     style.representativeMedia.take(3).forEach { media ->
+                        // AURA REPAIR: Restored reliable thumbnails and interaction for Signature Styles
                         AuraMediaThumbnail(
                             itemId = media.id,
                             mediaType = media.mediaType,
@@ -231,7 +234,10 @@ private fun SignatureStyleCard(
                             modifier = Modifier
                                 .size(52.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(AuraSubtleBorder),
+                                .background(AuraSubtleBorder)
+                                .clickable { 
+                                    onMediaSelect(media, style.representativeMedia)
+                                },
                             locationTag = "profile_style"
                         )
                     }
@@ -434,6 +440,7 @@ fun ProfileScreen(
     onNavigateToPrivacyPolicy: () -> Unit,
     onNavigateToDiagnostics: () -> Unit,
     onLaunchAuraMoments: () -> Unit,
+    onMediaSelect: (MediaItem, List<MediaItem>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val tasteDNA by repository.tasteDNA.collectAsStateWithLifecycle()
@@ -546,7 +553,10 @@ fun ProfileScreen(
                                 modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
                             )
                             
-                            SignatureStylesPresentation(profile = styleProfile)
+                            SignatureStylesPresentation(
+                                profile = styleProfile,
+                                onMediaSelect = onMediaSelect
+                            )
 
                             Spacer(modifier = Modifier.height(32.dp))
                             
@@ -791,7 +801,10 @@ fun ProfileScreen(
                             modifier = Modifier.padding(bottom = AuraSpacing.M, start = AuraSpacing.XXS)
                         )
                         
-                        SignatureStylesPresentation(profile = styleProfile)
+                        SignatureStylesPresentation(
+                            profile = styleProfile,
+                            onMediaSelect = onMediaSelect
+                        )
                         
                         Spacer(modifier = Modifier.height(AuraSpacing.L))
                         Surface(

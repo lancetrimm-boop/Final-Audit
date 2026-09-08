@@ -701,6 +701,16 @@ fun AuraMainContent(repository: MediaRepository) {
                                 },
                                 onLaunchAuraMoments = {
                                     showAuraMomentsSelection = true
+                                },
+                                onMediaSelect = { selectedItem, styleItems ->
+                                    val selectedIndex = styleItems.indexOfFirst { it.id == selectedItem.id }
+                                    if (selectedIndex != -1) {
+                                        repository.setPlaylist(
+                                            items = styleItems,
+                                            initialIndex = selectedIndex,
+                                            sourceTitle = "Signature Style"
+                                        )
+                                    }
                                 }
                             )
                         }
