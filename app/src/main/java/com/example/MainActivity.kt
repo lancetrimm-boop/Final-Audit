@@ -31,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -248,6 +249,9 @@ fun AuraMainContent(repository: MediaRepository) {
     val compareSession by repository.compareSelectionSession.collectAsStateWithLifecycle()
     val mediaItemsMap by repository.mediaItemsMap.collectAsStateWithLifecycle()
     val pairwiseState by repository.pairwiseState.collectAsStateWithLifecycle()
+    LaunchedEffect(pairwiseState) {
+        Log.d("PlaylistTrace", "pairwiseState updated: A=${pairwiseState.optionA.id}, B=${pairwiseState.optionB.id}")
+    }
     val compareMediaType by repository.compareMediaType.collectAsStateWithLifecycle()
     val compareStrategy by repository.compareStrategy.collectAsStateWithLifecycle()
     val compareSort by repository.compareSort.collectAsStateWithLifecycle()

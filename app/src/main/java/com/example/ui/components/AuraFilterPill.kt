@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Pause
@@ -44,16 +45,16 @@ fun <T> AuraSortSelector(
                 onPillClick()
                 expanded = true 
             },
-            shape = CircleShape,
+            shape = RoundedCornerShape(AuraSpacing.S), // More modern than full circle
             modifier = Modifier.height(32.dp),
-            color = if (isSelected) selectedColor.copy(alpha = 0.12f) else Color.Transparent,
+            color = if (isSelected) selectedColor.copy(alpha = 0.08f) else AuraSubtleSurface,
             border = androidx.compose.foundation.BorderStroke(
-                width = if (isSelected) 1.5.dp else 1.dp,
+                width = 1.dp,
                 brush = if (isSelected) DiscoveryGradient else SolidColor(AuraSubtleBorder)
             )
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = AuraSpacing.XS),
+                modifier = Modifier.padding(horizontal = AuraSpacing.S),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -111,11 +112,11 @@ fun AuraFilterChip(
 ) {
     Surface(
         onClick = onClick,
-        shape = CircleShape,
+        shape = RoundedCornerShape(AuraSpacing.S),
         modifier = modifier.height(32.dp),
-        color = if (isSelected) selectedColor.copy(alpha = 0.12f) else Color.Transparent,
+        color = if (isSelected) selectedColor.copy(alpha = 0.08f) else AuraSubtleSurface,
         border = androidx.compose.foundation.BorderStroke(
-            width = if (isSelected) 1.5.dp else 1.dp,
+            width = 1.dp,
             brush = if (isSelected) DiscoveryGradient else SolidColor(AuraSubtleBorder)
         )
     ) {

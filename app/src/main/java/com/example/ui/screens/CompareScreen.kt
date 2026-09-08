@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -142,6 +143,24 @@ fun CompareScreen(
     var showInfoDialog by remember { mutableStateOf(false) }
     var showResultsOverlay by remember { mutableStateOf(false) }
     var activeFilterGroup by remember { mutableStateOf(CompareFilterGroup.LEARNING) } // Default to Learning as it's the core intelligence
+
+    // AURA REPAIR: Ensure PreviewCoordinator is aware of the items being compared 
+    // so VideoTilePreview priority check doesn't block playback.
+    val comparedIds = remember(pairwiseState.optionA.id, pairwiseState.optionB.id) {
+        listOf(pairwiseState.optionA.id, pairwiseState.optionB.id).filter { it.isNotEmpty() }
+    }
+    
+    // UPDATE COORDINATOR IMMEDIATELY (SideEffect) to prevent race with VideoTilePreview
+    androidx.compose.runtime.SideEffect {
+        if (comparedIds.isNotEmpty()) {
+            com.example.ui.components.PreviewCoordinator.updateWindow(
+                visible = comparedIds,
+                all = comparedIds,
+                firstVisibleIndex = 0
+            )
+            com.example.ui.components.PreviewCoordinator.setScrollingFast(false)
+        }
+    }
 
     if (showInfoDialog) {
         AlertDialog(

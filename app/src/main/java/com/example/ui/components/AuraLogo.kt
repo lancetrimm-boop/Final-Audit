@@ -1,12 +1,16 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -21,7 +25,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.Icon
 import com.example.R
+import com.example.ui.theme.AuraCrispWhite
 import com.example.ui.theme.AuraMidnight
+import com.example.ui.theme.AuraMutedSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.DiscoveryGradient
 import com.example.ui.theme.DiscoveryViolet
 
@@ -32,22 +39,22 @@ import com.example.ui.theme.DiscoveryViolet
 @Composable
 fun AuraBrandName(
     modifier: Modifier = Modifier,
-    fontSize: Float = 18f,
+    fontSize: Float = 20f, // Slightly larger base
     letterSpacing: Float = -0.5f,
-    useGradient: Boolean = false
+    useGradient: Boolean = true // Default to gradient for "Authoritative" look
 ) {
-    val baseStyle = MaterialTheme.typography.headlineSmall
+    val baseStyle = MaterialTheme.typography.headlineMedium
     val style = if (useGradient) {
         baseStyle.copy(
             brush = DiscoveryGradient,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Black, // Stronger
             fontSize = fontSize.sp,
             letterSpacing = letterSpacing.sp
         )
     } else {
         baseStyle.copy(
             color = AuraMidnight,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Black,
             fontSize = fontSize.sp,
             letterSpacing = letterSpacing.sp
         )
@@ -67,21 +74,20 @@ fun AuraBrandName(
 @Composable
 fun AuraLogoMark(
     modifier: Modifier = Modifier,
-    size: Dp = 32.dp
+    size: Dp = 36.dp
 ) {
     Box(
-        modifier = modifier.size(size),
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .border(1.5.dp, DiscoveryGradient, CircleShape)
+            .background(AuraCrispWhite),
         contentAlignment = Alignment.Center
     ) {
-        // AURA REPAIR: Use AsyncImage (Coil) for the brand logo mark.
-        // The 1.8MB PNG resource has been observed to cause ResourceResolutionException 
-        // during direct painterResource() loading on high-density physical devices.
-        // Coil handles decoding off-thread. We provide a Vector fallback to prevent crashes.
         AsyncImage(
             model = R.drawable.aura_logo_mark,
             contentDescription = "Aura Logo",
-            modifier = Modifier.fillMaxSize(),
-            // DO NOT use painterResource with layer-list drawables here as it causes IllegalArgumentException in Compose
+            modifier = Modifier.fillMaxSize().padding(6.dp), // More breathing room for mark
             error = androidx.compose.ui.graphics.vector.rememberVectorPainter(image = Icons.Outlined.AutoAwesome),
             fallback = androidx.compose.ui.graphics.vector.rememberVectorPainter(image = Icons.Outlined.AutoAwesome)
         )
@@ -114,22 +120,23 @@ fun AuraFullLockup(
         modifier = modifier
     ) {
         AuraLogoMark(size = iconSize)
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.S))
         Text(
             text = stringResource(id = R.string.brand_name_full),
-            color = MaterialTheme.colorScheme.onBackground,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            fontSize = fontSize.sp,
-            letterSpacing = 0.sp
+            style = MaterialTheme.typography.displaySmall.copy(
+                fontWeight = FontWeight.Black,
+                fontSize = fontSize.sp,
+                letterSpacing = (-0.5).sp,
+                brush = DiscoveryGradient
+            )
         )
         Text(
-            text = stringResource(id = R.string.brand_description),
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            fontSize = (fontSize * 0.6f).sp,
-            letterSpacing = 1.sp
+            text = stringResource(id = R.string.brand_description).uppercase(),
+            style = MaterialTheme.typography.labelSmall.copy(
+                color = AuraMutedSlate,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.sp
+            )
         )
     }
 }
@@ -140,21 +147,22 @@ fun AuraFullLockup(
 @Composable
 fun AuraWordmark(
     modifier: Modifier = Modifier,
-    fontSize: Float = 22f
+    fontSize: Float = 20f
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
     ) {
         AuraLogoMark(size = (fontSize * 1.2f).dp)
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(AuraSpacing.S))
         Text(
             text = stringResource(id = R.string.brand_name_full),
-            color = MaterialTheme.colorScheme.onBackground,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            fontSize = fontSize.sp,
-            letterSpacing = 0.sp
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Black,
+                fontSize = fontSize.sp,
+                letterSpacing = (-0.25).sp,
+                brush = DiscoveryGradient
+            )
         )
     }
 }
@@ -165,30 +173,32 @@ fun AuraWordmark(
 @Composable
 fun AuraProductLockup(
     modifier: Modifier = Modifier,
-    fontSize: Float = 22f
+    fontSize: Float = 20f
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
     ) {
-        AuraLogoMark(size = (fontSize * 1.2f).dp)
-        Spacer(modifier = Modifier.width(12.dp))
+        AuraLogoMark(size = (fontSize * 1.3f).dp)
+        Spacer(modifier = Modifier.width(AuraSpacing.S))
         Column {
             Text(
                 text = stringResource(id = R.string.brand_name_full),
-                color = MaterialTheme.colorScheme.onBackground,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                fontSize = fontSize.sp,
-                letterSpacing = 0.sp
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Black,
+                    fontSize = fontSize.sp,
+                    letterSpacing = (-0.25).sp,
+                    brush = DiscoveryGradient
+                )
             )
             Text(
-                text = stringResource(id = R.string.brand_description),
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Normal,
-                fontSize = (fontSize * 0.5f).sp,
-                letterSpacing = 0.5.sp
+                text = stringResource(id = R.string.brand_description).uppercase(),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = AuraMutedSlate,
+                    fontWeight = FontWeight.Black,
+                    fontSize = (fontSize * 0.45f).sp,
+                    letterSpacing = 1.sp
+                )
             )
         }
     }

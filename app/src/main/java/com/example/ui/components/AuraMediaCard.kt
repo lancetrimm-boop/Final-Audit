@@ -354,7 +354,8 @@ fun AuraMediaThumbnail(
         }
 
         // LAYER 2: Video Preview (Becomes visible only when first frame is rendered)
-        if (isVideo && result?.bitmap != null && result.itemId == itemId) {
+        // AURA REPAIR: Allow VideoTilePreview to attempt playback even if thumbnail generation failed.
+        if (isVideo && result != null && result.itemId == itemId) {
             VideoTilePreview(
                 itemId = itemId,
                 videoUri = convertedUri ?: uriPath,
@@ -623,7 +624,8 @@ fun AuraContinueWatchingCard(
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object VideoPreviewPool {
-    private const val MAX_ACTIVE_PREVIEWS = 10 // Increased for 10-item rolling window
+    private const val MAX_ACTIVE_PREVIEWS = 10 // Balanced for Compare + Library
+    private const val MAX_IDLE_POOL = 4 // Strict limit on idle players to free hardware decoders
     
     // Key is "itemId_locationTag" to prevent player stealing between different UI contexts
     private val activePlayers = mutableMapOf<String, ExoPlayer>()
@@ -763,7 +765,6 @@ object VideoPreviewPool {
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                Log.e("VideoPreviewPool", "Preview error for $itemId: ${error.message}", error)
                 val repo = com.example.data.MediaRepository.instance
                 val mediaItem = repo.getMediaItemById(itemId)
                 repo.recordPlaybackError(error, player, mediaItem)
@@ -798,16 +799,11 @@ object VideoPreviewPool {
     @Synchronized
     fun releasePlayer(itemId: String, locationTag: String) {
         val poolKey = "${itemId}_$locationTag"
+        Log.d("VideoPreviewPool", "releasePlayer: $poolKey")
         
-        // AURA REPAIR: We don't immediately release if it's NEARBY
-        // Only release if it's truly gone or pool is full
-        val priority = PreviewCoordinator.getPriority(itemId)
-        if (priority != PreviewPriority.NONE) {
-            // Keep it in activePlayers but maybe update priority
-            playerPriorities[poolKey] = priority
-            return
-        }
-
+        // AURA REPAIR: REVERTED RETAIN LOGIC. 
+        // Retention was causing leaks during screen transitions because PreviewCoordinator 
+        // updates were racing with onDispose. Players are now released back to the idle pool immediately.
         accessOrder.remove(poolKey)
         playerPriorities.remove(poolKey)
         val player = activePlayers.remove(poolKey)
@@ -815,8 +811,12 @@ object VideoPreviewPool {
             try {
                 stop()
                 clearMediaItems()
-                // Move to idle pool for reuse
-                idlePlayers.add(this)
+                // AURA REPAIR: Only move to idle pool if under limit, else release to free decoders
+                if (idlePlayers.size < MAX_IDLE_POOL) {
+                    idlePlayers.add(this)
+                } else {
+                    release()
+                }
             } catch (_: Exception) {}
         }
     }
@@ -851,8 +851,12 @@ fun VideoTilePreview(
     val visibleIds by PreviewCoordinator.visibleIds.collectAsState()
     val nearbyIds by PreviewCoordinator.nearbyIds.collectAsState()
     
-    val priority = remember(itemId, visibleIds, nearbyIds) {
-        PreviewCoordinator.getPriority(itemId)
+    val priority = remember(itemId, visibleIds, nearbyIds, locationTag) {
+        if (locationTag.startsWith("compare_")) {
+            PreviewPriority.VISIBLE
+        } else {
+            PreviewCoordinator.getPriority(itemId)
+        }
     }
 
     // Performance Fix: Debounce player acquisition during fast scrolling

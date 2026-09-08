@@ -57,23 +57,23 @@ fun AuraSkeletonTile(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(AuraSpacing.CornerRadiusSmall))
                 .background(brush)
         )
-        Spacer(modifier = Modifier.height(AuraSpacing.XS))
+        Spacer(modifier = Modifier.height(AuraSpacing.S))
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.8f)
-                .height(14.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .fillMaxWidth(0.7f)
+                .height(16.dp)
+                .clip(RoundedCornerShape(AuraSpacing.XXXS))
                 .background(brush)
         )
         Spacer(modifier = Modifier.height(AuraSpacing.XXS))
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.5f)
+                .fillMaxWidth(0.4f)
                 .height(12.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(AuraSpacing.XXXS))
                 .background(brush)
         )
     }

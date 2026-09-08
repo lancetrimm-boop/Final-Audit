@@ -1,6 +1,7 @@
 package com.example.compatibility
 
 import android.content.Context
+import android.util.Log
 import com.example.data.CompatibilityStatus
 import com.example.data.ConversionStatus
 import com.example.data.MediaItem
@@ -34,6 +35,7 @@ sealed class PlaybackRouteResult {
 object AuraPlaybackRouter {
 
     fun resolveRoute(item: MediaItem): PlaybackRouteResult {
+        Log.e("PlaylistTrace", "Resolving route for ${item.id} - Status: ${item.compatibilityStatus}, URI: ${item.uriPath}")
         // Preferred Playable URI (Converted URI if conversion succeeded)
         val targetUri = if (item.conversionStatus == ConversionStatus.CONVERTED && !item.convertedUri.isNullOrBlank()) {
             item.convertedUri

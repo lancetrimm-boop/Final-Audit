@@ -78,7 +78,7 @@ fun LibraryScreen(
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-
+    
     // Library UI Preferences (Update 4)
     val libraryPrefs = remember(repository) { repository.libraryPreferences }
     val gridDensity by (libraryPrefs?.gridDensity ?: MutableStateFlow(160f)).collectAsStateWithLifecycle()
@@ -313,7 +313,7 @@ fun LibraryScreen(
             } else {
             if (!isLandscape) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = AuraSpacing.M),
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = AuraSpacing.S),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -326,7 +326,7 @@ fun LibraryScreen(
                     // AURA DESIGN REPAIR: Contextual loading indicator instead of global line
                     if (scanProgress.isScanning || importProgress.isImporting) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp).padding(end = AuraSpacing.S),
+                            modifier = Modifier.size(16.dp).padding(end = AuraSpacing.M),
                             strokeWidth = 2.dp,
                             color = DiscoveryViolet
                         )
@@ -488,9 +488,17 @@ fun LibraryScreen(
                                                 val clickedItemIndex = currentMediaItems.indexOfFirst { it.id == item.id }
                                                 
                                                 if (clickedItemIndex != -1) {
+                                                    // AURA OPTIMIZATION: Truncate large library playlist for detail view (Max 100 items around selection)
+                                                    val windowSize = 100
+                                                    val halfWindow = windowSize / 2
+                                                    val start = (clickedItemIndex - halfWindow).coerceAtLeast(0)
+                                                    val end = (clickedItemIndex + halfWindow).coerceAtMost(currentMediaItems.size)
+                                                    val truncatedItems = currentMediaItems.subList(start, end)
+                                                    val newInitialIndex = clickedItemIndex - start
+
                                                     repository.setLibraryPlaylist(
-                                                        items = currentMediaItems,
-                                                        initialIndex = clickedItemIndex
+                                                        items = truncatedItems,
+                                                        initialIndex = newInitialIndex
                                                     )
                                                     onMediaSelect(currentMediaItems[clickedItemIndex])
                                                 }
@@ -628,119 +636,125 @@ private fun SearchHeader(
     onRemoveReference: (Int) -> Unit,
     onExit: () -> Unit
 ) {
-    Row(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
-            .height(56.dp)
-            .background(AuraCrispWhite)
-            .padding(horizontal = AuraSpacing.XS),
-        verticalAlignment = Alignment.CenterVertically
+            .statusBarsPadding(),
+        color = AuraCrispWhite,
+        border = androidx.compose.foundation.BorderStroke(width = 0.5.dp, color = AuraSubtleBorder)
     ) {
-        IconButton(onClick = onExit, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Default.Close, contentDescription = "Exit Search", tint = AuraMidnight)
-        }
-        
-        if (searchRequest is SearchRequest.MultiVisual) {
-            LazyRow(
-                modifier = Modifier.padding(start = 4.dp, end = 4.dp).widthIn(max = 160.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                contentPadding = PaddingValues(end = 4.dp)
-            ) {
-                itemsIndexed(searchRequest.referenceUris) { index, uri ->
-                    Box(modifier = Modifier.padding(end = 4.dp)) {
-                        Surface(
-                            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)),
-                            color = AuraSubtleBorder,
-                            onClick = { onRemoveReference(index) }
-                        ) {
-                        AuraMediaThumbnail(
-                            itemId = "anchor_$index",
-                            mediaType = "VIDEO", // Force extraction path
-                            imageUrl = "",
-                            uriPath = uri.toString(),
-                            title = "",
-                            modifier = Modifier.fillMaxSize()
-                        )
-                            Box(
-                                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
-                                contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp) // Refined height
+                .padding(horizontal = AuraSpacing.S),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onExit, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Exit Search", tint = AuraMidnight)
+            }
+            
+            if (searchRequest is SearchRequest.MultiVisual) {
+                LazyRow(
+                    modifier = Modifier.padding(horizontal = AuraSpacing.XXS).widthIn(max = 160.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    contentPadding = PaddingValues(end = 4.dp)
+                ) {
+                    itemsIndexed(searchRequest.referenceUris) { index, uri ->
+                        Box(modifier = Modifier.padding(end = 4.dp)) {
+                            Surface(
+                                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(AuraSpacing.CornerRadiusSmall)),
+                                color = AuraSubtleBorder,
+                                onClick = { onRemoveReference(index) }
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                AuraMediaThumbnail(
+                                    itemId = "anchor_$index",
+                                    mediaType = "VIDEO", // Force extraction path
+                                    imageUrl = "",
+                                    uriPath = uri.toString(),
+                                    title = "",
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Box(
+                                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                }
                             }
                         }
                     }
                 }
-            }
-        } else if (searchRequest is SearchRequest.Visual || searchRequest is SearchRequest.Compound) {
-            val visualUri = when (searchRequest) {
-                is SearchRequest.Visual -> searchRequest.referenceUri
-                is SearchRequest.Compound -> searchRequest.referenceUri
-                else -> null
-            }
-            Box(modifier = Modifier.padding(start = 4.dp, end = 6.dp)) {
-                Surface(
-                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)),
-                    color = AuraSubtleBorder,
-                    onClick = onRemoveAnchor
-                ) {
-                    if (visualUri != null) {
-                        AuraMediaThumbnail(
-                            itemId = visualUri, // Use URI as ID for stable unique caching
-                            mediaType = "VIDEO", // Force extraction path
-                            imageUrl = "",
-                            uriPath = visualUri,
-                            title = "",
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.padding(6.dp))
-                    }
-                    Box(
-                        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
+            } else if (searchRequest is SearchRequest.Visual || searchRequest is SearchRequest.Compound) {
+                val visualUri = when (searchRequest) {
+                    is SearchRequest.Visual -> searchRequest.referenceUri
+                    is SearchRequest.Compound -> searchRequest.referenceUri
+                    else -> null
+                }
+                Box(modifier = Modifier.padding(horizontal = AuraSpacing.XS)) {
+                    Surface(
+                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(AuraSpacing.CornerRadiusSmall)),
+                        color = AuraSubtleBorder,
+                        onClick = onRemoveAnchor
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                        if (visualUri != null) {
+                            AuraMediaThumbnail(
+                                itemId = visualUri, // Use URI as ID for stable unique caching
+                                mediaType = "VIDEO", // Force extraction path
+                                imageUrl = "",
+                                uriPath = visualUri,
+                                title = "",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.padding(8.dp))
+                        }
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        }
                     }
                 }
             }
-        }
 
-        val query = when (searchRequest) {
-            is SearchRequest.Text -> searchRequest.query ?: ""
-            is SearchRequest.Compound -> searchRequest.query ?: ""
-            else -> ""
-        }
-        
-        TextField(
-            value = query,
-            onValueChange = onQueryChange,
-            modifier = Modifier.weight(1f),
-            placeholder = { 
-                Text(
-                    if (searchRequest !is SearchRequest.Text) "Add constraint..." else "Search library...", 
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AuraMutedSlate 
-                ) 
-            },
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-                disabledContainerColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                cursorColor = DiscoveryViolet
-            ),
-            singleLine = true,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = AuraMidnight),
-            trailingIcon = {
-                if (searchRequest is SearchRequest.Text) {
-                    IconButton(onClick = onImageSearchClick, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.ImageSearch, contentDescription = "Search by Image", tint = DiscoveryViolet, modifier = Modifier.size(20.dp))
+            val query = when (searchRequest) {
+                is SearchRequest.Text -> searchRequest.query ?: ""
+                is SearchRequest.Compound -> searchRequest.query ?: ""
+                else -> ""
+            }
+            
+            TextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f),
+                placeholder = { 
+                    Text(
+                        if (searchRequest !is SearchRequest.Text) "Add constraint..." else "Search library...", 
+                        style = MaterialTheme.typography.bodyLarge, // Standardized
+                        color = AuraMutedSlate 
+                    ) 
+                },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    cursorColor = DiscoveryViolet
+                ),
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = AuraMidnight, fontWeight = FontWeight.Bold),
+                trailingIcon = {
+                    if (searchRequest is SearchRequest.Text) {
+                        IconButton(onClick = onImageSearchClick, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Default.ImageSearch, contentDescription = "Search by Image", tint = DiscoveryViolet, modifier = Modifier.size(22.dp))
+                        }
                     }
                 }
-            }
-        )
+            )
+        }
     }
 }
 
@@ -763,14 +777,14 @@ private fun UtilityControlsRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = AuraSpacing.M, vertical = if (isCompact) 0.dp else AuraSpacing.XS),
+            .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS), // More compact
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Left Side: Filters or Auto-Scroll
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS),
+            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.S), // Increased gap for chips
             modifier = Modifier.weight(1f)
         ) {
             if (!isCompact) {
@@ -790,7 +804,7 @@ private fun UtilityControlsRow(
                     onClick = { onFilterChange("VIDEO") }
                 )
             } else {
-                // Compact mode (Landscape): Just show symbols or minimal
+                // Compact mode (Landscape)
                 IconButton(onClick = { onFilterChange("ALL") }, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Default.PhotoLibrary, contentDescription = "All", tint = if (selectedFilter == "ALL") DiscoveryViolet else AuraMutedSlate)
                 }
@@ -815,20 +829,20 @@ private fun UtilityControlsRow(
             }
 
             if (showScrollToTop && !isCompact) {
-                IconButton(onClick = onScrollToTop, modifier = Modifier.size(24.dp)) {
+                IconButton(onClick = onScrollToTop, modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Default.ArrowUpward, contentDescription = "Scroll to top", tint = AuraMutedSlate)
                 }
             }
             
-            IconButton(onClick = onSearchClick, modifier = Modifier.size(24.dp)) {
+            IconButton(onClick = onSearchClick, modifier = Modifier.size(28.dp)) {
                 Icon(Icons.Default.Search, contentDescription = "Search", tint = AuraMidnight)
             }
             
-            IconButton(onClick = onImportClick, modifier = Modifier.size(24.dp)) {
+            IconButton(onClick = onImportClick, modifier = Modifier.size(28.dp)) {
                 Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Import", tint = AuraMidnight)
             }
             
-            IconButton(onClick = onSyncClick, modifier = Modifier.size(24.dp)) {
+            IconButton(onClick = onSyncClick, modifier = Modifier.size(28.dp)) {
                 Icon(
                     imageVector = Icons.Default.Sync, 
                     contentDescription = "Sync", 
@@ -851,8 +865,8 @@ private fun CompactControlsRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XS),
-        horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS),
+            .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS), // More compact vertical padding
+        horizontalArrangement = Arrangement.spacedBy(AuraSpacing.S),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AuraSortSelector(
@@ -863,12 +877,13 @@ private fun CompactControlsRow(
             onOptionSelected = onCategoryChange,
             onPillClick = { /* No-op for main pill */ },
             getDisplayName = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } },
-            selectedColor = if (activeCategory == SortCategory.STANDARD) AuraMutedSlate else DiscoveryViolet
+            selectedColor = if (activeCategory == SortCategory.STANDARD) AuraMutedSlate else DiscoveryViolet,
+            modifier = Modifier.weight(1f) // Equal distribution
         )
 
         if (activeCategory == SortCategory.STANDARD) {
             AuraSortSelector(
-                label = "Criteria",
+                label = "Sort",
                 currentOption = when (standardSort) {
                     StandardSortOption.NEWEST_FIRST -> "Newest"
                     StandardSortOption.TITLE_ASC -> "A-Z"
@@ -880,11 +895,12 @@ private fun CompactControlsRow(
                     StandardSortOption.RANDOM -> "Shuffle"
                     StandardSortOption.LEAST_PLAYED -> "Unplayed"
                 },
-                isSelected = (activeCategory == SortCategory.STANDARD),
+                isSelected = true,
                 options = StandardSortOption.entries,
                 onOptionSelected = onStandardSortChange,
                 onPillClick = { /* Toggle menu */ },
-                getDisplayName = { it.name.replace("_", " ").lowercase().replaceFirstChar { char -> char.uppercase() } }
+                getDisplayName = { it.name.replace("_", " ").lowercase().replaceFirstChar { char -> char.uppercase() } },
+                modifier = Modifier.weight(1f)
             )
         } else {
             AuraSortSelector(
@@ -899,11 +915,12 @@ private fun CompactControlsRow(
                     IntelligentSortOption.LEAST_INTERACTED -> "Review"
                     IntelligentSortOption.SURPRISE_ME -> "Random"
                 },
-                isSelected = (activeCategory == SortCategory.INTELLIGENT),
+                isSelected = true,
                 options = IntelligentSortOption.entries,
                 onOptionSelected = onIntelligentSortChange,
                 onPillClick = { /* Toggle menu */ },
-                getDisplayName = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
+                getDisplayName = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } },
+                modifier = Modifier.weight(1f)
             )
         }
     }
@@ -921,16 +938,24 @@ private fun EmptyLibraryView(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            imageVector = Icons.Default.PhotoLibrary,
-            contentDescription = null,
-            tint = AuraMutedSlate.copy(alpha = 0.3f),
-            modifier = Modifier.size(56.dp)
-        )
-        Spacer(modifier = Modifier.height(AuraSpacing.M))
+        Surface(
+            modifier = Modifier.size(80.dp),
+            color = AuraSubtleSurface,
+            shape = CircleShape
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.PhotoLibrary,
+                    contentDescription = null,
+                    tint = DiscoveryViolet.copy(alpha = 0.4f),
+                    modifier = Modifier.size(40.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(AuraSpacing.L))
         Text(
             text = "Your library is empty",
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Black,
             color = AuraMidnight
         )
@@ -938,14 +963,25 @@ private fun EmptyLibraryView(
         Text(
             text = "Import media from your device or scan for local content to start building your intelligence profile.",
             style = MaterialTheme.typography.bodyMedium,
-            color = AuraSlate,
+            color = AuraMutedSlate, // Standardized color
             textAlign = TextAlign.Center,
             lineHeight = 20.sp
         )
-        Spacer(modifier = Modifier.height(AuraSpacing.L))
-        Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.M)) {
-            AuraButton(text = "IMPORT", onClick = onImportClick)
-            AuraOutlinedButton(text = "SCAN DEVICE", onClick = onScanClick)
+        Spacer(modifier = Modifier.height(AuraSpacing.XL))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.M),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            AuraButton(
+                text = "IMPORT", 
+                onClick = onImportClick,
+                modifier = Modifier.weight(1f)
+            )
+            AuraOutlinedButton(
+                text = "SCAN DEVICE", 
+                onClick = onScanClick,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }

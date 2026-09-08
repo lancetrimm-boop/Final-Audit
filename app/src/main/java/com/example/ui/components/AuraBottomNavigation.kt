@@ -28,6 +28,7 @@ import com.example.BuildConfig
 import com.example.ui.theme.AuraCrispWhite
 import com.example.ui.theme.AuraMidnight
 import com.example.ui.theme.AuraMutedSlate
+import com.example.ui.theme.AuraSlate
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.DiscoveryGradient
 import com.example.ui.theme.DiscoveryViolet
@@ -127,7 +128,7 @@ fun AuraBottomNavigation(
                             Icon(
                                 imageVector = if (isSelected) destination.selectedIcon else destination.unselectedIcon,
                                 contentDescription = destination.title,
-                                tint = if (isSelected) DiscoveryViolet else AuraMutedSlate,
+                                tint = if (isSelected) DiscoveryViolet else AuraSlate, // Darker unselected icon
                                 modifier = Modifier.size(if (isLandscape) 18.dp else 22.dp)
                             )
                             if (!isLandscape) {
@@ -135,8 +136,8 @@ fun AuraBottomNavigation(
                                 Text(
                                     text = destination.title,
                                     fontSize = 9.sp,
-                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
-                                    color = if (isSelected) AuraMidnight else AuraMutedSlate
+                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold, // Bolder
+                                    color = if (isSelected) AuraMidnight else AuraSlate // Darker unselected text
                                 )
                             }
                             

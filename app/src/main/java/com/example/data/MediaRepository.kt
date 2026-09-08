@@ -2050,13 +2050,17 @@ class MediaRepository(
         _isPlayerActive.value = true
         
         // AURA P1 STABILITY: Authoritative Playlist Sanitization
-        // Only verified playable terminal states are allowed in active playback.
+        // Allow terminal playable states AND optimistic pending states to ensure
+        // newly discovered media can be played immediately.
         val visibleStatuses = listOf(
             CompatibilityStatus.PLAYABLE,
             CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE,
             CompatibilityStatus.PLAYABLE_AFTER_CONVERSION,
             CompatibilityStatus.THUMBNAIL_FAILED,
-            CompatibilityStatus.NEEDS_TRANSCODE
+            CompatibilityStatus.NEEDS_TRANSCODE,
+            CompatibilityStatus.ANALYSIS_PENDING,
+            CompatibilityStatus.ANALYSIS_IN_PROGRESS,
+            CompatibilityStatus.UNTESTED
         )
         val sanitized = items.filter { item ->
             !item.isDeleted && item.compatibilityStatus in visibleStatuses
@@ -4241,7 +4245,8 @@ stats ->
             CompatibilityStatus.THUMBNAIL_FAILED,
             CompatibilityStatus.NEEDS_TRANSCODE,
             CompatibilityStatus.ANALYSIS_PENDING,
-            CompatibilityStatus.ANALYSIS_IN_PROGRESS
+            CompatibilityStatus.ANALYSIS_IN_PROGRESS,
+            CompatibilityStatus.UNTESTED
         )
         return !item.isDeleted && item.compatibilityStatus in visibleStatuses
     }

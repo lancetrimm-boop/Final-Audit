@@ -171,8 +171,11 @@ private fun SignatureStyleCard(
 ) {
     Surface(
         color = if (isEmerging) Color.Transparent else AuraSubtleSurface,
-        shape = RoundedCornerShape(20.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (isEmerging) AuraSubtleBorder.copy(alpha = 0.5f) else AuraSubtleBorder),
+        shape = RoundedCornerShape(AuraSpacing.CornerRadiusMedium),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp, 
+            color = if (isEmerging) AuraSubtleBorder.copy(alpha = 0.5f) else AuraSubtleBorder
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(AuraSpacing.M)) {
@@ -184,29 +187,32 @@ private fun SignatureStyleCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = if (isEmerging) "EMERGING STYLE" else "SIGNATURE STYLE",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Black,
-                        color = if (isEmerging) AuraMutedSlate else DiscoveryViolet,
-                        letterSpacing = 1.sp
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = if (isEmerging) AuraMutedSlate else DiscoveryViolet,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp
+                        )
                     )
                     Text(
                         text = style.anchor.displayName,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AuraMidnight
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = AuraMidnight
+                        )
                     )
                 }
                 
                 Surface(
-                    color = if (isEmerging) AuraMutedSlate.copy(alpha = 0.1f) else DiscoveryViolet.copy(alpha = 0.12f),
+                    color = if (isEmerging) AuraMutedSlate.copy(alpha = 0.08f) else DiscoveryViolet.copy(alpha = 0.1f),
                     shape = CircleShape
                 ) {
                     Text(
                         text = "${(style.affinityScore * 100).toInt()}%",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black,
-                        color = if (isEmerging) AuraMutedSlate else DiscoveryViolet
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Black,
+                            color = if (isEmerging) AuraMutedSlate else DiscoveryViolet
+                        )
                     )
                 }
             }
@@ -222,8 +228,11 @@ private fun SignatureStyleCard(
             
             if (style.representativeMedia.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(AuraSpacing.M))
-                Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
-                    style.representativeMedia.take(3).forEach { media ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(AuraSpacing.S),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    style.representativeMedia.take(4).forEach { media -> // Show 4 instead of 3
                         // AURA REPAIR: Restored reliable thumbnails and interaction for Signature Styles
                         AuraMediaThumbnail(
                             itemId = media.id,
@@ -232,8 +241,9 @@ private fun SignatureStyleCard(
                             uriPath = media.uriPath,
                             title = media.title,
                             modifier = Modifier
-                                .size(52.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .weight(1f) // Equal sizing
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(AuraSpacing.CornerRadiusSmall))
                                 .background(AuraSubtleBorder)
                                 .clickable { 
                                     onMediaSelect(media, style.representativeMedia)
@@ -311,11 +321,12 @@ private fun VisualTasteSummary(
 private fun ProfileSectionTitle(title: String) {
     Text(
         text = title.uppercase(),
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Black,
-        color = AuraMutedSlate,
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(start = AuraSpacing.XXS, bottom = AuraSpacing.XS, top = AuraSpacing.S)
+        style = MaterialTheme.typography.labelSmall.copy(
+            color = DiscoveryViolet,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.2.sp
+        ),
+        modifier = Modifier.padding(start = AuraSpacing.XXS, bottom = AuraSpacing.XXS, top = AuraSpacing.M)
     )
 }
 
@@ -485,7 +496,8 @@ fun ProfileScreen(
         ) {
             AuraSectionHeader(
                 title = "Profile",
-                subtitle = "Your intelligence profile and Taste DNA"
+                subtitle = "Your intelligence profile",
+                modifier = Modifier.statusBarsPadding()
             )
 
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {

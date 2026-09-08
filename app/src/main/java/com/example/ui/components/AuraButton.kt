@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -52,10 +55,11 @@ fun AuraButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    height: Dp = 40.dp,
+    height: Dp = AuraSpacing.ButtonHeight, // Use token
     testTag: String = "aura_primary_button",
     leadingIcon: @Composable (() -> Unit)? = null
 ) {
+    val haptic = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -65,9 +69,14 @@ fun AuraButton(
     )
 
     Surface(
-        onClick = if (enabled) onClick else ({}),
+        onClick = {
+            if (enabled) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+        },
         enabled = enabled,
-        shape = CircleShape,
+        shape = RoundedCornerShape(AuraSpacing.CornerRadiusSmall), // More modern than circle
         modifier = modifier
             .height(height)
             .graphicsLayer {
@@ -81,10 +90,10 @@ fun AuraButton(
         Box(
             modifier = Modifier
                 .then(
-                    if (enabled) Modifier.background(DiscoveryGradient, shape = CircleShape)
-                    else Modifier.background(AuraSubtleBorder, shape = CircleShape)
+                    if (enabled) Modifier.background(DiscoveryGradient)
+                    else Modifier.background(AuraSubtleBorder)
                 )
-                .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS),
+                .padding(horizontal = AuraSpacing.M),
             contentAlignment = Alignment.Center
         ) {
             Row(
@@ -95,10 +104,11 @@ fun AuraButton(
                     Spacer(modifier = Modifier.width(AuraSpacing.XS))
                 }
                 Text(
-                    text = text,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 13.sp,
-                    letterSpacing = 0.5.sp
+                    text = text.uppercase(), // Standardized uppercase for buttons
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
                 )
             }
         }
@@ -111,10 +121,11 @@ fun AuraOutlinedButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    height: Dp = 40.dp,
+    height: Dp = AuraSpacing.ButtonHeight, // Use token
     testTag: String = "aura_secondary_button",
     leadingIcon: @Composable (() -> Unit)? = null
 ) {
+    val haptic = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -124,7 +135,10 @@ fun AuraOutlinedButton(
     )
 
     OutlinedButton(
-        onClick = onClick,
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onClick()
+        },
         enabled = enabled,
         modifier = modifier
             .height(height)
@@ -133,14 +147,14 @@ fun AuraOutlinedButton(
                 scaleY = scale
             }
             .testTag(testTag),
-        shape = CircleShape, // Pill shape
+        shape = RoundedCornerShape(AuraSpacing.CornerRadiusSmall),
         border = BorderStroke(1.dp, if (enabled) AuraSubtleBorder else AuraSubtleBorder.copy(alpha = 0.5f)),
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = AuraCrispWhite,
+            containerColor = Color.Transparent,
             contentColor = AuraMidnight,
             disabledContentColor = Color.Gray
         ),
-        contentPadding = PaddingValues(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS)
+        contentPadding = PaddingValues(horizontal = AuraSpacing.M)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically
@@ -150,10 +164,11 @@ fun AuraOutlinedButton(
                 Spacer(modifier = Modifier.width(AuraSpacing.XS))
             }
             Text(
-                text = text,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-                letterSpacing = 0.25.sp
+                text = text.uppercase(),
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
             )
         }
     }

@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AuraMutedSlate
@@ -27,19 +28,13 @@ fun AuraSectionHeader(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .statusBarsPadding()
             .padding(
                 start = AuraSpacing.ScreenHorizontal, 
-                end = AuraSpacing.XS, 
-                top = AuraSpacing.XS, 
-                bottom = AuraSpacing.XXS
+                end = AuraSpacing.ScreenHorizontal, 
+                top = AuraSpacing.S, 
+                bottom = AuraSpacing.XS
             )
     ) {
-        AuraBrandName(
-            fontSize = 18f,
-            modifier = Modifier.padding(bottom = 0.dp)
-        )
-        
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -47,20 +42,22 @@ fun AuraSectionHeader(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge.copy(
+                    text = title.uppercase(),
+                    style = MaterialTheme.typography.titleMedium.copy(
                         brush = DiscoveryGradient,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = (-0.5).sp
-                    )
+                        letterSpacing = 1.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 if (subtitle != null) {
                     Text(
                         text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = AuraMutedSlate,
                         fontWeight = FontWeight.Medium,
-                        lineHeight = 16.sp
+                        lineHeight = 14.sp
                     )
                 }
             }
@@ -68,7 +65,7 @@ fun AuraSectionHeader(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.End,
-                    modifier = Modifier.padding(start = AuraSpacing.XS)
+                    modifier = Modifier.padding(start = AuraSpacing.S)
                 ) {
                     actions()
                 }

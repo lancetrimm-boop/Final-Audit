@@ -21,11 +21,16 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.MediaRepository
 import com.example.data.TasteDNA
+import com.example.ui.theme.AuraMidnight
+import com.example.ui.theme.AuraMutedSlate
 import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraSpacing
+import com.example.ui.theme.AuraSubtleSurface
 import com.example.ui.theme.AuraSurface
+import com.example.ui.theme.DiscoveryGradient
+import com.example.ui.theme.DiscoveryViolet
 
 @Composable
 fun CompactEngagementDebugger(
@@ -38,8 +43,8 @@ fun CompactEngagementDebugger(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-            .background(AuraSurface)
+            .clip(RoundedCornerShape(topStart = AuraSpacing.CornerRadiusMedium, topEnd = AuraSpacing.CornerRadiusMedium))
+            .background(AuraSubtleSurface)
             .padding(AuraSpacing.M)
     ) {
         // Compact Header
@@ -52,28 +57,31 @@ fun CompactEngagementDebugger(
                 Icon(
                     imageVector = Icons.Outlined.Tune,
                     contentDescription = null,
-                    tint = AuraPurple,
+                    tint = DiscoveryViolet,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(AuraSpacing.XS))
                 Text(
                     text = "AURA ENGAGEMENT TUNER",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black,
-                    color = AuraOnSurface,
-                    letterSpacing = 0.5.sp
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Black,
+                        color = AuraMidnight,
+                        letterSpacing = 0.5.sp
+                    )
                 )
             }
             
             Surface(
-                color = AuraPurple.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(8.dp)
+                color = DiscoveryViolet.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(AuraSpacing.XXS)
             ) {
                 Text(
                     text = "LIVE STATE",
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Black,
-                    color = AuraPurple,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Black,
+                        color = DiscoveryViolet,
+                        fontSize = 8.sp
+                    ),
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
@@ -86,21 +94,20 @@ fun CompactEngagementDebugger(
         TabRow(
             selectedTabIndex = selectedTab,
             containerColor = Color.Transparent,
-            contentColor = AuraPurple,
+            contentColor = DiscoveryViolet,
             divider = {},
             indicator = { tabPositions ->
                 TabRowDefaults.SecondaryIndicator(
                     modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                    color = AuraPurple
+                    color = DiscoveryViolet
                 )
             }
         ) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
                 Text(
                     "Engine Signals", 
-                    modifier = Modifier.padding(vertical = AuraSpacing.XS), 
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
+                    modifier = Modifier.padding(vertical = AuraSpacing.S), 
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
         }

@@ -158,18 +158,25 @@ fun DiscoverScreen(
                     )
                 }
                 else -> {
-                    AuraSectionHeader(
-                        title = "Discover",
-                        subtitle = "Your personal media intelligence engine",
-                        actions = {
-                            IconButton(onClick = { /* Search Placeholder */ }) {
-                                Icon(imageVector = Icons.Outlined.Search, contentDescription = "Search", tint = AuraMidnight)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = AuraSpacing.S),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        AuraSectionHeader(
+                            title = "Discover",
+                            subtitle = "Personal intelligence engine",
+                            modifier = Modifier.weight(1f),
+                            actions = {
+                                IconButton(onClick = { /* Search Placeholder */ }) {
+                                    Icon(imageVector = Icons.Outlined.Search, contentDescription = "Search", tint = AuraMidnight)
+                                }
+                                IconButton(onClick = { viewModel.refresh() }) {
+                                    Icon(imageVector = Icons.Outlined.Sync, contentDescription = "Refresh", tint = AuraMidnight)
+                                }
                             }
-                            IconButton(onClick = { viewModel.refresh() }) {
-                                Icon(imageVector = Icons.Outlined.Sync, contentDescription = "Refresh", tint = AuraMidnight)
-                            }
-                        }
-                    )
+                        )
+                    }
 
                     PullToRefreshBox(
                         isRefreshing = feedState is DiscoverFeedState.Loading,
@@ -454,12 +461,12 @@ fun ImmersiveMediaCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = AuraSpacing.M)
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(AuraSpacing.CornerRadiusMedium)) // Use token
             .background(AuraSubtleSurface)
             .clickable { onClick() }
-            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(20.dp))
+            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(AuraSpacing.CornerRadiusMedium))
     ) {
-        Box(modifier = Modifier.fillMaxWidth().aspectRatio(if (isLandscape) 2.5f else 1.3f)) {
+        Box(modifier = Modifier.fillMaxWidth().aspectRatio(if (isLandscape) 2.5f else 1.5f)) { // Adjusted aspect ratio
             AuraMediaThumbnail(
                 itemId = item.id,
                 mediaType = item.mediaType,

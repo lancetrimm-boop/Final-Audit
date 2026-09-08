@@ -4,19 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -327,7 +315,8 @@ fun CollectionsScreen(
     ) {
         AuraSectionHeader(
             title = "Collections",
-            subtitle = "Smart groups and local archives"
+            subtitle = "Smart groups and archives",
+            modifier = Modifier.statusBarsPadding()
         )
 
         LazyVerticalGrid(
@@ -788,8 +777,8 @@ fun AuraMomentsHeroCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(AuraSpacing.CornerRadiusMedium))
+            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(AuraSpacing.CornerRadiusMedium))
             .clickable(onClick = onLaunch)
             .testTag("aura_moments_hero_card"),
         color = AuraSubtleSurface
@@ -802,7 +791,7 @@ fun AuraMomentsHeroCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(48.dp) // Slightly larger
                     .clip(CircleShape)
                     .background(DiscoveryGradient),
                 contentAlignment = Alignment.Center
@@ -820,23 +809,25 @@ fun AuraMomentsHeroCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "AURA SLIDESHOW",
-                    color = DiscoveryViolet,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = DiscoveryViolet,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "Your Visual Taste",
-                    color = AuraMidnight,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Black
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        color = AuraMidnight,
+                        fontWeight = FontWeight.Black
+                    )
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "Intelligent slideshows curated from your library",
+                    style = MaterialTheme.typography.bodySmall,
                     color = AuraMutedSlate,
-                    fontSize = 12.sp,
                     lineHeight = 16.sp
                 )
             }

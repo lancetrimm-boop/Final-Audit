@@ -23,4 +23,16 @@ object AuraSpacing {
     val GridGap = S
     val ControlGap = XS
     val HeaderBottom = XS
+    
+    // Component specific
+    val CardInternal = S
+    val ChipHorizontal = S
+    val ChipVertical = XXS
+    val ButtonHeight = 44.dp
+    val CompactButtonHeight = 32.dp
+    val IconSizeSmall = 16.dp
+    val IconSizeMedium = 24.dp
+    val CornerRadiusSmall = 8.dp
+    val CornerRadiusMedium = 16.dp
+    val CornerRadiusLarge = 24.dp
 }

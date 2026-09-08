@@ -51,11 +51,11 @@ fun AuraEngagementTunerCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp)),
+            .clip(RoundedCornerShape(AuraSpacing.CornerRadiusMedium)),
         color = AuraSubtleSurface,
         border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
     ) {
-        Column(modifier = Modifier.padding(AuraSpacing.M)) {
+        Column(modifier = Modifier.padding(AuraSpacing.L)) { // Increased padding
             // Status Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -65,16 +65,18 @@ fun AuraEngagementTunerCard(
                 Column {
                     Text(
                         text = "AI LEARNING STATUS",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Black,
-                        color = AuraMutedSlate,
-                        letterSpacing = 1.sp
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Black,
+                            color = AuraMutedSlate,
+                            letterSpacing = 1.sp
+                        )
                     )
                     Text(
                         text = learningStatus.uppercase(),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Black,
-                        color = if (tasteDNA.isFineTuningEnabled) DiscoveryViolet else AuraMidnight
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            color = if (tasteDNA.isFineTuningEnabled) DiscoveryViolet else AuraMidnight
+                        )
                     )
                 }
             }

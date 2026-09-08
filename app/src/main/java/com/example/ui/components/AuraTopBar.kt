@@ -9,15 +9,18 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AuraCrispWhite
 import com.example.ui.theme.AuraMidnight
+import com.example.ui.theme.AuraMutedSlate
 import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 
@@ -25,6 +28,7 @@ import com.example.ui.theme.AuraSubtleBorder
 fun AuraTopBar(
     title: String,
     modifier: Modifier = Modifier,
+    subtitle: String? = null,
     showLogo: Boolean = true,
     navigationIcon: @Composable (() -> Unit)? = null,
     actions: @Composable (RowScope.() -> Unit)? = null
@@ -38,7 +42,7 @@ fun AuraTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(if (subtitle != null) 64.dp else 56.dp)
                 .padding(horizontal = AuraSpacing.XS),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -50,17 +54,35 @@ fun AuraTopBar(
                 Spacer(modifier = Modifier.width(AuraSpacing.S))
             }
 
-            Text(
-                text = if (showLogo) title else title.uppercase(),
-                color = AuraMidnight,
-                fontWeight = FontWeight.Black,
-                fontSize = 17.sp,
-                letterSpacing = if (showLogo) (-0.5).sp else 1.sp,
-                modifier = Modifier.weight(1f)
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (showLogo) title else title.uppercase(),
+                    color = AuraMidnight,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = if (showLogo) (-0.2).sp else 1.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AuraMutedSlate,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
 
             if (actions != null) {
-                actions()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    actions()
+                }
             } else {
                 IconButton(onClick = { /* Default search action */ }) {
                     Icon(
@@ -72,6 +94,6 @@ fun AuraTopBar(
             }
         }
         // Authoritative Bottom Border
-        HorizontalDivider(color = AuraSubtleBorder, thickness = 1.dp)
+        HorizontalDivider(color = AuraSubtleBorder, thickness = 0.5.dp)
     }
 }
