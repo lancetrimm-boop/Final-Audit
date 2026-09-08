@@ -52,8 +52,30 @@ class RetrievalRouter(
             if (visualProvider != null && visualProvider.isReady()) {
                 try {
                     val vector = request.visualVector
+                    val queryVectors = request.queryVectors
                     val query = request.query
                     when {
+                        // Multi-Vector Union Strategy (A ∪ B ∪ C)
+                        queryVectors != null && queryVectors.isNotEmpty() -> {
+                            val allResults = queryVectors.flatMap { v ->
+                                visualProvider.retrieveVisualCandidates(v, request.limit, 0.15f)
+                            }
+                            
+                            // Deduplicate and re-rank
+                            allResults.groupBy { it.mediaId }
+                                .map { (id, items) ->
+                                    val best = items.minBy { it.rank }
+                                    RankedChannelItem(
+                                        mediaId = id,
+                                        rawScore = items.maxOf { it.rawScore },
+                                        rank = best.rank,
+                                        metadata = best.metadata
+                                    )
+                                }
+                                .sortedWith(compareBy({ it.rank }, { -it.rawScore }))
+                                .take(request.limit * 2)
+                                .mapIndexed { index, item -> item.copy(rank = index + 1) }
+                        }
                         vector != null -> visualProvider.retrieveVisualCandidates(vector, request.limit * 2, 0.15f)
                         query != null && query.isNotBlank() -> visualProvider.retrieveVisualCandidates(query, request.limit * 2, 0.15f)
                         else -> emptyList()

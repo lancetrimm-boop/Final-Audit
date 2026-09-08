@@ -80,29 +80,13 @@ class VideoIntelligenceReranker : MultimodalReranker {
                 explanation += " [Lexical Protection Boost]"
             }
 
-            // 2. Max Frame Similarity Reranking
+            // 2. Multi-Reference Intersection Reranking
             if (frameVectors.containsKey(candidate.mediaId)) {
                 val frames = frameVectors[candidate.mediaId] ?: emptyList()
                 if (frames.isNotEmpty()) {
-                    if (queryVector != null) {
-                        // EXISTING: Single reference frame scoring
-                        val maxSim = calculateMaxSimilarity(queryVector, frames)
-                        val aggregateSim = candidate.channelScores[SearchChannel.SEMANTIC_VISUAL] ?: 0.0f
-                        
-                        explanation += " [Scene Frames: ${frames.size}]"
-                        explanation += " [Aggregate Sim: ${"%.3f".format(aggregateSim)}]"
-
-                        val gain = maxSim - aggregateSim
-                        if (gain > SIMILARITY_GAIN_THRESHOLD) {
-                            val promotion = 1.0 + (gain * (MAX_FRAME_SIMILARITY_BOOST - 1.0) / 0.5)
-                            boostedScore *= promotion.coerceAtMost(MAX_FRAME_SIMILARITY_BOOST.toDouble())
-                            explanation += " [Max Frame Similarity: ${"%.3f".format(maxSim)}] [Max Frame Promotion]"
-                            reasons.add(MatchReason(MatchReasonType.DEEP_SCENE_MATCH, maxSim, "Strong match to a specific scene in this video"))
-                        } else {
-                            explanation += " [Max Frame Similarity: ${"%.3f".format(maxSim)}]"
-                        }
-                    } else if (queryVectors != null && queryVectors.isNotEmpty()) {
-                        // NEW: Multi-reference frame scoring
+                    if (queryVectors != null && queryVectors.size >= 2) {
+                        // PHASE 2: Multi-reference intersection scoring
+                        // We score every visual evidence point (main vector and frames) against the references
                         val maxIntersectionResult = frames.map { frame ->
                             SoftIntersectionScorer.score(frame.vector, queryVectors)
                         }.maxByOrNull { it.score }
@@ -111,7 +95,7 @@ class VideoIntelligenceReranker : MultimodalReranker {
                             val maxSim = maxIntersectionResult.score
                             val aggregateSim = candidate.channelScores[SearchChannel.SEMANTIC_VISUAL] ?: 0.0f
                             
-                            explanation += " [Intersection Frames: ${frames.size}]"
+                            explanation += " [Intersection Points: ${frames.size}]"
                             
                             val gain = maxSim - aggregateSim
                             if (gain > SIMILARITY_GAIN_THRESHOLD) {
@@ -122,6 +106,23 @@ class VideoIntelligenceReranker : MultimodalReranker {
                             } else {
                                 explanation += " [Max Intersection: ${"%.3f".format(maxSim)}]"
                             }
+                        }
+                    } else if (queryVector != null) {
+                        // EXISTING: Single reference frame scoring
+                        val maxSim = calculateMaxSimilarity(queryVector, frames)
+                        val aggregateSim = candidate.channelScores[SearchChannel.SEMANTIC_VISUAL] ?: 0.0f
+                        
+                        explanation += " [Scene Points: ${frames.size}]"
+                        explanation += " [Aggregate Sim: ${"%.3f".format(aggregateSim)}]"
+
+                        val gain = maxSim - aggregateSim
+                        if (gain > SIMILARITY_GAIN_THRESHOLD) {
+                            val promotion = 1.0 + (gain * (MAX_FRAME_SIMILARITY_BOOST - 1.0) / 0.5)
+                            boostedScore *= promotion.coerceAtMost(MAX_FRAME_SIMILARITY_BOOST.toDouble())
+                            explanation += " [Max Sim: ${"%.3f".format(maxSim)}] [Scene Promotion]"
+                            reasons.add(MatchReason(MatchReasonType.DEEP_SCENE_MATCH, maxSim, "Strong match to a specific scene in this video"))
+                        } else {
+                            explanation += " [Max Sim: ${"%.3f".format(maxSim)}]"
                         }
                     }
                 }

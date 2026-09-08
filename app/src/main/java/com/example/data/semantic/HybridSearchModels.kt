@@ -75,10 +75,19 @@ sealed interface SearchRequest {
     val visualVector: FloatArray?
 
     /**
+     * Optional multiple visual reference vectors for intersection search.
+     */
+    val visualVectors: List<FloatArray>?
+
+    /**
      * Optional URI to the reference image (for UI display purposes).
-     * This avoids retaining a heavy Bitmap in the search pipeline.
      */
     val referenceUri: String?
+
+    /**
+     * Optional multiple URIs for multi-visual search.
+     */
+    val referenceUris: List<String>?
 
     /**
      * Identifies the query modality based on implementation type.
@@ -93,19 +102,20 @@ sealed interface SearchRequest {
         override val requestId: String = java.util.UUID.randomUUID().toString().take(8)
     ) : SearchRequest {
         override val visualVector: FloatArray? = null
+        override val visualVectors: List<FloatArray>? = null
         override val referenceUri: String? = null
+        override val referenceUris: List<String>? = null
         override val queryType: SearchQueryType = SearchQueryType.TEXT
     }
 
-    /**
-     * Visual search request using a pre-encoded vector.
-     */
     data class Visual(
         override val visualVector: FloatArray,
         override val referenceUri: String? = null,
         override val requestId: String = java.util.UUID.randomUUID().toString().take(8)
     ) : SearchRequest {
         override val query: String? = null
+        override val visualVectors: List<FloatArray> = listOf(visualVector)
+        override val referenceUris: List<String>? = referenceUri?.let { listOf(it) }
         override val queryType: SearchQueryType = SearchQueryType.VISUAL
     }
 
@@ -115,6 +125,8 @@ sealed interface SearchRequest {
         override val referenceUri: String? = null,
         override val requestId: String = java.util.UUID.randomUUID().toString().take(8)
     ) : SearchRequest {
+        override val visualVectors: List<FloatArray> = listOf(visualVector)
+        override val referenceUris: List<String>? = referenceUri?.let { listOf(it) }
         override val queryType: SearchQueryType = SearchQueryType.COMPOUND
     }
 
@@ -122,11 +134,11 @@ sealed interface SearchRequest {
      * Multiple visual reference intersection (Phase 2).
      */
     data class MultiVisual(
-        val visualVectors: List<FloatArray>,
-        val referenceUris: List<String>,
+        override val visualVectors: List<FloatArray>,
+        override val referenceUris: List<String>,
+        override val query: String? = null, // Allow optional text constraint
         override val requestId: String = java.util.UUID.randomUUID().toString().take(8)
     ) : SearchRequest {
-        override val query: String? = null
         override val visualVector: FloatArray? = visualVectors.firstOrNull()
         override val referenceUri: String? = referenceUris.firstOrNull()
         override val queryType: SearchQueryType = SearchQueryType.MULTI_VISUAL

@@ -86,13 +86,39 @@ class AuraIntelligenceCore(
         }
 
         val mediaIds = topForRerank.map { it.mediaId }
-        val frameVectors = repository.semanticRepresentationRepository?.getFramesForBatch(mediaIds)?.groupBy { it.mediaId } ?: emptyMap()
+        val frames = repository.semanticRepresentationRepository?.getFramesForBatch(mediaIds) ?: emptyList()
+        
+        // AURA REPAIR: Also include main visual representations as "frames" for reranking
+        // This ensures the reranker can perform Soft Intersection on photos and video aggregate vectors too.
+        val descriptor = repository.mobileCLIPProvider?.descriptor
+        val mainReps = if (descriptor != null) {
+            repository.semanticRepresentationRepository?.getCompatibleRepresentations(
+                SemanticRepresentationType.VISUAL,
+                descriptor
+            )?.filter { it.mediaId in mediaIds } ?: emptyList()
+        } else emptyList()
+
+        val allVisualEvidence = mutableListOf<VideoFrameRepresentation>()
+        allVisualEvidence.addAll(frames)
+        mainReps.forEach { rep ->
+            allVisualEvidence.add(VideoFrameRepresentation(
+                id = rep.id,
+                mediaId = rep.mediaId,
+                timestampUs = -1, // Use -1 to denote "Aggregate/Main" representation
+                modelDescriptor = rep.modelDescriptor,
+                documentVersion = rep.documentVersion,
+                dimensionality = rep.dimensionality,
+                vector = rep.vector
+            ))
+        }
+
+        val evidenceMap = allVisualEvidence.groupBy { it.mediaId }
 
         val reranked = reranker.rerank(
             candidates = topForRerank,
             queryVector = queryVector,
             queryVectors = searchRequest.queryVectors, // Support multi-reference if present
-            frameVectors = frameVectors
+            frameVectors = evidenceMap
         )
         
         val rerankedFused = reranked.map { rc ->

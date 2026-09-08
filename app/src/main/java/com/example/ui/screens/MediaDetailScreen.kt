@@ -165,6 +165,7 @@ fun MediaDetailScreen(
     onMicroMoment: ((String, Int) -> Unit)? = null,
     onSeeSimilar: ((MediaItem) -> Unit)? = null,
     onAISkipEvent: ((String, String, Long, Long) -> Unit)? = null,
+    onAddVisualReference: ((MediaItem) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -1400,6 +1401,9 @@ fun MediaDetailScreen(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // 3. Action Button Grid (3x2)
+                val activeReferences by repository.activeVisualReferences.collectAsStateWithLifecycle()
+                val isVisualSearchActive = activeReferences.isNotEmpty()
+
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1409,13 +1413,18 @@ fun MediaDetailScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         PlayerActionButton(
-                            label = "See Similar",
+                            label = if (isVisualSearchActive) "Add to Search" else "See Similar",
                             modifier = Modifier.weight(1f),
                             onClick = {
-                                Log.d("SeeSimilarTrace", "STAGE=UI sourceId=${activeItem.id} title=\"${activeItem.title}\" uri=${activeItem.uriPath}")
-                                onMicroMoment?.invoke(activeItem.id, 5)
+                                if (isVisualSearchActive) {
+                                    onAddVisualReference?.invoke(activeItem)
+                                    Toast.makeText(context, "Added to current search", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Log.d("SeeSimilarTrace", "STAGE=UI sourceId=${activeItem.id} title=\"${activeItem.title}\" uri=${activeItem.uriPath}")
+                                    onMicroMoment?.invoke(activeItem.id, 5)
+                                    onSeeSimilar?.invoke(activeItem)
+                                }
                                 showPlayerMenu = false
-                                onSeeSimilar?.invoke(activeItem)
                             }
                         )
                         PlayerActionButton(

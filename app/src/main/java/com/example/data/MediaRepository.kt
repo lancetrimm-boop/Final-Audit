@@ -521,86 +521,132 @@ class MediaRepository(
         get() = _libraryRepeatMode.value
         set(value) { _libraryRepeatMode.value = value }
 
-    private val _librarySearchRequest = MutableStateFlow<com.example.data.semantic.SearchRequest>(
-        com.example.data.semantic.SearchRequest.Text("")
-    )
-    val librarySearchRequest: StateFlow<com.example.data.semantic.SearchRequest> = _librarySearchRequest.asStateFlow()
+    private val _librarySearchQuery = MutableStateFlow("")
+    private val _activeVisualReferences = MutableStateFlow<List<MediaItem>>(emptyList())
+    
+    /**
+     * Authoritative set of visual reference items for iterative search.
+     */
+    val activeVisualReferences: StateFlow<List<MediaItem>> = _activeVisualReferences.asStateFlow()
+
+    /**
+     * Reactive search request derived from the combined state of text query and visual references.
+     * Established Phase 2 Reference Architecture.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val librarySearchRequest: StateFlow<com.example.data.semantic.SearchRequest> = combine(
+        _librarySearchQuery, _activeVisualReferences
+    ) { query, references -> query to references }
+    .transformLatest { (query, references) ->
+        emit(deriveSearchRequest(query, references))
+    }.stateIn(scope, SharingStarted.Eagerly, com.example.data.semantic.SearchRequest.Text(""))
 
     var librarySearchQuery: String
-        get() = _librarySearchRequest.value.query ?: ""
+        get() = _librarySearchQuery.value
         set(value) {
             android.util.Log.i("SEARCH_REQUEST", "UPDATE_TEXT: \"$value\"")
-            val current = _librarySearchRequest.value
-            val vector = current.visualVector
-            val uri = current.referenceUri
+            _librarySearchQuery.value = value
+        }
 
-            _librarySearchRequest.value = when {
-                value.isBlank() -> {
-                    if (vector != null) {
-                        com.example.data.semantic.SearchRequest.Visual(vector, uri)
-                    } else {
-                        com.example.data.semantic.SearchRequest.Text("")
-                    }
-                }
-                vector != null -> {
-                    com.example.data.semantic.SearchRequest.Compound(value, vector, uri)
-                }
-                else -> {
-                    com.example.data.semantic.SearchRequest.Text(value)
+    private suspend fun deriveSearchRequest(query: String, references: List<MediaItem>): com.example.data.semantic.SearchRequest {
+        if (references.isEmpty()) {
+            return com.example.data.semantic.SearchRequest.Text(query)
+        }
+
+        // Resolve vectors for all active references
+        // Preference: Repositories > Transient Cache
+        val descriptor = mobileCLIPProvider?.descriptor ?: return com.example.data.semantic.SearchRequest.Text(query)
+        
+        val vectors = references.mapNotNull { item ->
+            semanticRepresentationRepository?.getSpecificRepresentation(
+                item.id,
+                SemanticRepresentationType.VISUAL,
+                descriptor
+            )?.vector
+        }
+
+        val uris = references.map { it.uriPath }
+
+        return when {
+            // Fallback to text if no visual vectors resolved yet
+            vectors.isEmpty() -> com.example.data.semantic.SearchRequest.Text(query)
+            
+            // Single Reference Case (Preserves existing pipeline equivalence)
+            vectors.size == 1 -> {
+                if (query.isBlank()) {
+                    com.example.data.semantic.SearchRequest.Visual(vectors[0], uris[0])
+                } else {
+                    com.example.data.semantic.SearchRequest.Compound(query, vectors[0], uris[0])
                 }
             }
+            
+            // Multi-Reference Case (Phase 2 Intersection Search)
+            else -> {
+                com.example.data.semantic.SearchRequest.MultiVisual(vectors, uris, query.ifBlank { null })
+            }
         }
+    }
 
     /**
      * Triggers a visual-to-visual search using a reference image.
-     * Implements safe downsampling and background encoding to minimize memory pressure 
-     * and keep the reactive search request flow lightweight.
-     * 
-     * @param bitmap The reference image bitmap for encoding.
-     * @param uri Optional source URI for UI display.
+     * Established Phase 2 Iterative Architecture: Picking a new image from outside 
+     * resets the visual reference set by default.
      */
     fun searchByImage(bitmap: android.graphics.Bitmap, uri: String? = null) {
-        // Safe resizing to a moderate resolution before putting into flow
-        // MobileCLIP expects 256x256, so 512x512 provides enough detail while being memory-safe
         val scaled = if (bitmap.width > 512 || bitmap.height > 512) {
             android.graphics.Bitmap.createScaledBitmap(bitmap, 512, 512, true)
         } else {
             bitmap
         }
         
-        android.util.Log.i("SEARCH_REQUEST", "UPDATE_IMAGE: bitmap=${scaled.width}x${scaled.height} uri=$uri")
-        
         scope.launch(Dispatchers.Default) {
             try {
                 val provider = mobileCLIPProvider
-                if (provider == null || !provider.isReady()) {
-                    Log.e("MediaRepository", "Visual search failed: MobileCLIP provider not ready.")
-                    return@launch
-                }
+                if (provider == null || !provider.isReady()) return@launch
 
                 val result = provider.generateEmbedding(
-                    mediaId = "query_${System.currentTimeMillis()}",
+                    mediaId = "query_ext_${System.currentTimeMillis()}",
                     input = SemanticInput.ExplicitBitmap(scaled),
                     sourceDataHash = "query_image"
                 )
 
                 if (result is EmbeddingResult.Success) {
-                    val vector = result.representation.vector
-                    
-                    // AURA SEARCH FIX 3.1: Visual search is independent by default.
-                    // It does NOT inherit stale text state. 
-                    // To perform a compound search, the user must explicitly add a text constraint after the image anchor is set.
-                    _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Visual(
-                        visualVector = vector,
-                        referenceUri = uri
+                    val mockItem = MediaItem(
+                        id = result.representation.mediaId,
+                        title = "Reference",
+                        mediaType = "PHOTO",
+                        uriPath = uri ?: "",
+                        imageUrl = uri ?: ""
                     )
+                    // Reset and set as single anchor
+                    _activeVisualReferences.value = listOf(mockItem)
                 }
             } catch (e: Exception) {
-                Log.e("MediaRepository", "Failed to encode reference image for search.", e)
+                Log.e("MediaRepository", "Failed to encode reference image.", e)
             } finally {
-                // Defensive recycle of the temporary scaled bitmap
-                if (scaled !== bitmap) {
-                    scaled.recycle()
+                if (scaled !== bitmap) scaled.recycle()
+            }
+        }
+    }
+
+    /**
+     * Appends a media item to the active visual search reference set.
+     * Reuses existing visual embeddings when available.
+     */
+    fun addVisualReference(item: MediaItem) {
+        if (_activeVisualReferences.value.any { it.id == item.id }) return
+        _activeVisualReferences.value = _activeVisualReferences.value + item
+        
+        // Asynchronously ensure representation exists
+        scope.launch(Dispatchers.Default) {
+            val descriptor = mobileCLIPProvider?.descriptor ?: return@launch
+            val exists = semanticRepresentationRepository?.exists(
+                item.id, SemanticRepresentationType.VISUAL, descriptor
+            ) == true
+            
+            if (!exists) {
+                applicationContext?.let { context ->
+                    visualIndexingService?.indexVisual(context, item)
                 }
             }
         }
@@ -610,70 +656,53 @@ class MediaRepository(
      * Removes the visual anchor while preserving any existing text constraint.
      */
     fun removeVisualAnchor() {
-        val current = _librarySearchRequest.value
-        val text = current.query ?: ""
-        _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Text(text)
+        _activeVisualReferences.value = emptyList()
+    }
+
+    fun removeVisualReference(index: Int) {
+        val current = _activeVisualReferences.value
+        if (index in current.indices) {
+            _activeVisualReferences.value = current.filterIndexed { i, _ -> i != index }
+        }
     }
 
     /**
-     * Clears any active search (text or visual) and returns to standard library view.
+     * Repaired Multi-Select Search Entry Point.
+     * Transitions from a selection batch to an iterative reference set.
      */
-    fun getIntelligentFavorites(limit: Int = 20): List<com.example.data.intelligence.IntelligentSection> {
-        val favs = _mediaItems.value.filter { it.isFavorite }.sortedByDescending { it.rating }
-        return listOf(
-            com.example.data.intelligence.IntelligentSection(
-                title = "Your Favorites",
-                subtitle = "Hand-picked by you",
-                items = favs.take(limit)
-            )
-        )
-    }
-
-    fun setAutoScrollSpeed(speed: com.example.data.AutoScrollSpeed) {
-        libraryPreferences?.setAutoScrollSpeed(speed)
-    }
-
-    fun setGridDensity(density: Float) {
-        libraryPreferences?.setGridDensity(density)
-    }
-
     fun searchByMultipleImages(items: List<MediaItem>) {
-        val uris = items.map { Uri.parse(it.uriPath) }
-        // Implementation stub for UI contract
-        Log.i("MediaRepository", "Multiple image search requested: ${uris.size} items")
-        if (uris.isNotEmpty()) {
-            val context = applicationContext ?: return
-            val uri = uris.first()
-            try {
-                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
-                } else {
-                    MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+        Log.i("MediaRepository", "Executing multi-visual search for ${items.size} items.")
+        // Phase 2 Fix: Set batch as the current authoritative reference set
+        _activeVisualReferences.value = items
+        
+        // Ensure all batch items have embeddings
+        items.forEach { item ->
+            scope.launch(Dispatchers.Default) {
+                val descriptor = mobileCLIPProvider?.descriptor ?: return@launch
+                val exists = semanticRepresentationRepository?.exists(
+                    item.id, SemanticRepresentationType.VISUAL, descriptor
+                ) == true
+                if (!exists) {
+                    applicationContext?.let { context ->
+                        visualIndexingService?.indexVisual(context, item)
+                    }
                 }
-                searchByImage(bitmap, uri.toString())
-            } catch (e: Exception) {
-                Log.e("MediaRepository", "Failed to load image for multi-visual search", e)
             }
         }
     }
 
     fun clearSearch() {
-        _librarySearchRequest.value = com.example.data.semantic.SearchRequest.Text("")
+        _librarySearchQuery.value = ""
+        _activeVisualReferences.value = emptyList()
     }
 
-    fun removeVisualReference(index: Int) {
-        // Implementation stub for UI contract
-        removeVisualAnchor()
-    }
-
-    @OptIn(kotlinx.coroutines.FlowPreview::class)
-    private val librarySearchRequestFlow: Flow<com.example.data.semantic.SearchRequest> = _librarySearchRequest
+    @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val librarySearchRequestFlow: Flow<com.example.data.semantic.SearchRequest> = librarySearchRequest
         .debounce { request ->
-            // Debounce if text query is present (Text or Compound)
+            // Debounce if text query is present (Text or Compound or MultiVisual with query)
             // Allow pure visual searches to trigger immediately
-            if (request is com.example.data.semantic.SearchRequest.Visual) 0L else 300L
+            if (request.query.isNullOrBlank() && request !is com.example.data.semantic.SearchRequest.Text) 0L else 300L
         }
-        .distinctUntilChanged()
 
     private val _librarySessionSeed = MutableStateFlow(System.currentTimeMillis())
     var librarySessionSeed: Long

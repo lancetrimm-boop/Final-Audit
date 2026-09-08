@@ -8,6 +8,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
@@ -65,6 +66,7 @@ fun LibraryScreen(
     val standardSort by repository.selectedStandardSort.collectAsStateWithLifecycle()
     val intelligentSort by repository.selectedIntelligentSort.collectAsStateWithLifecycle()
     val searchRequest by repository.librarySearchRequest.collectAsStateWithLifecycle()
+    val activeVisualReferences by repository.activeVisualReferences.collectAsStateWithLifecycle()
     var isSearchActive by remember { mutableStateOf(false) }
 
     // Multi-select state
@@ -250,6 +252,7 @@ fun LibraryScreen(
 
                 SelectionHeader(
                     selectedCount = selectedIds.size,
+                    isSearchActive = isSearchActive,
                     onDelete = {
                         if (deleteLauncher != null) {
                             val itemsToDelete = selectedIds.mapNotNull { mediaItemsMap[it] }
@@ -272,18 +275,20 @@ fun LibraryScreen(
                             if (selectedItems.size >= 2) {
                                 repository.searchByMultipleImages(selectedItems)
                             } else {
-                                val mediaItem = selectedItems[0]
-                                coroutineScope.launch {
-                                    val bitmap = MediaThumbnailFetcher.getThumbnail(context, mediaItem.uriPath)
-                                    if (bitmap != null) {
-                                        repository.searchByImage(bitmap, mediaItem.uriPath)
-                                    }
-                                }
+                                // AURA REPAIR: Use stable identity-based addition instead of bitmap extraction
+                                repository.clearSearch() // Start fresh for "See Similar"
+                                repository.addVisualReference(selectedItems[0])
                             }
                             isSelectionMode = false
                             selectedIds = emptySet()
                             isSearchActive = true
                         }
+                    },
+                    onAddToSearch = {
+                        val selectedItems = selectedIds.mapNotNull { mediaItemsMap[it] }
+                        selectedItems.forEach { repository.addVisualReference(it) }
+                        isSelectionMode = false
+                        selectedIds = emptySet()
                     },
                     onCancel = {
                         isSelectionMode = false
@@ -293,14 +298,12 @@ fun LibraryScreen(
             } else if (isSearchActive) {
                 SearchHeader(
                     searchRequest = searchRequest,
+                    activeReferences = activeVisualReferences,
                     onQueryChange = { 
                         repository.librarySearchQuery = it
                     },
                     onImageSearchClick = {
                         visualSearchLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                    onRemoveAnchor = {
-                        repository.removeVisualAnchor()
                     },
                     onRemoveReference = {
                         repository.removeVisualReference(it)
@@ -536,9 +539,11 @@ fun LibraryScreen(
 @Composable
 private fun SelectionHeader(
     selectedCount: Int,
+    isSearchActive: Boolean,
     onDelete: () -> Unit,
     onCompare: () -> Unit,
     onSearchSimilar: () -> Unit,
+    onAddToSearch: () -> Unit,
     onCancel: () -> Unit
 ) {
     Row(
@@ -566,6 +571,28 @@ private fun SelectionHeader(
         }
         
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (isSearchActive) {
+                Surface(
+                    onClick = onAddToSearch,
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = AuraSpacing.S),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "ADD TO SEARCH",
+                            color = DiscoveryViolet,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(AuraSpacing.S))
+            }
+
             if (selectedCount == 1) {
                 IconButton(onClick = onSearchSimilar, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.ImageSearch, contentDescription = "Search Similar", tint = Color.White)
@@ -630,9 +657,9 @@ private fun SelectionHeader(
 @Composable
 private fun SearchHeader(
     searchRequest: SearchRequest,
+    activeReferences: List<MediaItem>,
     onQueryChange: (String) -> Unit,
     onImageSearchClick: () -> Unit,
-    onRemoveAnchor: () -> Unit,
     onRemoveReference: (Int) -> Unit,
     onExit: () -> Unit
 ) {
@@ -646,7 +673,7 @@ private fun SearchHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp) // Refined height
+                .height(64.dp)
                 .padding(horizontal = AuraSpacing.S),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -654,66 +681,66 @@ private fun SearchHeader(
                 Icon(Icons.Default.Close, contentDescription = "Exit Search", tint = AuraMidnight)
             }
             
-            if (searchRequest is SearchRequest.MultiVisual) {
+            if (activeReferences.isNotEmpty()) {
                 LazyRow(
-                    modifier = Modifier.padding(horizontal = AuraSpacing.XXS).widthIn(max = 160.dp),
+                    modifier = Modifier
+                        .padding(horizontal = AuraSpacing.XXS)
+                        .widthIn(max = 240.dp), // Increased slightly for better multi-visibility
                     verticalAlignment = Alignment.CenterVertically,
                     contentPadding = PaddingValues(end = 4.dp)
                 ) {
-                    itemsIndexed(searchRequest.referenceUris) { index, uri ->
-                        Box(modifier = Modifier.padding(end = 4.dp)) {
+                    itemsIndexed(activeReferences, key = { _, item -> item.id }) { index, item ->
+                        Box(modifier = Modifier.padding(end = 6.dp)) {
                             Surface(
-                                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(AuraSpacing.CornerRadiusSmall)),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(AuraSpacing.CornerRadiusSmall)),
                                 color = AuraSubtleBorder,
                                 onClick = { onRemoveReference(index) }
                             ) {
                                 AuraMediaThumbnail(
-                                    itemId = "anchor_$index",
-                                    mediaType = "VIDEO", // Force extraction path
-                                    imageUrl = "",
-                                    uriPath = uri.toString(),
+                                    itemId = item.id,
+                                    mediaType = item.mediaType,
+                                    imageUrl = item.imageUrl,
+                                    uriPath = item.uriPath,
                                     title = "",
-                                    modifier = Modifier.fillMaxSize()
+                                    modifier = Modifier.fillMaxSize(),
+                                    locationTag = "search_header"
                                 )
                                 Box(
-                                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.25f)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.Close, 
+                                        contentDescription = "Remove", 
+                                        tint = Color.White, 
+                                        modifier = Modifier.size(14.dp)
+                                    )
                                 }
                             }
                         }
                     }
-                }
-            } else if (searchRequest is SearchRequest.Visual || searchRequest is SearchRequest.Compound) {
-                val visualUri = when (searchRequest) {
-                    is SearchRequest.Visual -> searchRequest.referenceUri
-                    is SearchRequest.Compound -> searchRequest.referenceUri
-                    else -> null
-                }
-                Box(modifier = Modifier.padding(horizontal = AuraSpacing.XS)) {
-                    Surface(
-                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(AuraSpacing.CornerRadiusSmall)),
-                        color = AuraSubtleBorder,
-                        onClick = onRemoveAnchor
-                    ) {
-                        if (visualUri != null) {
-                            AuraMediaThumbnail(
-                                itemId = visualUri, // Use URI as ID for stable unique caching
-                                mediaType = "VIDEO", // Force extraction path
-                                imageUrl = "",
-                                uriPath = visualUri,
-                                title = "",
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.padding(8.dp))
-                        }
-                        Box(
-                            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
+                    
+                    item {
+                        Surface(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(AuraSpacing.CornerRadiusSmall))
+                                .border(1.dp, AuraSubtleBorder, RoundedCornerShape(AuraSpacing.CornerRadiusSmall)),
+                            color = Color.Transparent,
+                            onClick = onImageSearchClick
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Add, 
+                                    contentDescription = "Add Reference", 
+                                    tint = DiscoveryViolet, 
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -722,6 +749,7 @@ private fun SearchHeader(
             val query = when (searchRequest) {
                 is SearchRequest.Text -> searchRequest.query ?: ""
                 is SearchRequest.Compound -> searchRequest.query ?: ""
+                is SearchRequest.MultiVisual -> searchRequest.query ?: ""
                 else -> ""
             }
             
@@ -731,8 +759,8 @@ private fun SearchHeader(
                 modifier = Modifier.weight(1f),
                 placeholder = { 
                     Text(
-                        if (searchRequest !is SearchRequest.Text) "Add constraint..." else "Search library...", 
-                        style = MaterialTheme.typography.bodyLarge, // Standardized
+                        if (activeReferences.isNotEmpty()) "Add constraint..." else "Search library...", 
+                        style = MaterialTheme.typography.bodyLarge,
                         color = AuraMutedSlate 
                     ) 
                 },
@@ -747,7 +775,7 @@ private fun SearchHeader(
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = AuraMidnight, fontWeight = FontWeight.Bold),
                 trailingIcon = {
-                    if (searchRequest is SearchRequest.Text) {
+                    if (activeReferences.isEmpty()) {
                         IconButton(onClick = onImageSearchClick, modifier = Modifier.size(40.dp)) {
                             Icon(Icons.Default.ImageSearch, contentDescription = "Search by Image", tint = DiscoveryViolet, modifier = Modifier.size(22.dp))
                         }

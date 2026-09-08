@@ -514,6 +514,9 @@ fun AuraMainContent(repository: MediaRepository) {
                     },
                     onAISkipEvent = { mediaId, eventType, fromPos, toPos ->
                         repository.recordAISkipEvent(mediaId, eventType, fromPos, toPos)
+                    },
+                    onAddVisualReference = { item ->
+                        repository.addVisualReference(item)
                     }
                 )
             } else {
