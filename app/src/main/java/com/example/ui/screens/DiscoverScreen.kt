@@ -100,6 +100,7 @@ import com.example.ui.theme.AuraCrispWhite
 import com.example.ui.theme.AuraMidnight
 import com.example.ui.theme.AuraMutedSlate
 import com.example.ui.theme.AuraSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
 import com.example.ui.theme.DiscoveryGradient
@@ -179,17 +180,12 @@ fun DiscoverScreen(
                             is DiscoverFeedState.Loading -> {
                                 LazyColumn(
                                     modifier = Modifier.fillMaxSize(),
-                                    contentPadding = PaddingValues(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                                    contentPadding = PaddingValues(horizontal = AuraSpacing.M, vertical = AuraSpacing.XS),
+                                    verticalArrangement = Arrangement.spacedBy(AuraSpacing.M)
                                 ) {
-                                    item {
-                                        com.example.ui.components.AuraSkeletonTile(
-                                            modifier = Modifier.fillMaxWidth().height(300.dp)
-                                        )
-                                    }
                                     items(3) {
                                         com.example.ui.components.AuraSkeletonTile(
-                                            modifier = Modifier.fillMaxWidth().height(250.dp)
+                                            modifier = Modifier.fillMaxWidth()
                                         )
                                     }
                                 }
@@ -329,6 +325,22 @@ fun ObsessionDetailView(
         }
     }
 
+    // AURA REPAIR: Viewport-aware preview coordination for Discover Detail
+    LaunchedEffect(listState, batch.items) {
+        snapshotFlow { 
+            val layoutInfo = listState.layoutInfo
+            val visibleItems = layoutInfo.visibleItemsInfo
+            val visibleIds = visibleItems.mapNotNull { it.key as? String }
+            val allIds = batch.items.map { it.id }
+            val firstIdx = listState.firstVisibleItemIndex
+            Triple(visibleIds, allIds, firstIdx to listState.isScrollInProgress)
+        }.collect { (visible, all, scrollState) ->
+            val (firstIdx, scrolling) = scrollState
+            com.example.ui.components.PreviewCoordinator.updateWindow(visible, all, firstIdx)
+            com.example.ui.components.PreviewCoordinator.setScrollingFast(scrolling)
+        }
+    }
+
     // Record exposures for the batch items as they appear
     LaunchedEffect(batch.items) {
         if (batch.items.isNotEmpty()) {
@@ -364,35 +376,37 @@ fun EndOfBatchView(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(32.dp),
+            .padding(AuraSpacing.XL),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
             imageVector = Icons.Outlined.AutoAwesome,
             contentDescription = null,
-            tint = DiscoveryViolet.copy(alpha = 0.6f),
-            modifier = Modifier.size(48.dp)
+            tint = DiscoveryViolet.copy(alpha = 0.5f),
+            modifier = Modifier.size(40.dp)
         )
         
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.M))
         
         Text(
             text = "End of current batch",
             style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
             color = AuraMidnight
         )
         
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XS))
         
         Text(
             text = "Aura has analyzed all candidates in this obsession. Would you like more or something different?",
             style = MaterialTheme.typography.bodySmall,
             color = AuraSlate,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            lineHeight = 16.sp
         )
         
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.L))
         
         if (canExpand) {
             AuraButton(
@@ -400,7 +414,7 @@ fun EndOfBatchView(
                 onClick = onExpand,
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.S))
         }
         
         AuraButton(
@@ -409,10 +423,19 @@ fun EndOfBatchView(
             modifier = Modifier.fillMaxWidth()
         )
         
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.S))
         
-        androidx.compose.material3.TextButton(onClick = onBackToObsessions) {
-            Text("BACK TO DISCOVER", color = AuraSlate, fontWeight = FontWeight.Bold)
+        androidx.compose.material3.TextButton(
+            onClick = onBackToObsessions,
+            contentPadding = PaddingValues(AuraSpacing.XS)
+        ) {
+            Text(
+                "BACK TO DISCOVER", 
+                style = MaterialTheme.typography.labelLarge,
+                color = AuraMutedSlate, 
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp
+            )
         }
     }
 }
@@ -430,13 +453,13 @@ fun ImmersiveMediaCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(24.dp))
+            .padding(horizontal = AuraSpacing.M)
+            .clip(RoundedCornerShape(20.dp))
             .background(AuraSubtleSurface)
             .clickable { onClick() }
-            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(24.dp))
+            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(20.dp))
     ) {
-        Box(modifier = Modifier.fillMaxWidth().aspectRatio(if (isLandscape) 2.5f else 1.2f)) {
+        Box(modifier = Modifier.fillMaxWidth().aspectRatio(if (isLandscape) 2.5f else 1.3f)) {
             AuraMediaThumbnail(
                 itemId = item.id,
                 mediaType = item.mediaType,
@@ -451,45 +474,46 @@ fun ImmersiveMediaCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .padding(AuraSpacing.XS),
                 horizontalArrangement = Arrangement.End
             ) {
                 Surface(
                     onClick = onFavoriteToggle,
                     shape = CircleShape,
                     color = Color.Black.copy(alpha = 0.3f),
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.Favorite,
                             contentDescription = "Favorite",
                             tint = if (item.isFavorite) Color.Red else Color.White,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
         }
 
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
             Text(
                 text = item.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Black,
                 color = AuraMidnight,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             
             if (item.aiSummary.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = item.aiSummary,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = AuraSlate,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 16.sp
                 )
             }
         }
@@ -533,11 +557,28 @@ fun DiscoveryFeed(
             }
     }
 
+    // AURA REPAIR: Viewport-aware preview coordination for Discover Feed
+    LaunchedEffect(listState, obsessions) {
+        snapshotFlow { 
+            val layoutInfo = listState.layoutInfo
+            val visibleItems = layoutInfo.visibleItemsInfo
+            // For obsession cards, the "media" is often the first preview item
+            val visibleIds = visibleItems.mapNotNull { obsessions.getOrNull(it.index)?.previewItems?.firstOrNull()?.id }
+            val allIds = obsessions.mapNotNull { it.previewItems.firstOrNull()?.id }
+            val firstIdx = listState.firstVisibleItemIndex
+            Triple(visibleIds, allIds, firstIdx to listState.isScrollInProgress)
+        }.collect { (visible, all, scrollState) ->
+            val (firstIdx, scrolling) = scrollState
+            com.example.ui.components.PreviewCoordinator.updateWindow(visible, all, firstIdx)
+            com.example.ui.components.PreviewCoordinator.setScrollingFast(scrolling)
+        }
+    }
+
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 48.dp),
-        verticalArrangement = Arrangement.spacedBy(32.dp)
+        contentPadding = PaddingValues(top = AuraSpacing.XS, bottom = AuraSpacing.XXL),
+        verticalArrangement = Arrangement.spacedBy(AuraSpacing.M)
     ) {
         items(
             items = obsessions,
@@ -551,24 +592,24 @@ fun DiscoveryFeed(
         }
 
         item {
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             
             Text(
                 text = "Intelligence Tuning",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Black,
                 color = AuraMidnight,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                modifier = Modifier.padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XS)
             )
             
-            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+            Box(modifier = Modifier.padding(horizontal = AuraSpacing.M)) {
                 Column {
                     DiscoveryPolicyControl(
                         policy = discoveryPolicy,
                         onPolicyChange = { repository.updateDiscoveryPolicy(it) }
                     )
                     
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(AuraSpacing.M))
                     
                     AuraEngagementTunerCard(
                         tasteDNA = tasteDNA,
@@ -588,7 +629,7 @@ fun DiscoveryFeed(
                 }
             }
             
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XL))
         }
     }
 
@@ -645,26 +686,26 @@ fun ObsessionCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = AuraSpacing.M)
             .graphicsLayer { 
                 this.alpha = alpha 
                 this.scaleX = scale
                 this.scaleY = scale
             }
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(AuraCrispWhite)
             .clickable(
                 onClickLabel = "Open ${obsession.title}",
                 onClick = onClick
             )
-            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(24.dp))
+            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(20.dp))
     ) {
         // Large Media Preview
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(cardAspectRatio)
-                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
         ) {
             AuraMediaThumbnail(
                 itemId = mainItem.id,
@@ -690,25 +731,25 @@ fun ObsessionCard(
 
         // Details
         Column(
-            modifier = Modifier.padding(24.dp)
+            modifier = Modifier.padding(AuraSpacing.M)
         ) {
             Text(
                 text = obsession.title.uppercase(),
                 color = DiscoveryViolet,
                 fontWeight = FontWeight.Black,
-                fontSize = 13.sp,
-                letterSpacing = 0.5.sp
+                fontSize = 11.sp,
+                letterSpacing = 1.sp
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = obsession.subtitle,
                 color = AuraMidnight,
                 fontWeight = FontWeight.Bold,
-                fontSize = 24.sp,
-                lineHeight = 30.sp
+                fontSize = 20.sp,
+                lineHeight = 24.sp
             )
             
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -716,12 +757,12 @@ fun ObsessionCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Secondary Previews
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
                     obsession.previewItems.drop(1).take(3).forEach { item ->
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(AuraSubtleBorder)
                         ) {
                             AsyncImage(
@@ -737,7 +778,7 @@ fun ObsessionCard(
                 AuraButton(
                     text = "EXPLORE",
                     onClick = onClick,
-                    modifier = Modifier.height(40.dp).padding(start = 12.dp)
+                    modifier = Modifier.height(36.dp).padding(start = AuraSpacing.S)
                 )
             }
         }
@@ -749,31 +790,33 @@ fun EmptyDiscoverView(onScanAndImport: (() -> Unit)?) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(AuraSpacing.XL),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
             imageVector = Icons.Outlined.AutoAwesome,
             contentDescription = null,
-            tint = AuraMutedSlate.copy(alpha = 0.4f),
-            modifier = Modifier.size(64.dp)
+            tint = AuraMutedSlate.copy(alpha = 0.3f),
+            modifier = Modifier.size(56.dp)
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.M))
         Text(
             text = "Your Intelligence Awaits",
             style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Black,
             color = AuraMidnight,
             textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XS))
         Text(
             text = "Aura needs more local content to generate obsessions. Scan your device or import media to start discovering.",
             style = MaterialTheme.typography.bodyMedium,
             color = AuraSlate,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            lineHeight = 20.sp
         )
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.L))
         AuraButton(
             text = "SCAN FOR MEDIA",
             onClick = { onScanAndImport?.invoke() }

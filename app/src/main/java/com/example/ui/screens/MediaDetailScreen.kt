@@ -48,6 +48,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.statusBarsPadding
+import com.example.ui.theme.AuraSpacing
+
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -872,7 +875,8 @@ fun MediaDetailScreen(
                                 colors = listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)
                             )
                         )
-                        .padding(horizontal = 16.dp, vertical = 24.dp),
+                        .statusBarsPadding()
+                        .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.M),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
@@ -936,14 +940,14 @@ fun MediaDetailScreen(
                                 colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
                             )
                         )
-                        .padding(16.dp),
+                        .padding(AuraSpacing.M),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     if (isVideo && durationMs > 0f) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
+                                .padding(horizontal = AuraSpacing.XXS),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -977,7 +981,7 @@ fun MediaDetailScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(AuraSpacing.XS))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -986,7 +990,7 @@ fun MediaDetailScreen(
                     ) {
                         // 1. Camera / Screenshot
                         IconButton(onClick = { captureAndSaveScreenshot(context, activeItem, currentPositionMs.toLong()) }) {
-                            Icon(imageVector = Icons.Default.PhotoCamera, contentDescription = "Capture", tint = Color.White, modifier = Modifier.size(20.dp))
+                            Icon(imageVector = Icons.Default.PhotoCamera, contentDescription = "Capture", tint = Color.White, modifier = Modifier.size(18.dp))
                         }
 
                         // 2. AI Skip Backward
@@ -1017,7 +1021,7 @@ fun MediaDetailScreen(
                             },
                             modifier = Modifier.testTag("detail_ai_skip_back_button")
                         ) {
-                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "AI Skip Back", tint = Color.White, modifier = Modifier.size(20.dp))
+                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "AI Skip Back", tint = Color.White, modifier = Modifier.size(18.dp))
                         }
 
                         // 3. Previous Button
@@ -1030,14 +1034,14 @@ fun MediaDetailScreen(
                                 imageVector = Icons.Default.SkipPrevious,
                                 contentDescription = "Previous",
                                 tint = if (playlistState?.hasPrevious == true) Color.White else Color.White.copy(alpha = 0.3f),
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
 
                         // 4. Large Play/Pause (Gradient Circle)
                         Box(
                             modifier = Modifier
-                                .size(56.dp)
+                                .size(48.dp)
                                 .clip(CircleShape)
                                 .background(DiscoveryGradient)
                                 .clickable {
@@ -1049,7 +1053,7 @@ fun MediaDetailScreen(
                                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = if (isPlaying) "Pause" else "Play",
                                 tint = Color.White,
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(28.dp)
                             )
                         }
 
@@ -1063,7 +1067,7 @@ fun MediaDetailScreen(
                                 imageVector = Icons.Default.SkipNext,
                                 contentDescription = "Next",
                                 tint = if (playlistState?.hasNext == true) Color.White else Color.White.copy(alpha = 0.3f),
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
 
@@ -1097,7 +1101,7 @@ fun MediaDetailScreen(
                             },
                             modifier = Modifier.testTag("detail_ai_skip_forward_button")
                         ) {
-                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "AI Skip Forward", tint = Color.White, modifier = Modifier.size(20.dp))
+                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "AI Skip Forward", tint = Color.White, modifier = Modifier.size(18.dp))
                         }
 
                         // 7. Video Loop Toggle (Farthest Right)
@@ -1116,8 +1120,8 @@ fun MediaDetailScreen(
                             Icon(
                                 imageVector = if (isLoopEnabled) Icons.Default.RepeatOne else Icons.Default.Repeat,
                                 contentDescription = "Toggle Loop",
-                                tint = if (isLoopEnabled) AuraPurple else Color.White,
-                                modifier = Modifier.size(20.dp)
+                                tint = if (isLoopEnabled) AuraPurple.copy(alpha = 0.9f) else Color.White,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }

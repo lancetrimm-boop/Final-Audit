@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AuraCrispWhite
 import com.example.ui.theme.AuraMidnight
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 
 @Composable
@@ -37,24 +38,24 @@ fun AuraTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
-                .padding(horizontal = 16.dp),
+                .height(56.dp)
+                .padding(horizontal = AuraSpacing.XS),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (navigationIcon != null) {
                 navigationIcon()
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(AuraSpacing.XS))
             } else if (showLogo) {
-                AuraLogoIcon(size = 28.dp)
-                Spacer(modifier = Modifier.width(12.dp))
+                AuraLogoIcon(size = 24.dp)
+                Spacer(modifier = Modifier.width(AuraSpacing.S))
             }
 
             Text(
                 text = if (showLogo) title else title.uppercase(),
                 color = AuraMidnight,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                letterSpacing = if (showLogo) 0.sp else 1.sp,
+                fontWeight = FontWeight.Black,
+                fontSize = 17.sp,
+                letterSpacing = if (showLogo) (-0.5).sp else 1.sp,
                 modifier = Modifier.weight(1f)
             )
 

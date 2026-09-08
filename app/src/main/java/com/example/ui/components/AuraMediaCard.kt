@@ -46,12 +46,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -75,7 +70,6 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -96,6 +90,7 @@ import com.example.ui.theme.AuraMutedSlate
 import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraStarGold
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
@@ -161,7 +156,7 @@ fun AuraMediaTile(
                     }
                 )
             }
-            .clip(RoundedCornerShape(4.dp)) // Minimal rounding for "Wall of Media" look
+            .clip(RoundedCornerShape(8.dp)) // Refined rounding
             .background(AuraSubtleSurface)
             .testTag("media_tile_${item.id}")
     ) {
@@ -183,14 +178,14 @@ fun AuraMediaTile(
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(6.dp),
-                color = Color.Black.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(2.dp)
+                    .padding(AuraSpacing.XXS),
+                color = Color.Black.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(4.dp)
             ) {
                 Text(
                     text = item.duration,
                     color = Color.White,
-                    fontSize = 9.sp,
+                    fontSize = 8.5.sp,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                 )
@@ -266,6 +261,9 @@ fun AuraMediaThumbnail(
     
     // AURA REPAIR: Identity-safe state to prevent recycled cards from showing stale thumbnails
     var thumbnailResult by remember(itemId) { mutableStateOf<ThumbnailResult?>(null) }
+    
+    // AURA REPAIR: Track if video is actually rendering to prevent black frame gap
+    var isVideoRendering by remember(itemId) { mutableStateOf(false) }
 
     LaunchedEffect(itemId, uriPath, imageUrl, convertedUri) {
         // Preference: Converted > Original > Remote
@@ -294,6 +292,7 @@ fun AuraMediaThumbnail(
     ) {
         val result = thumbnailResult
         
+        // LAYER 1: Static Thumbnail (Always underneath as a safety baseline)
         when {
             result == null -> {
                 // State 1: Loading (Subtle gradient shimmer)
@@ -354,15 +353,21 @@ fun AuraMediaThumbnail(
             }
         }
 
-        if (isVideo && thumbnailResult?.bitmap != null && thumbnailResult?.itemId == itemId) {
+        // LAYER 2: Video Preview (Becomes visible only when first frame is rendered)
+        if (isVideo && result?.bitmap != null && result.itemId == itemId) {
             VideoTilePreview(
                 itemId = itemId,
                 videoUri = convertedUri ?: uriPath,
                 imageUrl = imageUrl,
+                onFirstFrameRendered = { isVideoRendering = true },
                 locationTag = locationTag,
                 modifier = Modifier
                     .fillMaxSize()
                     .clipToBounds()
+                    .graphicsLayer { 
+                        // Cross-fade to video once it's actually ready
+                        alpha = if (isVideoRendering) 1f else 0f 
+                    }
             )
         }
     }
@@ -618,12 +623,15 @@ fun AuraContinueWatchingCard(
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object VideoPreviewPool {
-    private const val MAX_ACTIVE_PREVIEWS = 3 // Reduced for performance and thermal stability
+    private const val MAX_ACTIVE_PREVIEWS = 10 // Increased for 10-item rolling window
     
     // Key is "itemId_locationTag" to prevent player stealing between different UI contexts
     private val activePlayers = mutableMapOf<String, ExoPlayer>()
     private val accessOrder = mutableListOf<String>()
     private val idlePlayers = mutableListOf<ExoPlayer>()
+
+    // Tracks current priority of each active player for adaptive eviction
+    private val playerPriorities = mutableMapOf<String, PreviewPriority>()
 
     // Track listeners to avoid leaks during reuse
     private val playerListeners = mutableMapOf<ExoPlayer, Player.Listener>()
@@ -634,36 +642,72 @@ object VideoPreviewPool {
         itemId: String, 
         locationTag: String,
         uriString: String, 
-        imageUrl: String = ""
+        imageUrl: String = "",
+        priority: PreviewPriority = PreviewPriority.VISIBLE,
+        onFirstFrameRendered: (() -> Unit)? = null
     ): ExoPlayer? {
         val poolKey = "${itemId}_$locationTag"
         
+        // Update priority if already active
+        playerPriorities[poolKey] = priority
+
         if (activePlayers.containsKey(poolKey)) {
             accessOrder.remove(poolKey)
             accessOrder.add(poolKey)
             val existing = activePlayers[poolKey]
             existing?.apply {
+                // If reusing an existing player for the same key, update the listener to the new callback
+                playerListeners[this]?.let { removeListener(it) }
+                val listener = createListener(itemId, this, onFirstFrameRendered)
+                addListener(listener)
+                playerListeners[this] = listener
+
                 repeatMode = Player.REPEAT_MODE_ONE
+                
+                // RESOURCE OPTIMIZATION: Only play if VISIBLE. Paused NEARBY saves rendering/decoder cycles.
+                playWhenReady = (priority == PreviewPriority.VISIBLE)
+                
                 if (playbackState == Player.STATE_ENDED) {
                     seekTo(0)
-                    playWhenReady = true
-                } else if (!isPlaying && playWhenReady) {
-                    playWhenReady = true
                 }
             }
             return existing
         }
 
-        // Performance Fix: Reuse players from idle pool or evict oldest active
+        // Adaptive Preparation: If scrolling fast and priority is not VISIBLE, defer
+        val isFast = PreviewCoordinator.isScrollingFast.value
+        if (isFast && priority != PreviewPriority.VISIBLE) {
+            return null
+        }
+
+        // Performance Fix: Reuse players from idle pool or evict lowest priority active
         val player = when {
             idlePlayers.isNotEmpty() -> idlePlayers.removeAt(0)
             activePlayers.size < MAX_ACTIVE_PREVIEWS -> buildNewPlayer(context)
-            accessOrder.isNotEmpty() -> {
-                val oldestKey = accessOrder.removeAt(0)
-                activePlayers.remove(oldestKey)
+            else -> {
+                // EVICTION STRATEGY: Find the lowest priority item to evict
+                val priorityNearby = PreviewCoordinator.priorityNearbyIds.value
+                val keyToEvict = accessOrder.firstOrNull { playerPriorities[it] == PreviewPriority.NONE }
+                    ?: accessOrder.firstOrNull { 
+                        playerPriorities[it] == PreviewPriority.NEARBY && 
+                        !priorityNearby.contains(it.substringBeforeLast("_"))
+                    }
+                    ?: accessOrder.firstOrNull { playerPriorities[it] == PreviewPriority.NEARBY }
+                    ?: accessOrder.first() // Fallback to LRU if all are VISIBLE
+
+                accessOrder.remove(keyToEvict)
+                playerPriorities.remove(keyToEvict)
+                val evictedPlayer = activePlayers.remove(keyToEvict)
+                evictedPlayer?.apply {
+                    stop()
+                    clearMediaItems()
+                    idlePlayers.add(this)
+                }
+                
+                // Now that we've freed up a slot (pushed to idlePlayers), pick it up
+                if (idlePlayers.isNotEmpty()) idlePlayers.removeAt(0) else buildNewPlayer(context)
             }
-            else -> buildNewPlayer(context)
-        } ?: buildNewPlayer(context)
+        }
         
         return try {
             player.apply {
@@ -679,21 +723,7 @@ object VideoPreviewPool {
                 
                 // Replace listener safely
                 playerListeners[this]?.let { removeListener(it) }
-                val listener = object : Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == Player.STATE_ENDED) {
-                            seekTo(0)
-                            playWhenReady = true
-                        }
-                    }
-
-                    override fun onPlayerError(error: PlaybackException) {
-                        Log.e("VideoPreviewPool", "Preview error for $itemId: ${error.message}", error)
-                        val repo = com.example.data.MediaRepository.instance
-                        val mediaItem = repo.getMediaItemById(itemId)
-                        repo.recordPlaybackError(error, this@apply, mediaItem)
-                    }
-                }
+                val listener = createListener(itemId, this, onFirstFrameRendered)
                 addListener(listener)
                 playerListeners[this] = listener
                 
@@ -702,7 +732,8 @@ object VideoPreviewPool {
                 repeatMode = Player.REPEAT_MODE_ONE // Looping preview
                 
                 prepare()
-                playWhenReady = true
+                // RESOURCE OPTIMIZATION: Only play if VISIBLE. NEARBY pre-warms but stays paused.
+                playWhenReady = (priority == PreviewPriority.VISIBLE)
             }
             activePlayers[poolKey] = player
             accessOrder.add(poolKey)
@@ -710,6 +741,33 @@ object VideoPreviewPool {
         } catch (e: Exception) {
             Log.e("VideoPreviewPool", "Failed to configure player for $itemId", e)
             null
+        }
+    }
+
+    private fun createListener(
+        itemId: String,
+        player: ExoPlayer,
+        onFirstFrameRendered: (() -> Unit)?
+    ): Player.Listener {
+        return object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    player.seekTo(0)
+                    player.playWhenReady = true
+                }
+            }
+
+            override fun onRenderedFirstFrame() {
+                // AURA REPAIR: Trigger transition once the video is actually visible
+                onFirstFrameRendered?.invoke()
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                Log.e("VideoPreviewPool", "Preview error for $itemId: ${error.message}", error)
+                val repo = com.example.data.MediaRepository.instance
+                val mediaItem = repo.getMediaItemById(itemId)
+                repo.recordPlaybackError(error, player, mediaItem)
+            }
         }
     }
 
@@ -740,7 +798,18 @@ object VideoPreviewPool {
     @Synchronized
     fun releasePlayer(itemId: String, locationTag: String) {
         val poolKey = "${itemId}_$locationTag"
+        
+        // AURA REPAIR: We don't immediately release if it's NEARBY
+        // Only release if it's truly gone or pool is full
+        val priority = PreviewCoordinator.getPriority(itemId)
+        if (priority != PreviewPriority.NONE) {
+            // Keep it in activePlayers but maybe update priority
+            playerPriorities[poolKey] = priority
+            return
+        }
+
         accessOrder.remove(poolKey)
+        playerPriorities.remove(poolKey)
         val player = activePlayers.remove(poolKey)
         player?.apply {
             try {
@@ -755,6 +824,7 @@ object VideoPreviewPool {
     @Synchronized
     fun releaseAll() {
         accessOrder.clear()
+        playerPriorities.clear()
         activePlayers.values.forEach { it.release() }
         activePlayers.clear()
         idlePlayers.forEach { it.release() }
@@ -769,17 +839,62 @@ fun VideoTilePreview(
     itemId: String,
     videoUri: String,
     imageUrl: String,
+    onFirstFrameRendered: () -> Unit,
     modifier: Modifier = Modifier,
     locationTag: String = "generic"
 ) {
     val context = LocalContext.current
     var playerState by remember(itemId, locationTag) { mutableStateOf<ExoPlayer?>(null) }
     var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
+    
+    // Track priority reactively
+    val visibleIds by PreviewCoordinator.visibleIds.collectAsState()
+    val nearbyIds by PreviewCoordinator.nearbyIds.collectAsState()
+    
+    val priority = remember(itemId, visibleIds, nearbyIds) {
+        PreviewCoordinator.getPriority(itemId)
+    }
 
     // Performance Fix: Debounce player acquisition during fast scrolling
-    LaunchedEffect(itemId, locationTag) {
-        delay(400) // Only start preview if visible for > 400ms
-        playerState = VideoPreviewPool.acquirePlayer(context, itemId, locationTag, videoUri, imageUrl)
+    LaunchedEffect(itemId, locationTag, priority) {
+        val isFast = PreviewCoordinator.isScrollingFast.value
+        
+        if (priority == PreviewPriority.NONE) {
+            // If it's not even nearby, don't bother and clear state if we had one
+            if (playerState != null) {
+                VideoPreviewPool.releasePlayer(itemId, locationTag)
+                playerState = null
+            }
+            return@LaunchedEffect
+        }
+        
+        // RESOURCE OPTIMIZATION: If scrolling fast, ONLY prepare VISIBLE items.
+        // Defer NEARBY preparation until scrolling slows or stops.
+        if (isFast && priority == PreviewPriority.NEARBY) {
+            // Drop existing player if we moved from VISIBLE to NEARBY during fast scroll
+            if (playerState != null) {
+                VideoPreviewPool.releasePlayer(itemId, locationTag)
+                playerState = null
+            }
+            return@LaunchedEffect
+        }
+
+        val acquisitionDelay = when(priority) {
+            PreviewPriority.VISIBLE -> 400L
+            PreviewPriority.NEARBY -> 1200L // Longer delay for nearby pre-warming
+            else -> 2000L
+        }
+        
+        delay(acquisitionDelay)
+        playerState = VideoPreviewPool.acquirePlayer(
+            context, 
+            itemId, 
+            locationTag, 
+            videoUri, 
+            imageUrl,
+            priority = priority,
+            onFirstFrameRendered = onFirstFrameRendered
+        )
     }
 
     DisposableEffect(itemId, locationTag) {

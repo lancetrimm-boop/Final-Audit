@@ -45,21 +45,21 @@ fun <T> AuraSortSelector(
                 expanded = true 
             },
             shape = CircleShape,
-            modifier = Modifier.height(36.dp),
-            color = if (isSelected) selectedColor.copy(alpha = 0.15f) else Color.Transparent,
+            modifier = Modifier.height(32.dp),
+            color = if (isSelected) selectedColor.copy(alpha = 0.12f) else Color.Transparent,
             border = androidx.compose.foundation.BorderStroke(
-                width = if (isSelected) 2.dp else 1.dp,
-                brush = if (isSelected) DiscoveryGradient else SolidColor(AuraMutedSlate.copy(alpha = 0.5f))
+                width = if (isSelected) 1.5.dp else 1.dp,
+                brush = if (isSelected) DiscoveryGradient else SolidColor(AuraSubtleBorder)
             )
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp),
+                modifier = Modifier.padding(horizontal = AuraSpacing.XS),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = "$label: $currentOption",
-                    fontSize = 12.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                    fontSize = 11.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     color = if (isSelected) selectedColor else AuraMutedSlate,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -67,7 +67,7 @@ fun <T> AuraSortSelector(
                 Icon(
                     imageVector = Icons.Default.ArrowDropDown,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(14.dp),
                     tint = if (isSelected) selectedColor else AuraMutedSlate
                 )
             }
@@ -112,21 +112,21 @@ fun AuraFilterChip(
     Surface(
         onClick = onClick,
         shape = CircleShape,
-        modifier = modifier.height(36.dp),
-        color = if (isSelected) selectedColor.copy(alpha = 0.15f) else Color.Transparent,
+        modifier = modifier.height(32.dp),
+        color = if (isSelected) selectedColor.copy(alpha = 0.12f) else Color.Transparent,
         border = androidx.compose.foundation.BorderStroke(
-            width = if (isSelected) 2.dp else 1.dp,
-            brush = if (isSelected) DiscoveryGradient else SolidColor(AuraMutedSlate.copy(alpha = 0.5f))
+            width = if (isSelected) 1.5.dp else 1.dp,
+            brush = if (isSelected) DiscoveryGradient else SolidColor(AuraSubtleBorder)
         )
     ) {
         Box(
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.padding(horizontal = AuraSpacing.M),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = label,
-                fontSize = 12.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                fontSize = 11.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 color = if (isSelected) selectedColor else AuraMutedSlate
             )
         }
@@ -143,34 +143,34 @@ fun AutoScrollToggle(
     modifier: Modifier = Modifier
 ) {
     val backgroundColor by animateColorAsState(
-        targetValue = if (isEnabled) DiscoveryViolet.copy(alpha = 0.2f) else Color.Transparent,
+        targetValue = if (isEnabled) DiscoveryViolet.copy(alpha = 0.15f) else Color.Transparent,
         label = "auto_scroll_bg"
     )
-    val borderColor = if (isEnabled) DiscoveryGradient else SolidColor(AuraMutedSlate.copy(alpha = 0.4f))
+    val borderColor = if (isEnabled) DiscoveryGradient else SolidColor(AuraSubtleBorder)
     val textColor = if (isEnabled) DiscoveryViolet else AuraMutedSlate
 
     Surface(
         onClick = { onToggle(!isEnabled) },
         shape = CircleShape,
-        modifier = modifier.height(32.dp),
+        modifier = modifier.height(28.dp),
         color = backgroundColor,
         border = androidx.compose.foundation.BorderStroke(if (isEnabled) 1.5.dp else 1.dp, borderColor)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp),
+            modifier = Modifier.padding(horizontal = AuraSpacing.XS),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             Icon(
                 imageVector = if (isEnabled) Icons.Default.PlayArrow else Icons.Default.Pause,
                 contentDescription = null,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(12.dp),
                 tint = textColor
             )
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(AuraSpacing.XXS))
             Text(
                 text = if (isEnabled) "AUTO-SCROLL ON" else "AUTO-SCROLL OFF",
-                fontSize = 9.sp,
+                fontSize = 8.5.sp,
                 fontWeight = FontWeight.Black,
                 color = textColor,
                 letterSpacing = 0.5.sp
@@ -194,24 +194,24 @@ fun AutoScrollSpeedSelector(
         Surface(
             onClick = { expanded = true },
             shape = CircleShape,
-            modifier = Modifier.height(32.dp),
+            modifier = Modifier.height(28.dp),
             color = AuraSubtleSurface,
             border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 10.dp),
+                modifier = Modifier.padding(horizontal = AuraSpacing.XS),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = currentSpeed.label,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Black,
                     color = AuraMidnight
                 )
                 Icon(
                     imageVector = Icons.Default.ArrowDropDown,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(14.dp),
                     tint = AuraMidnight
                 )
             }

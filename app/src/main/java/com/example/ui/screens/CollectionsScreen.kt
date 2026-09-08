@@ -29,11 +29,16 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -47,6 +52,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,6 +68,7 @@ import com.example.ui.theme.AuraMutedSlate
 import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
 import com.example.ui.theme.DiscoveryGradient
@@ -324,43 +331,51 @@ fun CollectionsScreen(
         )
 
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 160.dp),
+            columns = GridCells.Adaptive(minSize = 150.dp),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            contentPadding = PaddingValues(AuraSpacing.M),
+            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.GridGap),
+            verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)
         ) {
             // SIGNATURE STYLES
             item(span = { GridItemSpan(maxLineSpan) }) {
                 // FORCE SHOW FOR DEBUGGING if report is missing or empty
                 val clusters = report?.tasteProfile?.tasteClusters ?: emptyList()
                 
-                Column(modifier = Modifier.padding(bottom = 12.dp)) {
+                Column(modifier = Modifier.padding(bottom = AuraSpacing.S)) {
                     Text(
                         text = "SIGNATURE STYLES",
                         color = DiscoveryViolet,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(AuraSpacing.M))
                     
                     if (clusters.isEmpty()) {
-                        Text(
-                            text = "No clusters found in report. Report exists: ${report != null}",
-                            color = Color.Red,
-                            fontSize = 12.sp
-                        )
+                        Surface(
+                            color = AuraSubtleSurface,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Aura is identifying your style clusters...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AuraMutedSlate,
+                                modifier = Modifier.padding(AuraSpacing.M),
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     } else {
                         LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.M),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             items(clusters) { cluster ->
                                 TasteClusterCard(
                                     evidence = cluster,
                                     onClick = { selectedCluster = cluster },
-                                    modifier = Modifier.width(280.dp)
+                                    modifier = Modifier.width(260.dp)
                                 )
                             }
                         }
@@ -377,19 +392,19 @@ fun CollectionsScreen(
 
             // USER MEDIA SECTION HEADER
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Column(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
+                Column(modifier = Modifier.padding(top = AuraSpacing.S, bottom = AuraSpacing.XXS)) {
                     Text(
                         text = "USER MEDIA",
                         color = DiscoveryViolet,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(AuraSpacing.XXXS))
                     Text(
-                        text = "Your videos, photos and exported Aura clips",
+                        text = "Your videos, photos and exported clips",
                         color = AuraMutedSlate,
-                        fontSize = 12.sp
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
@@ -407,19 +422,19 @@ fun CollectionsScreen(
             // SMART COLLECTIONS SECTION HEADER
             if (smartCollections.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Column(modifier = Modifier.padding(top = 24.dp, bottom = 4.dp)) {
+                    Column(modifier = Modifier.padding(top = AuraSpacing.M, bottom = AuraSpacing.XXS)) {
                         Text(
                             text = "SMART COLLECTIONS",
                             color = AuraMutedSlate,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.2.sp
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(AuraSpacing.XXXS))
                         Text(
                             text = "Auto-organized categories based on themes",
                             color = AuraMutedSlate,
-                            fontSize = 12.sp
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
@@ -730,28 +745,28 @@ private fun CollectionTileCard(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(10.dp)
+                    .padding(AuraSpacing.XS)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 Text(
-                    text = "${collection.items.size} items",
+                    text = "${collection.items.size} ITEMS",
                     color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Black
                 )
             }
         }
 
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XS))
 
         Text(
             text = collection.title,
             color = AuraMidnight,
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp,
+            fontWeight = FontWeight.Black,
+            fontSize = 14.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -759,7 +774,7 @@ private fun CollectionTileCard(
         Text(
             text = collection.description,
             color = AuraMutedSlate,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -773,8 +788,8 @@ fun AuraMomentsHeroCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, AuraSubtleBorder, RoundedCornerShape(16.dp))
             .clickable(onClick = onLaunch)
             .testTag("aura_moments_hero_card"),
         color = AuraSubtleSurface
@@ -782,12 +797,12 @@ fun AuraMomentsHeroCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
+                .padding(AuraSpacing.M),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(52.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(DiscoveryGradient),
                 contentAlignment = Alignment.Center
@@ -796,32 +811,33 @@ fun AuraMomentsHeroCard(
                     imageVector = Icons.Outlined.AutoAwesome,
                     contentDescription = "Aura Slideshow",
                     tint = Color.White,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(AuraSpacing.M))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "AURA SLIDESHOW",
                     color = DiscoveryViolet,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Black,
-                    letterSpacing = 1.2.sp
+                    letterSpacing = 1.sp
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "Your Visual Taste",
                     color = AuraMidnight,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Black
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "Intelligent slideshows curated from your library",
                     color = AuraMutedSlate,
-                    fontSize = 12.sp
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
                 )
             }
         }

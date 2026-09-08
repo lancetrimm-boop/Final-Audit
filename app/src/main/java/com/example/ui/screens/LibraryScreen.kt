@@ -174,6 +174,23 @@ fun LibraryScreen(
         stableItems.filter { mediaItemsMap.containsKey(it.id) }
     }
 
+    LaunchedEffect(gridState, displayItems) {
+        snapshotFlow { 
+            val layoutInfo = gridState.layoutInfo
+            val visibleItems = layoutInfo.visibleItemsInfo
+            val visibleIds = visibleItems.mapNotNull { it.key as? String }
+            val allIds = displayItems.map { it.id }
+            val firstIdx = gridState.firstVisibleItemIndex
+            Triple(visibleIds, allIds, firstIdx to gridState.isScrollInProgress)
+        }.collect { (visible, all, scrollState) ->
+            val (firstIdx, scrolling) = scrollState
+            PreviewCoordinator.updateWindow(visible, all, firstIdx)
+            // For now, treat any scroll as "active". In a real velocity check, 
+            // we'd use a threshold.
+            PreviewCoordinator.setScrollingFast(scrolling)
+        }
+    }
+
     LaunchedEffect(gridState) {
         snapshotFlow { Pair(gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset) }
             .collect { (index, offset) ->
@@ -294,25 +311,42 @@ fun LibraryScreen(
                     }
                 )
             } else {
-                if (!isLandscape) {
+            if (!isLandscape) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = AuraSpacing.M),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     AuraSectionHeader(
                         title = "Library",
-                        subtitle = "Your complete media collection"
+                        subtitle = "Your complete media collection",
+                        modifier = Modifier.weight(1f)
                     )
-                } else {
+                    
+                    // AURA DESIGN REPAIR: Contextual loading indicator instead of global line
+                    if (scanProgress.isScanning || importProgress.isImporting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp).padding(end = AuraSpacing.S),
+                            strokeWidth = 2.dp,
+                            color = DiscoveryViolet
+                        )
+                    }
+                }
+            } else {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                            .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Library",
-                            style = MaterialTheme.typography.titleSmall,
+                            text = "LIBRARY",
+                            style = MaterialTheme.typography.titleMedium,
                             color = DiscoveryViolet,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp
                         )
                         UtilityControlsRow(
                             selectedFilter = selectedFilter,
@@ -379,15 +413,8 @@ fun LibraryScreen(
                 onIntelligentSortChange = { repository.intelligentSort = it }
             )
 
-            if (scanProgress.isScanning || importProgress.isImporting) {
-                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().height(2.dp).clip(CircleShape),
-                        color = DiscoveryViolet,
-                        trackColor = AuraSubtleBorder
-                    )
-                }
-            }
+            // AURA DESIGN REPAIR: Removed global persistent purple loading line. 
+            // Manual scans are already handled by PullToRefreshBox.
 
             PullToRefreshBox(
                 isRefreshing = scanProgress.isScanning && scanProgress.isManual,
@@ -428,9 +455,14 @@ fun LibraryScreen(
                             columns = GridCells.Adaptive(minSize = gridDensity.dp),
                             state = gridState,
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(20.dp)
+                            contentPadding = PaddingValues(
+                                start = AuraSpacing.M, 
+                                end = AuraSpacing.M, 
+                                top = AuraSpacing.XS, 
+                                bottom = AuraSpacing.XXL
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.GridGap),
+                            verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)
                         ) {
                             itemsIndexed(
                                 items = displayItems,
@@ -506,54 +538,55 @@ private fun SelectionHeader(
             .fillMaxWidth()
             .background(DiscoveryGradient)
             .statusBarsPadding()
-            .height(64.dp)
-            .padding(horizontal = 16.dp),
+            .height(56.dp)
+            .padding(horizontal = AuraSpacing.M),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-            IconButton(onClick = onCancel) {
+            IconButton(onClick = onCancel, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White)
             }
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(AuraSpacing.S))
             Text(
-                text = "$selectedCount Selected",
+                text = "$selectedCount SELECTED",
                 color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Black
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp
             )
         }
         
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (selectedCount == 1) {
-                IconButton(onClick = onSearchSimilar) {
+                IconButton(onClick = onSearchSimilar, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.ImageSearch, contentDescription = "Search Similar", tint = Color.White)
                 }
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(AuraSpacing.XS))
             } else if (selectedCount >= 2) {
                 Surface(
                     onClick = onSearchSimilar,
                     shape = CircleShape,
                     color = Color.White.copy(alpha = 0.9f),
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier.height(30.dp)
                 ) {
                     Box(
-                        modifier = Modifier.padding(horizontal = 12.dp),
+                        modifier = Modifier.padding(horizontal = AuraSpacing.XS),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AutoAwesomeMotion, contentDescription = null, tint = DiscoveryViolet, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(Icons.Default.AutoAwesomeMotion, contentDescription = null, tint = DiscoveryViolet, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(AuraSpacing.XXS))
                             Text(
-                                text = "FIND COMMON",
+                                text = "COMMON",
                                 color = DiscoveryViolet,
-                                fontSize = 12.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Black
                             )
                         }
                     }
                 }
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(AuraSpacing.S))
             }
 
             Surface(
@@ -561,25 +594,25 @@ private fun SelectionHeader(
                 enabled = selectedCount >= 4,
                 shape = CircleShape,
                 color = if (selectedCount >= 4) Color.White else Color.White.copy(alpha = 0.2f),
-                modifier = Modifier.height(36.dp)
+                modifier = Modifier.height(30.dp)
             ) {
                 Box(
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                    modifier = Modifier.padding(horizontal = AuraSpacing.S),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "COMPARE ($selectedCount)",
+                        text = "COMPARE",
                         color = if (selectedCount >= 4) DiscoveryViolet else Color.White.copy(alpha = 0.5f),
-                        fontSize = 12.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 0.5.sp
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(AuraSpacing.S))
 
-            IconButton(onClick = onDelete) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
             }
         }
@@ -599,38 +632,41 @@ private fun SearchHeader(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .height(64.dp)
+            .height(56.dp)
             .background(AuraCrispWhite)
-            .padding(horizontal = 8.dp),
+            .padding(horizontal = AuraSpacing.XS),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onExit) {
+        IconButton(onClick = onExit, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Default.Close, contentDescription = "Exit Search", tint = AuraMidnight)
         }
         
         if (searchRequest is SearchRequest.MultiVisual) {
             LazyRow(
-                modifier = Modifier.padding(start = 4.dp, end = 4.dp).widthIn(max = 200.dp),
+                modifier = Modifier.padding(start = 4.dp, end = 4.dp).widthIn(max = 160.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 contentPadding = PaddingValues(end = 4.dp)
             ) {
                 itemsIndexed(searchRequest.referenceUris) { index, uri ->
                     Box(modifier = Modifier.padding(end = 4.dp)) {
                         Surface(
-                            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)),
+                            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)),
                             color = AuraSubtleBorder,
                             onClick = { onRemoveReference(index) }
                         ) {
-                            AsyncImage(
-                                model = uri,
-                                contentDescription = "Reference $index",
-                                contentScale = ContentScale.Crop
-                            )
+                        AuraMediaThumbnail(
+                            itemId = "anchor_$index",
+                            mediaType = "VIDEO", // Force extraction path
+                            imageUrl = "",
+                            uriPath = uri.toString(),
+                            title = "",
+                            modifier = Modifier.fillMaxSize()
+                        )
                             Box(
                                 modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
                             }
                         }
                     }
@@ -642,26 +678,29 @@ private fun SearchHeader(
                 is SearchRequest.Compound -> searchRequest.referenceUri
                 else -> null
             }
-            Box(modifier = Modifier.padding(start = 4.dp, end = 8.dp)) {
+            Box(modifier = Modifier.padding(start = 4.dp, end = 6.dp)) {
                 Surface(
-                    modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)),
+                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)),
                     color = AuraSubtleBorder,
                     onClick = onRemoveAnchor
                 ) {
                     if (visualUri != null) {
-                        AsyncImage(
-                            model = visualUri,
-                            contentDescription = "Visual Reference",
-                            contentScale = ContentScale.Crop
+                        AuraMediaThumbnail(
+                            itemId = visualUri, // Use URI as ID for stable unique caching
+                            mediaType = "VIDEO", // Force extraction path
+                            imageUrl = "",
+                            uriPath = visualUri,
+                            title = "",
+                            modifier = Modifier.fillMaxSize()
                         )
                     } else {
-                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.padding(8.dp))
+                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.padding(6.dp))
                     }
                     Box(
                         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
                     }
                 }
             }
@@ -679,7 +718,8 @@ private fun SearchHeader(
             modifier = Modifier.weight(1f),
             placeholder = { 
                 Text(
-                    if (searchRequest !is SearchRequest.Text) "Add constraint..." else "Search your library...", 
+                    if (searchRequest !is SearchRequest.Text) "Add constraint..." else "Search library...", 
+                    style = MaterialTheme.typography.bodyMedium,
                     color = AuraMutedSlate 
                 ) 
             },
@@ -692,11 +732,11 @@ private fun SearchHeader(
                 cursorColor = DiscoveryViolet
             ),
             singleLine = true,
-            textStyle = MaterialTheme.typography.bodyLarge.copy(color = AuraMidnight),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = AuraMidnight),
             trailingIcon = {
                 if (searchRequest is SearchRequest.Text) {
-                    IconButton(onClick = onImageSearchClick) {
-                        Icon(Icons.Default.ImageSearch, contentDescription = "Search by Image", tint = DiscoveryViolet)
+                    IconButton(onClick = onImageSearchClick, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ImageSearch, contentDescription = "Search by Image", tint = DiscoveryViolet, modifier = Modifier.size(20.dp))
                     }
                 }
             }
@@ -723,14 +763,14 @@ private fun UtilityControlsRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = if (isCompact) 0.dp else 12.dp),
+            .padding(horizontal = AuraSpacing.M, vertical = if (isCompact) 0.dp else AuraSpacing.XS),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Left Side: Filters or Auto-Scroll
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS),
             modifier = Modifier.weight(1f)
         ) {
             if (!isCompact) {
@@ -760,7 +800,7 @@ private fun UtilityControlsRow(
         // Right Side: Action Icons + AutoScroll
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.ControlGap)
         ) {
             AutoScrollToggle(
                 isEnabled = isAutoScrollActive,
@@ -811,12 +851,12 @@ private fun CompactControlsRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XS),
+        horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AuraSortSelector(
-            label = "Sort Mode",
+            label = "Mode",
             currentOption = if (activeCategory == SortCategory.STANDARD) "Standard" else "Aura AI",
             isSelected = true,
             options = SortCategory.entries,
@@ -826,19 +866,17 @@ private fun CompactControlsRow(
             selectedColor = if (activeCategory == SortCategory.STANDARD) AuraMutedSlate else DiscoveryViolet
         )
 
-        Spacer(modifier = Modifier.width(4.dp))
-
         if (activeCategory == SortCategory.STANDARD) {
             AuraSortSelector(
                 label = "Criteria",
                 currentOption = when (standardSort) {
                     StandardSortOption.NEWEST_FIRST -> "Newest"
-                    StandardSortOption.TITLE_ASC -> "Name A-Z"
-                    StandardSortOption.TITLE_DESC -> "Name Z-A"
+                    StandardSortOption.TITLE_ASC -> "A-Z"
+                    StandardSortOption.TITLE_DESC -> "Z-A"
                     StandardSortOption.MOST_PLAYED -> "Popular"
                     StandardSortOption.RECENTLY_PLAYED -> "Recent"
-                    StandardSortOption.SHORTEST_DURATION -> "Shortest"
-                    StandardSortOption.LONGEST_DURATION -> "Longest"
+                    StandardSortOption.SHORTEST_DURATION -> "Short"
+                    StandardSortOption.LONGEST_DURATION -> "Long"
                     StandardSortOption.RANDOM -> "Shuffle"
                     StandardSortOption.LEAST_PLAYED -> "Unplayed"
                 },
@@ -850,7 +888,7 @@ private fun CompactControlsRow(
             )
         } else {
             AuraSortSelector(
-                label = "Intelligence",
+                label = "Vibe",
                 currentOption = when (intelligentSort) {
                     IntelligentSortOption.PERSONALIZED -> "Personalized"
                     IntelligentSortOption.DISCOVER -> "Discover"
@@ -858,8 +896,8 @@ private fun CompactControlsRow(
                     IntelligentSortOption.HIDDEN_GEMS -> "Hidden Gems"
                     IntelligentSortOption.FAVORITES -> "Favorites"
                     IntelligentSortOption.EXPLORE -> "Explore"
-                    IntelligentSortOption.LEAST_INTERACTED -> "Least Interacted"
-                    IntelligentSortOption.SURPRISE_ME -> "Surprise Me"
+                    IntelligentSortOption.LEAST_INTERACTED -> "Review"
+                    IntelligentSortOption.SURPRISE_ME -> "Random"
                 },
                 isSelected = (activeCategory == SortCategory.INTELLIGENT),
                 options = IntelligentSortOption.entries,
@@ -879,37 +917,35 @@ private fun EmptyLibraryView(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(AuraSpacing.XL),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
             imageVector = Icons.Default.PhotoLibrary,
             contentDescription = null,
-            tint = AuraMutedSlate.copy(alpha = 0.4f),
-            modifier = Modifier.size(64.dp)
+            tint = AuraMutedSlate.copy(alpha = 0.3f),
+            modifier = Modifier.size(56.dp)
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.M))
         Text(
             text = "Your library is empty",
             style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Black,
             color = AuraMidnight
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XS))
         Text(
             text = "Import media from your device or scan for local content to start building your intelligence profile.",
             style = MaterialTheme.typography.bodyMedium,
             color = AuraSlate,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            lineHeight = 20.sp
         )
-        Spacer(modifier = Modifier.height(32.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(onClick = onImportClick) {
-                Text("IMPORT")
-            }
-            OutlinedButton(onClick = onScanClick) {
-                Text("SCAN DEVICE")
-            }
+        Spacer(modifier = Modifier.height(AuraSpacing.L))
+        Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.M)) {
+            AuraButton(text = "IMPORT", onClick = onImportClick)
+            AuraOutlinedButton(text = "SCAN DEVICE", onClick = onScanClick)
         }
     }
 }

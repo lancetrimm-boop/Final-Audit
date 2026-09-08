@@ -67,7 +67,7 @@ fun AuraBottomNavigation(
             .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
         val isLandscape = this.maxWidth > this.maxHeight
-        val navHeight = if (isLandscape) 48.dp else 64.dp
+        val navHeight = if (isLandscape) 44.dp else 56.dp
         
         Column {
             // Top Border
@@ -77,7 +77,7 @@ fun AuraBottomNavigation(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(navHeight)
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -128,30 +128,30 @@ fun AuraBottomNavigation(
                                 imageVector = if (isSelected) destination.selectedIcon else destination.unselectedIcon,
                                 contentDescription = destination.title,
                                 tint = if (isSelected) DiscoveryViolet else AuraMutedSlate,
-                                modifier = Modifier.size(if (isLandscape) 20.dp else 24.dp)
+                                modifier = Modifier.size(if (isLandscape) 18.dp else 22.dp)
                             )
                             if (!isLandscape) {
-                                Spacer(modifier = Modifier.height(4.dp))
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = destination.title,
-                                    fontSize = 10.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 9.sp,
+                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
                                     color = if (isSelected) AuraMidnight else AuraMutedSlate
                                 )
                             }
                             
                             // Active Indicator (Subtle Gradient Dot)
                             if (isSelected) {
-                                Spacer(modifier = Modifier.height(if (isLandscape) 2.dp else 4.dp))
+                                Spacer(modifier = Modifier.height(if (isLandscape) 2.dp else 3.dp))
                                 Box(
                                     modifier = Modifier
-                                        .size(4.dp)
+                                        .size(3.dp)
                                         .clip(CircleShape)
                                         .background(DiscoveryGradient)
                                 )
                             } else {
                                 if (!isLandscape) {
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
                                 }
                             }
                         }

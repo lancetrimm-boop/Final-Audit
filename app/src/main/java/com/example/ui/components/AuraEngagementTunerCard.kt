@@ -22,6 +22,7 @@ import com.example.ui.theme.AuraMutedSlate
 import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
 import com.example.ui.theme.AuraSurface
@@ -50,11 +51,11 @@ fun AuraEngagementTunerCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp)),
+            .clip(RoundedCornerShape(16.dp)),
         color = AuraSubtleSurface,
         border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
             // Status Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -64,21 +65,21 @@ fun AuraEngagementTunerCard(
                 Column {
                     Text(
                         text = "AI LEARNING STATUS",
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Black,
                         color = AuraMutedSlate,
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = learningStatus,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
+                        text = learningStatus.uppercase(),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Black,
                         color = if (tasteDNA.isFineTuningEnabled) DiscoveryViolet else AuraMidnight
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
 
             // Sub-component for actual controls (Refactored to be embeddable)
             TasteDnaControlPanel(

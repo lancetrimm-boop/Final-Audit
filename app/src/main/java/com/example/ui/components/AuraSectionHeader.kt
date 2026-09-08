@@ -10,11 +10,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AuraMutedSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.DiscoveryGradient
 
 /**
  * Standardized Aura Section Header.
- * Standardizes branding, typography, and gradient behavior across all primary sections.
+ * Refined for density and consistent spacing.
  */
 @Composable
 fun AuraSectionHeader(
@@ -27,11 +28,16 @@ fun AuraSectionHeader(
         modifier = modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)
+            .padding(
+                start = AuraSpacing.ScreenHorizontal, 
+                end = AuraSpacing.XS, 
+                top = AuraSpacing.XS, 
+                bottom = AuraSpacing.XXS
+            )
     ) {
         AuraBrandName(
-            fontSize = 20f,
-            modifier = Modifier.padding(bottom = 2.dp)
+            fontSize = 18f,
+            modifier = Modifier.padding(bottom = 0.dp)
         )
         
         Row(
@@ -42,26 +48,27 @@ fun AuraSectionHeader(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium.copy(
+                    style = MaterialTheme.typography.titleLarge.copy(
                         brush = DiscoveryGradient,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.sp
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = (-0.5).sp
                     )
                 )
                 if (subtitle != null) {
                     Text(
                         text = subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = AuraMutedSlate,
                         fontWeight = FontWeight.Medium,
-                        lineHeight = 20.sp
+                        lineHeight = 16.sp
                     )
                 }
             }
             if (actions != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier.padding(start = AuraSpacing.XS)
                 ) {
                     actions()
                 }

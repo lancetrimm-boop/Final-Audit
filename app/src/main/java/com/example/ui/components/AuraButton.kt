@@ -41,6 +41,7 @@ import com.example.ui.theme.AuraCrispWhite
 import com.example.ui.theme.AuraMidnight
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraPurpleContainer
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.DiscoveryGradient
 import com.example.ui.theme.DiscoveryViolet
@@ -51,7 +52,7 @@ fun AuraButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    height: Dp = 48.dp,
+    height: Dp = 40.dp,
     testTag: String = "aura_primary_button",
     leadingIcon: @Composable (() -> Unit)? = null
 ) {
@@ -83,7 +84,7 @@ fun AuraButton(
                     if (enabled) Modifier.background(DiscoveryGradient, shape = CircleShape)
                     else Modifier.background(AuraSubtleBorder, shape = CircleShape)
                 )
-                .padding(horizontal = 24.dp, vertical = 8.dp),
+                .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS),
             contentAlignment = Alignment.Center
         ) {
             Row(
@@ -91,12 +92,13 @@ fun AuraButton(
             ) {
                 if (leadingIcon != null) {
                     leadingIcon()
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(AuraSpacing.XS))
                 }
                 Text(
                     text = text,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp,
+                    letterSpacing = 0.5.sp
                 )
             }
         }
@@ -109,7 +111,7 @@ fun AuraOutlinedButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    height: Dp = 48.dp,
+    height: Dp = 40.dp,
     testTag: String = "aura_secondary_button",
     leadingIcon: @Composable (() -> Unit)? = null
 ) {
@@ -138,19 +140,20 @@ fun AuraOutlinedButton(
             contentColor = AuraMidnight,
             disabledContentColor = Color.Gray
         ),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp)
+        contentPadding = PaddingValues(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (leadingIcon != null) {
                 leadingIcon()
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(AuraSpacing.XS))
             }
             Text(
                 text = text,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                letterSpacing = 0.25.sp
             )
         }
     }

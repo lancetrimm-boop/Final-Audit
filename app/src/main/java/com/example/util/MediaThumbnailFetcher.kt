@@ -49,6 +49,9 @@ object MediaThumbnailFetcher {
     suspend fun getThumbnail(context: Context, uriString: String): Bitmap? = withContext(Dispatchers.IO) {
         if (uriString.isBlank()) return@withContext null
 
+        // 0. Memory Cache Path
+        memoryCache.get(uriString)?.let { return@withContext it }
+
         // 1. Preferred Path: loadThumbnail (API 29+) for system-cached thumbnails
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uriString.startsWith("content://")) {
             val cacheKey = generateCacheKey(uriString, -1L, TARGET_THUMBNAIL_SIZE)
@@ -57,7 +60,10 @@ object MediaThumbnailFetcher {
             if (cacheFile.exists()) {
                 try {
                     val bitmap = BitmapFactory.decodeFile(cacheFile.absolutePath)
-                    if (isValidBitmap(bitmap) && !isBlackFrame(bitmap!!)) return@withContext bitmap
+                    if (isValidBitmap(bitmap) && !isBlackFrame(bitmap!!)) {
+                        memoryCache.put(uriString, bitmap)
+                        return@withContext bitmap
+                    }
                 } catch (_: Exception) {}
             }
 
@@ -66,6 +72,7 @@ object MediaThumbnailFetcher {
                 val bitmap = context.contentResolver.loadThumbnail(uri, Size(TARGET_THUMBNAIL_SIZE, TARGET_THUMBNAIL_SIZE), null)
                 if (isValidBitmap(bitmap) && !isBlackFrame(bitmap)) {
                     saveToDiskCache(cacheFile, bitmap)
+                    memoryCache.put(uriString, bitmap)
                     return@withContext bitmap
                 }
             } catch (e: Exception) {
@@ -74,8 +81,11 @@ object MediaThumbnailFetcher {
         }
 
         // 2. Secondary Path: MediaMetadataRetriever with retries for bad representative frames
-        // Start at 2s instead of 1s to avoid common fade-ins from black
-        return@withContext getFrameAtTime(context, uriString, 2_000_000L)
+        val bitmap = getFrameAtTime(context, uriString, 2_000_000L)
+        if (bitmap != null) {
+            memoryCache.put(uriString, bitmap)
+        }
+        return@withContext bitmap
     }
 
     /**
@@ -88,11 +98,17 @@ object MediaThumbnailFetcher {
         val cacheKey = generateCacheKey(uriString, timeUs, TARGET_THUMBNAIL_SIZE)
         val cacheFile = getCacheFile(context, cacheKey)
 
+        // Memory Cache lookup (includes timestamp in key for granular caching)
+        memoryCache.get(cacheKey)?.let { return@withContext it }
+
         // Disk Cache lookup
         if (cacheFile.exists()) {
             try {
                 val bitmap = BitmapFactory.decodeFile(cacheFile.absolutePath)
-                if (isValidBitmap(bitmap)) return@withContext bitmap
+                if (isValidBitmap(bitmap)) {
+                    memoryCache.put(cacheKey, bitmap)
+                    return@withContext bitmap
+                }
             } catch (_: Exception) {}
         }
 
@@ -171,7 +187,7 @@ object MediaThumbnailFetcher {
                 retriever.setDataSource(uriString)
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            val frame = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 retriever.getScaledFrameAtTime(
                     timeUs, 
                     MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 
@@ -180,7 +196,10 @@ object MediaThumbnailFetcher {
                 )
             } else {
                 retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-            } ?: retriever.frameAtTime
+            } ?: try { retriever.frameAtTime } catch (_: Exception) { null }
+            
+            // AURA REPAIR: Extra safety for NULL pointer from native MediaMetadataRetriever
+            if (isValidBitmap(frame)) frame else null
         } catch (e: Exception) {
             Log.w(TAG, "MediaMetadataRetriever failed for $uriString: ${e.message}")
             null

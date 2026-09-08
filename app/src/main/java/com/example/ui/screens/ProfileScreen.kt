@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -30,7 +31,22 @@ import coil.compose.AsyncImage
 import com.example.data.*
 import com.example.data.intelligence.TasteClusterEvidence
 import com.example.ui.components.*
-import com.example.ui.theme.*
+import com.example.ui.theme.AuraBackground
+import com.example.ui.theme.AuraBorder
+import com.example.ui.theme.AuraCrispWhite
+import com.example.ui.theme.AuraMidnight
+import com.example.ui.theme.AuraMutedSlate
+import com.example.ui.theme.AuraOnSurface
+import com.example.ui.theme.AuraOnSurfaceVariant
+import com.example.ui.theme.AuraPurple
+import com.example.ui.theme.AuraSlate
+import com.example.ui.theme.AuraSpacing
+import com.example.ui.theme.AuraStarGold
+import com.example.ui.theme.AuraSubtleBorder
+import com.example.ui.theme.AuraSubtleSurface
+import com.example.ui.theme.AuraSurface
+import com.example.ui.theme.DiscoveryGradient
+import com.example.ui.theme.DiscoveryViolet
 import android.widget.Toast
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
@@ -119,20 +135,21 @@ private fun SignatureStylesPresentation(
     if (profile.activeStyles.isEmpty() && profile.emergingStyles.isEmpty()) {
         Surface(
             color = AuraSubtleSurface,
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(20.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Box(modifier = Modifier.padding(24.dp), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.padding(AuraSpacing.L), contentAlignment = Alignment.Center) {
                 Text(
                     "Aura is still learning your unique visual styles. Keep viewing and rating your media.",
                     textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AuraMutedSlate
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AuraMutedSlate,
+                    lineHeight = 18.sp
                 )
             }
         }
     } else {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             profile.activeStyles.take(3).forEach { style ->
                 SignatureStyleCard(style = style, isEmerging = false)
             }
@@ -152,11 +169,11 @@ private fun SignatureStyleCard(
 ) {
     Surface(
         color = if (isEmerging) Color.Transparent else AuraSubtleSurface,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, if (isEmerging) AuraSubtleBorder.copy(alpha = 0.5f) else AuraSubtleBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -172,46 +189,50 @@ private fun SignatureStyleCard(
                     )
                     Text(
                         text = style.anchor.displayName,
-                        fontSize = 18.sp,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = AuraMidnight
                     )
                 }
                 
                 Surface(
-                    color = if (isEmerging) AuraMutedSlate.copy(alpha = 0.1f) else DiscoveryViolet.copy(alpha = 0.1f),
+                    color = if (isEmerging) AuraMutedSlate.copy(alpha = 0.1f) else DiscoveryViolet.copy(alpha = 0.12f),
                     shape = CircleShape
                 ) {
                     Text(
                         text = "${(style.affinityScore * 100).toInt()}%",
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
                         color = if (isEmerging) AuraMutedSlate else DiscoveryViolet
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XXS))
             
             Text(
                 text = style.anchor.description,
                 style = MaterialTheme.typography.bodySmall,
-                color = AuraSlate
+                color = AuraSlate,
+                lineHeight = 16.sp
             )
             
             if (style.representativeMedia.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(modifier = Modifier.height(AuraSpacing.M))
+                Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
                     style.representativeMedia.take(3).forEach { media ->
-                        AsyncImage(
-                            model = media.imageUrl,
-                            contentDescription = null,
+                        AuraMediaThumbnail(
+                            itemId = media.id,
+                            mediaType = media.mediaType,
+                            imageUrl = media.imageUrl,
+                            uriPath = media.uriPath,
+                            title = media.title,
                             modifier = Modifier
-                                .size(60.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(AuraSubtleBorder),
-                            contentScale = ContentScale.Crop
+                            locationTag = "profile_style"
                         )
                     }
                 }
@@ -284,11 +305,11 @@ private fun VisualTasteSummary(
 private fun ProfileSectionTitle(title: String) {
     Text(
         text = title.uppercase(),
-        fontSize = 11.sp,
+        fontSize = 10.sp,
         fontWeight = FontWeight.Black,
         color = AuraMutedSlate,
-        letterSpacing = 2.sp,
-        modifier = Modifier.padding(start = 4.dp, bottom = 12.dp, top = 12.dp)
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(start = AuraSpacing.XXS, bottom = AuraSpacing.XS, top = AuraSpacing.S)
     )
 }
 
@@ -304,7 +325,7 @@ private fun PrivacyConsentCard(
         color = AuraSubtleSurface,
         border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -312,19 +333,19 @@ private fun PrivacyConsentCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Global Recommendation Intelligence",
+                        text = "Global Intelligence",
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         color = AuraMidnight
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = when (consentState) {
                             com.example.data.contribution.ConsentState.GRANTED -> "Status: Opted In (Active)"
-                            com.example.data.contribution.ConsentState.REVOKED -> "Status: Opted Out (Queue Purged)"
-                            else -> "Status: Disabled by Default"
+                            com.example.data.contribution.ConsentState.REVOKED -> "Status: Opted Out"
+                            else -> "Status: Not Decided"
                         },
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = if (consentState == com.example.data.contribution.ConsentState.GRANTED) DiscoveryViolet else AuraMutedSlate
                     )
@@ -345,14 +366,15 @@ private fun PrivacyConsentCard(
                         checkedTrackColor = DiscoveryViolet,
                         uncheckedThumbColor = AuraMutedSlate,
                         uncheckedTrackColor = AuraSubtleBorder
-                    )
+                    ),
+                    modifier = Modifier.scale(0.8f)
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XS))
 
             Text(
-                text = "Participation is entirely optional. When enabled, Aura contributes anonymized mathematical preference signals to improve global models. Your personal intelligence stays 100% private and on-device.",
+                text = "Participation is optional. When enabled, Aura contributes anonymized preference signals to improve models. Your intelligence stays 100% private.",
                 fontSize = 11.sp,
                 color = AuraMutedSlate,
                 lineHeight = 16.sp
@@ -713,20 +735,20 @@ fun ProfileScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XS)
                     ) {
                         // 1. COLLECTIONS
                         ProfileSectionTitle("Collections")
                         Text(
                             text = "What you have saved and organized",
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = AuraMutedSlate,
-                            modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
+                            modifier = Modifier.padding(bottom = AuraSpacing.M, start = AuraSpacing.XXS)
                         )
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp)),
+                                .clip(RoundedCornerShape(20.dp)),
                             color = AuraSubtleSurface,
                             border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
                         ) {
@@ -738,7 +760,7 @@ fun ProfileScreen(
                                     onClick = { onNavigateToFavorites() }
                                 )
                                 
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), color = AuraSubtleBorder.copy(alpha = 0.5f))
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = AuraSpacing.L), color = AuraSubtleBorder.copy(alpha = 0.5f))
                                 
                                 SettingsClickRow(
                                     icon = Icons.Default.AutoAwesomeMotion,
@@ -747,7 +769,7 @@ fun ProfileScreen(
                                     onClick = { onLaunchAuraMoments() }
                                 )
 
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), color = AuraSubtleBorder.copy(alpha = 0.5f))
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = AuraSpacing.L), color = AuraSubtleBorder.copy(alpha = 0.5f))
 
                                 SettingsClickRow(
                                     icon = Icons.Default.Delete,
@@ -758,24 +780,24 @@ fun ProfileScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(48.dp))
+                        Spacer(modifier = Modifier.height(AuraSpacing.L))
 
                         // 2. SIGNATURE STYLES
                         ProfileSectionTitle("Signature Styles")
                         Text(
                             text = "Your intelligence profile and visual style clusters",
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = AuraMutedSlate,
-                            modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
+                            modifier = Modifier.padding(bottom = AuraSpacing.M, start = AuraSpacing.XXS)
                         )
                         
                         SignatureStylesPresentation(profile = styleProfile)
                         
-                        Spacer(modifier = Modifier.height(48.dp))
+                        Spacer(modifier = Modifier.height(AuraSpacing.L))
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp)),
+                                .clip(RoundedCornerShape(20.dp)),
                             color = AuraSubtleSurface,
                             border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
                         ) {
@@ -792,26 +814,26 @@ fun ProfileScreen(
                                     enter = expandVertically() + fadeIn(),
                                     exit = shrinkVertically() + fadeOut()
                                 ) {
-                                    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                                    Column(modifier = Modifier.padding(horizontal = AuraSpacing.L, vertical = AuraSpacing.XS)) {
                                         TasteSliders(
                                             tasteDNA = tasteDNA,
                                             onTasteDnaUpdate = { repository.updateTasteDNA(it, isUserGenerated = true, evidenceCategory = "Profile Manual Tuning") }
                                         )
-                                        Spacer(modifier = Modifier.height(24.dp))
+                                        Spacer(modifier = Modifier.height(AuraSpacing.L))
                                     }
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(48.dp))
+                        Spacer(modifier = Modifier.height(AuraSpacing.L))
 
                         // 3. DISCOVERY
                         ProfileSectionTitle("Discovery")
                         Text(
                             text = "How AURA applies your visual taste",
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = AuraMutedSlate,
-                            modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
+                            modifier = Modifier.padding(bottom = AuraSpacing.M, start = AuraSpacing.XXS)
                         )
                         
                         // Global Discovery Strategy
@@ -820,25 +842,25 @@ fun ProfileScreen(
                             onPolicyChange = { repository.updateDiscoveryPolicy(it) }
                         )
 
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(AuraSpacing.S))
 
                         // Discovery Intelligence (Weights) with Advanced Controls
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp)),
+                                .clip(RoundedCornerShape(20.dp)),
                             color = AuraSubtleSurface,
                             border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
                         ) {
                             Column {
-                                Column(modifier = Modifier.padding(24.dp)) {
+                                Column(modifier = Modifier.padding(AuraSpacing.L)) {
                                     Text(
                                         text = "Discovery Intelligence",
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = AuraMidnight
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(AuraSpacing.XXS))
                                     Text(
                                         text = "AURA automatically balances your preferences, engagement, and exploration.",
                                         fontSize = 12.sp,
@@ -847,7 +869,7 @@ fun ProfileScreen(
                                     )
                                 }
                                 
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), color = AuraSubtleBorder.copy(alpha = 0.5f))
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = AuraSpacing.L), color = AuraSubtleBorder.copy(alpha = 0.5f))
                                 
                                 SettingsClickRow(
                                     icon = Icons.Default.SettingsSuggest,
@@ -861,36 +883,36 @@ fun ProfileScreen(
                                     enter = expandVertically() + fadeIn(),
                                     exit = shrinkVertically() + fadeOut()
                                 ) {
-                                    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                                    Column(modifier = Modifier.padding(horizontal = AuraSpacing.L, vertical = AuraSpacing.XS)) {
                                         IntelligenceWeightsSection(
                                             preferenceProfile = preferenceProfile,
                                             onPreferenceProfileUpdate = { repository.updatePreferenceProfile(it) },
                                             showTitle = false
                                         )
-                                        Spacer(modifier = Modifier.height(24.dp))
+                                        Spacer(modifier = Modifier.height(AuraSpacing.L))
                                     }
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(48.dp))
+                        Spacer(modifier = Modifier.height(AuraSpacing.L))
 
                         // 4. ADMINISTRATIVE & PRIVACY
                         ProfileSectionTitle("Administrative & Privacy")
                         Text(
                             text = "Manage app settings and privacy",
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = AuraMutedSlate,
-                            modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
+                            modifier = Modifier.padding(bottom = AuraSpacing.M, start = AuraSpacing.XXS)
                         )
                         PrivacyConsentCard(consentState) { repository.updateConsentState(it) }
 
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(AuraSpacing.S))
 
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp)),
+                                .clip(RoundedCornerShape(20.dp)),
                             color = AuraSubtleSurface,
                             border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
                         ) {
@@ -901,7 +923,7 @@ fun ProfileScreen(
                                     subtitle = "Share your thoughts about Aura experience",
                                     onClick = { showFeedbackDialog = true }
                                 )
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), color = AuraSubtleBorder.copy(alpha = 0.5f))
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = AuraSpacing.L), color = AuraSubtleBorder.copy(alpha = 0.5f))
                                 SettingsClickRow(
                                     icon = Icons.Default.PrivacyTip,
                                     title = "Privacy Policy",
@@ -913,20 +935,20 @@ fun ProfileScreen(
 
                         AuraVersionInfo()
 
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(AuraSpacing.S))
 
                         // 5. PLAYBACK DIAGNOSTICS
                         ProfileSectionTitle("Playback Diagnostics")
                         Text(
                             text = "Review playback failures and technical diagnostics stored on this device.",
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = AuraMutedSlate,
-                            modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
+                            modifier = Modifier.padding(bottom = AuraSpacing.M, start = AuraSpacing.XXS)
                         )
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp)),
+                                .clip(RoundedCornerShape(20.dp)),
                             color = AuraSubtleSurface,
                             border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
                         ) {
@@ -941,7 +963,7 @@ fun ProfileScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(48.dp))
+                        Spacer(modifier = Modifier.height(AuraSpacing.XXL))
                     }
                 }
             }
@@ -1060,30 +1082,15 @@ internal fun TasteClusterDetailView(
                 ) {
                     val imageModel = evidence.representativeMediaThumbnailUrl
                     if (imageModel != null) {
-                        if (thumbnailBitmap != null) {
-                            Image(
-                                bitmap = thumbnailBitmap!!.asImageBitmap(),
-                                contentDescription = "Visual evidence for ${evidence.title}",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Fit
-                            )
-                        } else {
-                            AsyncImage(
-                                model = imageModel,
-                                contentDescription = "Visual evidence for ${evidence.title}",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Fit
-                            )
-                        }
-                        
-                        if (evidence.isVideo) {
-                            VideoTilePreview(
-                                itemId = evidence.representativeMediaId ?: "",
-                                videoUri = imageModel,
-                                imageUrl = imageModel,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
+                        AuraMediaThumbnail(
+                            itemId = evidence.representativeMediaId ?: "",
+                            mediaType = if (evidence.isVideo) "VIDEO" else "PHOTO",
+                            imageUrl = imageModel,
+                            uriPath = imageModel, // Fallback for local
+                            title = evidence.title,
+                            modifier = Modifier.fillMaxSize(),
+                            locationTag = "cluster_detail"
+                        )
                     }
                 }
 
@@ -1171,7 +1178,7 @@ private fun SettingsClickRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(vertical = 16.dp, horizontal = 20.dp),
+            .padding(vertical = AuraSpacing.M, horizontal = AuraSpacing.M),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -1180,7 +1187,7 @@ private fun SettingsClickRow(
             modifier = Modifier.weight(1f)
         ) {
             Surface(
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.size(32.dp),
                 color = DiscoveryViolet.copy(alpha = 0.08f),
                 shape = CircleShape
             ) {
@@ -1189,16 +1196,16 @@ private fun SettingsClickRow(
                         imageVector = icon,
                         contentDescription = null,
                         tint = DiscoveryViolet,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(AuraSpacing.M))
             Column {
                 Text(
                     text = title,
                     fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     color = AuraMidnight
                 )
                 Text(
@@ -1213,7 +1220,7 @@ private fun SettingsClickRow(
             imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
             tint = AuraSubtleBorder,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(18.dp)
         )
     }
 }

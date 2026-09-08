@@ -17,6 +17,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
@@ -61,6 +62,7 @@ import com.example.ui.theme.AuraCrispWhite
 import com.example.ui.theme.AuraMidnight
 import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraPurple
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraTheme
 import com.example.ui.theme.DiscoveryViolet
 import kotlinx.coroutines.launch
@@ -95,7 +97,7 @@ fun AuraApp(repository: MediaRepository) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = AuraPurple)
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(AuraSpacing.M))
                     Text(
                         text = initializationDetail,
                         color = AuraMidnight.copy(alpha = 0.7f),
@@ -105,27 +107,28 @@ fun AuraApp(repository: MediaRepository) {
             }
         }
         DatabaseState.TIMEOUT -> {
-            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize().padding(AuraSpacing.L), contentAlignment = Alignment.Center) {
                 androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "Initialization Stalled",
                         color = AuraMidnight,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.Black,
                         style = MaterialTheme.typography.headlineSmall
                     )
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(8.dp))
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(AuraSpacing.XS))
                     Text(
                         text = "Aura is taking longer than usual to secure your library. This might happen during heavy system load.",
                         color = AuraMidnight.copy(alpha = 0.7f),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium
                     )
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(24.dp))
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(AuraSpacing.L))
                     Button(
                         onClick = { repository.initDatabase(context) },
-                        colors = ButtonDefaults.buttonColors(containerColor = AuraPurple)
+                        colors = ButtonDefaults.buttonColors(containerColor = AuraPurple),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("Retry Initialization")
+                        Text("Retry Initialization", fontWeight = FontWeight.Bold)
                     }
                 }
             }

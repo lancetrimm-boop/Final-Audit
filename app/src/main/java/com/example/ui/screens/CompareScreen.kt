@@ -93,6 +93,7 @@ import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraPurpleContainer
 import com.example.ui.theme.AuraSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
 import com.example.ui.theme.AuraSurface
@@ -231,7 +232,7 @@ fun CompareScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                        .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -239,7 +240,7 @@ fun CompareScreen(
                         text = if (session.isActive) "Compare Selection — Round ${session.roundNumber}" else "Compare",
                         style = MaterialTheme.typography.titleSmall,
                         color = DiscoveryViolet,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Black
                     )
                     Row {
                         IconButton(onClick = { showInfoDialog = true }, modifier = Modifier.size(32.dp)) {
@@ -415,15 +416,15 @@ fun CompareScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 12.dp, top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            .padding(bottom = AuraSpacing.S, top = AuraSpacing.XXS),
+                        horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(22.dp))
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
                                 .clickable { onVote(pairwiseState.optionA.id) }
                                 .testTag("prefer_left_button"),
                             color = Color.Transparent,
@@ -434,19 +435,19 @@ fun CompareScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "Prefer Left",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
+                                    text = "PREFER LEFT",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black
                                 )
                             }
                         }
 
                         Surface(
                             modifier = Modifier
-                                .weight(0.8f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(22.dp))
-                                .border(1.dp, AuraSubtleBorder, RoundedCornerShape(22.dp))
+                                .weight(0.7f)
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .border(1.dp, AuraSubtleBorder, RoundedCornerShape(20.dp))
                                 .clickable { onSkip() }
                                 .testTag("skip_button"),
                             color = AuraCrispWhite,
@@ -454,9 +455,10 @@ fun CompareScreen(
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = "Equal / Skip",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
+                                    text = "SKIP",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = AuraMutedSlate
                                 )
                             }
                         }
@@ -464,8 +466,8 @@ fun CompareScreen(
                         Surface(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(22.dp))
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
                                 .clickable { onVote(pairwiseState.optionB.id) }
                                 .testTag("prefer_right_button"),
                             color = Color.Transparent,
@@ -476,9 +478,9 @@ fun CompareScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "Prefer Right",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
+                                    text = "PREFER RIGHT",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black
                                 )
                             }
                         }
@@ -536,6 +538,9 @@ private fun CompareMediaTile(
     }
 
     var thumbnail by remember(item.id) { mutableStateOf<Bitmap?>(null) }
+    
+    // AURA REPAIR: Track if video is actually rendering to prevent black frame gap
+    var isVideoRendering by remember(item.id) { mutableStateOf(false) }
     
     LaunchedEffect(item.id) {
         val targetUri = item.uriPath.ifEmpty { item.imageUrl }
@@ -615,11 +620,13 @@ private fun CompareMediaTile(
                 itemId = item.id,
                 videoUri = playableUri,
                 imageUrl = item.imageUrl,
+                onFirstFrameRendered = { isVideoRendering = true },
                 locationTag = locationTag,
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(16.dp))
                     .clipToBounds()
+                    .graphicsLayer(alpha = if (isVideoRendering) 1f else 0f)
             )
         } else {
             // PHOTO (or unplayable video fallback)
@@ -671,34 +678,34 @@ private fun CompareMediaTile(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))))
-                .padding(12.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))))
+                .padding(AuraSpacing.S)
         ) {
             if (traitBadge != null) {
                 Surface(
                     color = DiscoveryViolet,
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier.padding(bottom = 4.dp)
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.padding(bottom = AuraSpacing.XXS)
                 ) {
                     Text(
-                        text = traitBadge,
+                        text = traitBadge.uppercase(),
                         color = Color.White,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Black,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
             }
             Text(
-                text = label,
+                text = label.uppercase(),
                 color = Color.White,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 0.5.sp
             )
             Text(
                 text = item.title,
-                color = Color.White.copy(alpha = 0.8f),
+                color = Color.White.copy(alpha = 0.85f),
                 fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -768,13 +775,13 @@ private fun CompareControlRow(
 ) {
     androidx.compose.foundation.lazy.LazyRow(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS),
+        horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS),
         verticalAlignment = Alignment.CenterVertically
     ) {
         item {
             AuraSortSelector(
-                label = "Media Type",
+                label = "Media",
                 currentOption = when (mediaType) {
                     CompareMediaTypeFilter.PHOTOS -> "Photos"
                     CompareMediaTypeFilter.VIDEOS -> "Videos"
@@ -793,11 +800,11 @@ private fun CompareControlRow(
 
         item {
             AuraSortSelector(
-                label = "Intelligence",
+                label = "Vibe",
                 currentOption = when (strategy) {
                     CompareStrategy.PERSONALIZED -> "Personalized"
                     CompareStrategy.REDISCOVER -> "Rediscover"
-                    CompareStrategy.LEAST_INTERACTED -> "Least Compared"
+                    CompareStrategy.LEAST_INTERACTED -> "Review"
                     CompareStrategy.EXPLORE -> "Experimental"
                 },
                 isSelected = activeGroup == CompareFilterGroup.LEARNING,
@@ -811,7 +818,7 @@ private fun CompareControlRow(
                     when (it) {
                         CompareStrategy.PERSONALIZED -> "Personalized"
                         CompareStrategy.REDISCOVER -> "Rediscover"
-                        CompareStrategy.LEAST_INTERACTED -> "Least Compared"
+                        CompareStrategy.LEAST_INTERACTED -> "Review"
                         CompareStrategy.EXPLORE -> "Experimental"
                     }
                 },
@@ -823,11 +830,11 @@ private fun CompareControlRow(
             AuraSortSelector(
                 label = "Priority",
                 currentOption = when (sort) {
-                    CompareSortOption.RECOMMENDED -> "Recommended"
-                    CompareSortOption.NEWEST -> "Newest First"
-                    CompareSortOption.OLDEST -> "Oldest First"
-                    CompareSortOption.LARGEST_FILES -> "Largest Files"
-                    CompareSortOption.SMALLEST_FILES -> "Smallest Files"
+                    CompareSortOption.RECOMMENDED -> "Auto"
+                    CompareSortOption.NEWEST -> "Newest"
+                    CompareSortOption.OLDEST -> "Oldest"
+                    CompareSortOption.LARGEST_FILES -> "Largest"
+                    CompareSortOption.SMALLEST_FILES -> "Smallest"
                 },
                 isSelected = activeGroup == CompareFilterGroup.STANDARD,
                 options = CompareSortOption.entries,
@@ -838,7 +845,7 @@ private fun CompareControlRow(
                 onPillClick = { onGroupClick(CompareFilterGroup.STANDARD) },
                 getDisplayName = { 
                     when (it) {
-                        CompareSortOption.RECOMMENDED -> "Recommended"
+                        CompareSortOption.RECOMMENDED -> "Auto"
                         CompareSortOption.NEWEST -> "Newest"
                         CompareSortOption.OLDEST -> "Oldest"
                         CompareSortOption.LARGEST_FILES -> "Largest"

@@ -36,6 +36,7 @@ import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
 import com.example.ui.theme.AuraSurface
@@ -124,25 +125,26 @@ fun CleanupReviewScreen(
 
 @Composable
 private fun HeaderSection(uiState: CleanupReviewUiState) {
-    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+    Column(modifier = Modifier.padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.S)) {
         Text(
             "Aura found media that may no longer add value to your library.",
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = AuraMutedSlate
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XXS))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = formatSize(uiState.storageRecoveryEstimate),
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Black,
                 color = DiscoveryViolet
             )
             Text(
-                " can be reviewed",
-                style = MaterialTheme.typography.titleMedium,
+                " CAN BE REVIEWED",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black,
                 color = AuraMidnight,
-                modifier = Modifier.padding(start = 4.dp)
+                modifier = Modifier.padding(start = AuraSpacing.XXS)
             )
         }
     }
@@ -184,24 +186,24 @@ private fun CategoryChip(
         shape = androidx.compose.foundation.shape.CircleShape,
         color = if (isSelected) DiscoveryViolet.copy(alpha = 0.12f) else Color.Transparent,
         border = androidx.compose.foundation.BorderStroke(
-            width = if (isSelected) 2.dp else 1.dp,
-            brush = if (isSelected) DiscoveryGradient else androidx.compose.ui.graphics.SolidColor(AuraMutedSlate.copy(alpha = 0.5f))
+            width = if (isSelected) 1.5.dp else 1.dp,
+            brush = if (isSelected) DiscoveryGradient else androidx.compose.ui.graphics.SolidColor(AuraSubtleBorder)
         )
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XS),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = label,
-                fontSize = 10.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                text = label.uppercase(),
+                fontSize = 9.sp,
+                fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
                 color = if (isSelected) DiscoveryViolet else AuraMutedSlate,
                 letterSpacing = 0.5.sp
             )
             Text(
                 text = "$count items",
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Black,
                 color = if (isSelected) DiscoveryViolet else AuraMidnight
             )
@@ -220,7 +222,7 @@ private fun RecommendationsList(
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XXS),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -229,17 +231,18 @@ private fun RecommendationsList(
             ) {
                 Text(
                     if (uiState.selectedIds.isEmpty()) "SELECT ALL" else "CLEAR SELECTION",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = DiscoveryViolet
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = DiscoveryViolet,
+                    letterSpacing = 1.sp
                 )
             }
             
             var showSortMenu by remember { mutableStateOf(false) }
             
             Box {
-                IconButton(onClick = { showSortMenu = true }) {
-                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort", tint = AuraMutedSlate)
+                IconButton(onClick = { showSortMenu = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort", tint = AuraMutedSlate, modifier = Modifier.size(20.dp))
                 }
                 
                 DropdownMenu(
@@ -265,8 +268,8 @@ private fun RecommendationsList(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(start = AuraSpacing.M, end = AuraSpacing.M, bottom = AuraSpacing.XXXL),
+            verticalArrangement = Arrangement.spacedBy(AuraSpacing.GridGap)
         ) {
             items(uiState.filteredRecommendations, key = { it.mediaId }) { rec ->
                 val item = uiState.mediaItems[rec.mediaId] ?: MediaItem(rec.mediaId, "Unknown", "PHOTO")
@@ -293,31 +296,32 @@ private fun BulkActionSurface(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(16.dp),
+            .padding(AuraSpacing.M),
         shape = RoundedCornerShape(20.dp),
         color = Color.Black,
         tonalElevation = 8.dp
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(AuraSpacing.M),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Selected: $selectedCount items", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Text("Recover: ${formatSize(recoveryBytes)}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                Text("Selected: $selectedCount items", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("Recover: ${formatSize(recoveryBytes)}", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
             }
             
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onKeepAll) {
-                    Text("KEEP ALL", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
+                TextButton(onClick = onKeepAll, contentPadding = PaddingValues(horizontal = AuraSpacing.XS)) {
+                    Text("KEEP ALL", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
                 }
                 Button(
                     onClick = onDelete,
                     colors = ButtonDefaults.buttonColors(containerColor = DiscoveryViolet),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = AuraSpacing.M)
                 ) {
-                    Text("DELETE ($selectedCount)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("DELETE ($selectedCount)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
                 }
             }
         }

@@ -31,6 +31,7 @@ import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
 import com.example.ui.theme.AuraSurface
@@ -71,12 +72,12 @@ fun TasteDnaControlPanel(
             // 2. Aura Style Analysis (placed below AI learning)
             AiDescriptionSection(aiDescription)
             
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             
             // 3. Discovery Intelligence (4 tuners)
             IntelligenceWeightsSection(preferenceProfile, onPreferenceProfileUpdate)
             
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             
             // 4. Collapsible taste-slider menu (24 sliders)
             CollapsibleTasteSliders(
@@ -86,13 +87,13 @@ fun TasteDnaControlPanel(
                 onTasteDnaUpdate = onTasteDnaUpdate
             )
             
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             RadarSection(tasteDNA)
         } else if (showWeightsAtTop) {
             IntelligenceWeightsSection(preferenceProfile, onPreferenceProfileUpdate)
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             AiLearningToggleSection(tasteDNA, isEmbedded, onTasteDnaUpdate)
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             
             if (collapsibleSliders) {
                 CollapsibleTasteSliders(
@@ -105,14 +106,14 @@ fun TasteDnaControlPanel(
                 TasteSliders(tasteDNA, onTasteDnaUpdate)
             }
             
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             RadarSection(tasteDNA)
             AiDescriptionSection(aiDescription)
         } else {
             RadarSection(tasteDNA)
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             AiLearningToggleSection(tasteDNA, isEmbedded, onTasteDnaUpdate)
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             
             if (collapsibleSliders) {
                 CollapsibleTasteSliders(
@@ -126,7 +127,7 @@ fun TasteDnaControlPanel(
             }
             
             AiDescriptionSection(aiDescription)
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.L))
             IntelligenceWeightsSection(preferenceProfile, onPreferenceProfileUpdate)
         }
     }
@@ -167,7 +168,7 @@ private fun RadarSection(tasteDNA: TasteDNA) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 16.dp),
+            .padding(vertical = AuraSpacing.M),
         contentAlignment = Alignment.Center
     ) {
         TasteRadarChart(
@@ -185,25 +186,25 @@ private fun AiLearningToggleSection(
 ) {
     Surface(
         color = if (isEmbedded) AuraSubtleSurface.copy(alpha = 0.5f) else AuraSubtleSurface,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(1.dp, AuraSubtleBorder)
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(AuraSpacing.M),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "AI Taste Learning",
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = AuraMidnight
                 )
                 Text(
                     text = "Allow Aura to adapt your profile based on your interactions.",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = AuraSlate
                 )
             }
@@ -216,7 +217,7 @@ private fun AiLearningToggleSection(
                     uncheckedThumbColor = AuraMutedSlate,
                     uncheckedTrackColor = AuraSubtleBorder
                 ),
-                modifier = Modifier.scale(0.85f)
+                modifier = Modifier.scale(0.8f)
             )
         }
     }
@@ -229,7 +230,7 @@ internal fun TasteSliders(
 ) {
     Column {
         ControlSectionHeader("Aesthetic Character")
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             ConsumerSlider("Vibrancy", tasteDNA.effectiveVibrancy, "Subtle", "Vibrant", 
                 isAdjusted = tasteDNA.isFineTuningEnabled && tasteDNA.vibrancy != tasteDNA.learnedVibrancy
             ) { onTasteDnaUpdate(tasteDNA.updateBaseline(newVibrancy = it)) }
@@ -263,10 +264,10 @@ internal fun TasteSliders(
             ) { onTasteDnaUpdate(tasteDNA.updateBaseline(newGrain = it)) }
         }
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.L))
 
         ControlSectionHeader("Structure & Flow")
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             ConsumerSlider("Symmetry", tasteDNA.effectiveSymmetry, "Asymmetric", "Symmetric",
                 isAdjusted = tasteDNA.isFineTuningEnabled && tasteDNA.symmetry != tasteDNA.learnedSymmetry
             ) { onTasteDnaUpdate(tasteDNA.updateBaseline(newSymmetry = it)) }
@@ -300,10 +301,10 @@ internal fun TasteSliders(
             ) { onTasteDnaUpdate(tasteDNA.updateBaseline(newDensity = it)) }
         }
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.L))
 
         ControlSectionHeader("Style & Sentiment")
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             ConsumerSlider("Naturalism", tasteDNA.effectiveNaturalism, "Stylized", "Organic",
                 isAdjusted = tasteDNA.isFineTuningEnabled && tasteDNA.naturalism != tasteDNA.learnedNaturalism
             ) { onTasteDnaUpdate(tasteDNA.updateBaseline(newNaturalism = it)) }
@@ -351,13 +352,13 @@ internal fun CollapsibleTasteSliders(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onToggle() }
-                .padding(vertical = 12.dp),
+                .padding(vertical = AuraSpacing.XS),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
                 text = "Tune your Tastes",
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = AuraMidnight
             )
@@ -383,36 +384,36 @@ internal fun CollapsibleTasteSliders(
 @Composable
 internal fun AiDescriptionSection(aiDescription: String?) {
     if (!aiDescription.isNullOrBlank()) {
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XL))
         Surface(
             color = DiscoveryViolet.copy(alpha = 0.05f),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth(),
             border = BorderStroke(1.dp, AuraSubtleBorder)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(AuraSpacing.M)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Outlined.AutoAwesome,
                         contentDescription = null,
                         tint = DiscoveryViolet,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(AuraSpacing.XS))
                     Text(
                         text = "AURA STYLE ANALYSIS",
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Black,
                         color = DiscoveryViolet,
-                        letterSpacing = 1.2.sp
+                        letterSpacing = 1.sp
                     )
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(AuraSpacing.XXS))
                 Text(
                     text = aiDescription,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     color = AuraMidnight,
-                    lineHeight = 18.sp
+                    lineHeight = 16.sp
                 )
             }
         }
@@ -428,7 +429,7 @@ internal fun IntelligenceWeightsSection(
     if (showTitle) {
         ControlSectionHeader("Discovery Intelligence")
     }
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
         ConsumerSlider(
             label = "Content Similarity",
             value = preferenceProfile.contentSimilarityWeight,
@@ -463,11 +464,11 @@ internal fun IntelligenceWeightsSection(
 private fun ControlSectionHeader(title: String) {
     Text(
         text = title.uppercase(),
-        fontSize = 11.sp,
+        fontSize = 10.sp,
         fontWeight = FontWeight.Black,
         color = DiscoveryViolet,
         letterSpacing = 1.2.sp,
-        modifier = Modifier.padding(bottom = 16.dp)
+        modifier = Modifier.padding(bottom = AuraSpacing.XS)
     )
 }
 
@@ -490,23 +491,23 @@ private fun ConsumerSlider(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AuraMidnight)
+                Text(text = label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AuraMidnight)
                 if (isAdjusted) {
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(AuraSpacing.XS))
                     Surface(color = DiscoveryViolet.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
                         Text(
                             "ADAPTED", 
                             fontSize = 8.sp, 
                             fontWeight = FontWeight.Black, 
                             color = DiscoveryViolet, 
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                         )
                     }
                 }
             }
             Text(
                 text = "$percentage%", 
-                fontSize = 13.sp, 
+                fontSize = 12.sp, 
                 fontWeight = FontWeight.Bold,
                 color = if (isAdjusted) DiscoveryViolet else AuraMutedSlate
             )
@@ -515,13 +516,13 @@ private fun ConsumerSlider(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(32.dp),
+                .height(28.dp),
             contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
                     .width(1.dp)
-                    .height(12.dp)
+                    .height(8.dp)
                     .background(AuraSubtleBorder)
             )
 
@@ -540,11 +541,11 @@ private fun ConsumerSlider(
 
         if (leftLabel != null && rightLabel != null) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(text = leftLabel, fontSize = 9.sp, color = AuraMutedSlate, fontWeight = FontWeight.Medium)
-                Text(text = rightLabel, fontSize = 9.sp, color = AuraMutedSlate, fontWeight = FontWeight.Medium)
+                Text(text = leftLabel, fontSize = 8.sp, color = AuraMutedSlate, fontWeight = FontWeight.Medium)
+                Text(text = rightLabel, fontSize = 8.sp, color = AuraMutedSlate, fontWeight = FontWeight.Medium)
             }
         }
     }

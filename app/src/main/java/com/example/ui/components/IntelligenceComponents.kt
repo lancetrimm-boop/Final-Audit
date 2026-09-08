@@ -42,6 +42,7 @@ import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSuccess
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
@@ -63,31 +64,32 @@ fun IntelligenceMetricCard(
     Surface(
         onClick = onClick,
         modifier = Modifier
-            .width(120.dp)
-            .height(80.dp)
-            .padding(4.dp),
+            .width(100.dp)
+            .height(64.dp)
+            .padding(AuraSpacing.XXXS),
         color = if (isSelected) DiscoveryViolet else AuraSubtleSurface,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) DiscoveryViolet else AuraSubtleBorder)
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(AuraSpacing.XS),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = value.toString(),
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Black,
                 color = if (isSelected) AuraCrispWhite else AuraMidnight
             )
             Text(
-                text = label,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Medium,
+                text = label.uppercase(),
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Black,
                 color = if (isSelected) AuraCrispWhite.copy(alpha = 0.8f) else AuraMutedSlate,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                lineHeight = 12.sp
+                lineHeight = 10.sp,
+                letterSpacing = 0.5.sp
             )
         }
     }
@@ -102,13 +104,13 @@ fun FindingCard(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = AuraSpacing.XXXS),
         colors = CardDefaults.cardColors(containerColor = AuraCrispWhite),
         border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -117,34 +119,34 @@ fun FindingCard(
                 FindingClassificationBadge(finding.classification)
                 Text(
                     text = SimpleDateFormat("MMM d", Locale.US).format(Date(finding.dateDiscovered)),
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Medium,
                     color = AuraMutedSlate
                 )
             }
             
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XS))
             
             Text(
                 text = finding.title,
-                fontSize = 18.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = AuraMidnight,
-                lineHeight = 22.sp
-            )
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            Text(
-                text = finding.summary,
-                fontSize = 14.sp,
-                color = AuraSlate,
-                maxLines = 2,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 lineHeight = 20.sp
             )
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XXS))
+            
+            Text(
+                text = finding.summary,
+                fontSize = 13.sp,
+                color = AuraSlate,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                lineHeight = 18.sp
+            )
+            
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -153,18 +155,18 @@ fun FindingCard(
                 Icon(
                     Icons.Outlined.Analytics,
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(12.dp),
                     tint = DiscoveryViolet
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(AuraSpacing.XXS))
                 Text(
                     text = "${finding.technicalDetails.evidence.productionCount} samples",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = DiscoveryViolet
                 )
                 Spacer(modifier = Modifier.weight(1f))
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = AuraSubtleBorder, modifier = Modifier.size(16.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = AuraSubtleBorder, modifier = Modifier.size(14.dp))
             }
         }
     }
@@ -179,12 +181,12 @@ fun ImprovementReviewCard(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = AuraSpacing.XXS),
         colors = CardDefaults.cardColors(containerColor = AuraCrispWhite),
         border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -194,32 +196,32 @@ fun ImprovementReviewCard(
                 PriorityBadge(improvement.priority)
             }
             
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XS))
             
             Text(
                 text = improvement.title,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.ExtraBold,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Black,
                 color = AuraMidnight
             )
             
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XS))
             
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MetricItem("EXPECTED IMPACT", improvement.expectedImpact, Modifier.weight(1f))
+                MetricItem("IMPACT", improvement.expectedImpact, Modifier.weight(1f))
                 MetricItem("RISK", improvement.risk, Modifier.weight(1f))
             }
             
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             
             Button(
                 onClick = onClick,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = DiscoveryViolet),
-                shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(12.dp)
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(AuraSpacing.XS)
             ) {
-                Text("Review Recommendation", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("Review Recommendation", fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -700,65 +702,71 @@ fun AuraMaturityCard(maturity: AuraMaturitySnapshot) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = AuraSubtleSurface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
+        border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder),
+        shape = RoundedCornerShape(16.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
             // 1. Personalization Confidence (Signal Quality)
             Text(
                 "Personalization Confidence",
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
                 color = AuraMidnight
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XXS))
             LinearProgressIndicator(
                 progress = { maturity.personalizationConfidence.toFloat() },
-                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
+                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
                 color = DiscoveryViolet,
                 trackColor = AuraSubtleBorder
             )
             Text(
                 "How well Aura understands your aesthetic preferences.",
+                style = MaterialTheme.typography.bodySmall,
                 fontSize = 10.sp,
                 color = AuraMutedSlate,
                 modifier = Modifier.padding(top = 4.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
 
             // 2. Data Coverage (Signal Quantity)
             Text(
                 "Library Learning Coverage",
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
                 color = AuraMidnight
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XXS))
             LinearProgressIndicator(
                 progress = { maturity.dataCoverage.toFloat() },
-                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
+                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
                 color = DiscoveryMagenta,
                 trackColor = AuraSubtleBorder
             )
             Text(
                 "Proportion of your library that Aura has evaluated.",
+                style = MaterialTheme.typography.bodySmall,
                 fontSize = 10.sp,
                 color = AuraMutedSlate,
                 modifier = Modifier.padding(top = 4.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
 
             // 3. Metadata row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
             ) {
                 Column {
-                    Text("STATUS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = AuraMutedSlate)
-                    Text(maturity.calibrationStatus.name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuraMidnight)
+                    Text("STATUS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = AuraMutedSlate)
+                    Text(maturity.calibrationStatus.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = DiscoveryViolet)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("LEARNING DATA", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = AuraMutedSlate)
-                    Text("${maturity.totalInteractionsAnalyzed} signals across ${maturity.itemsInLearningPool} items", fontSize = 11.sp, color = AuraMidnight)
+                    Text("LEARNING DATA", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = AuraMutedSlate)
+                    Text("${maturity.totalInteractionsAnalyzed} signals", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = AuraMidnight)
                 }
             }
         }
@@ -767,13 +775,19 @@ fun AuraMaturityCard(maturity: AuraMaturitySnapshot) {
 
 @Composable
 fun AuraEngagementGrid(engagement: EngagementSnapshot) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Engagement Insight", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = AuraMidnight)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
+        Text(
+            "ENGAGEMENT INSIGHT", 
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = AuraMutedSlate,
+            letterSpacing = 1.sp
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             MetricBox("Comp. Rate", "${(engagement.completionRate * 100).toInt()}%", Modifier.weight(1f))
             MetricBox("Fav. Density", "${(engagement.favoriteDensity * 100).toInt()}%", Modifier.weight(1f))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             MetricBox("Skip Velocity", "%.1f/min".format(engagement.averageSkipVelocity), Modifier.weight(1f))
             MetricBox("Peak Hour", "${engagement.mostActiveHour}:00", Modifier.weight(1f))
         }
@@ -784,13 +798,13 @@ fun AuraEngagementGrid(engagement: EngagementSnapshot) {
 private fun MetricBox(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(12.dp),
         color = AuraSubtleSurface,
         border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(label, fontSize = 11.sp, color = AuraMutedSlate)
-            Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AuraMidnight)
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = AuraMutedSlate, fontWeight = FontWeight.Bold)
+            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = AuraMidnight)
         }
     }
 }

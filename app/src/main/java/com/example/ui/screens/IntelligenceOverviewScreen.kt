@@ -29,6 +29,7 @@ import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSuccess
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
@@ -65,8 +66,8 @@ fun IntelligenceOverviewScreen(
                 .fillMaxSize()
                 .background(AuraCrispWhite)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+                .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XS),
+            verticalArrangement = Arrangement.spacedBy(AuraSpacing.L)
         ) {
             // TOP EXECUTIVE SUMMARY
             SummaryMessageHeader(report.executiveSummary)
@@ -92,27 +93,27 @@ fun IntelligenceOverviewScreen(
             // MASTER INTELLIGENCE (SECONDARY LAYER)
             MasterIntelligenceAccess(onViewMasterReport = onViewMasterReport)
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XL))
         }
     }
 }
 
 @Composable
 private fun SummaryMessageHeader(summary: ExecutiveSummary) {
-    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+    Column(modifier = Modifier.padding(vertical = AuraSpacing.XS)) {
         Text(
             text = "Intelligence",
-            style = MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.ExtraBold,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
             color = AuraMidnight,
-            letterSpacing = (-1).sp
+            letterSpacing = (-0.5).sp
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XXS))
         Text(
             text = summary.plainEnglishSummary,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.bodyLarge,
             color = AuraSlate,
-            lineHeight = 24.sp,
+            lineHeight = 22.sp,
             fontWeight = FontWeight.Medium
         )
     }

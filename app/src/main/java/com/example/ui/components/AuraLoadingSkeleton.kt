@@ -22,6 +22,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleSurface
 
 @Composable
@@ -56,10 +57,10 @@ fun AuraSkeletonTile(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(brush)
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XS))
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.8f)
@@ -67,7 +68,7 @@ fun AuraSkeletonTile(
                 .clip(RoundedCornerShape(4.dp))
                 .background(brush)
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XXS))
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.5f)

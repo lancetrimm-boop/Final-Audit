@@ -21,6 +21,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.intelligence.CalibrationStatus
 import com.example.ui.components.TasteRadarChart
+import com.example.ui.theme.AuraSpacing
+import com.example.ui.theme.AuraMidnight
+import com.example.ui.theme.AuraMutedSlate
+import com.example.ui.theme.DiscoveryViolet
+import com.example.ui.theme.DiscoveryMagenta
 
 /**
  * Main dashboard for user-facing local intelligence insights (Phase 4).
@@ -37,7 +42,13 @@ fun IntelligenceDashboardScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Intelligence Dashboard", fontWeight = FontWeight.Bold) },
+                title = { 
+                    Text(
+                        "Intelligence Dashboard", 
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black 
+                    ) 
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.Info, contentDescription = "Back")
@@ -53,7 +64,7 @@ fun IntelligenceDashboardScreen(
     ) { padding ->
         if (state.isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(color = DiscoveryViolet)
             }
         } else if (report != null) {
             Column(
@@ -61,8 +72,8 @@ fun IntelligenceDashboardScreen(
                     .padding(padding)
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                    .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.S),
+                verticalArrangement = Arrangement.spacedBy(AuraSpacing.M)
             ) {
                 // 1. Maturity & Learning Stats
                 MaturityCard(report.maturity)
@@ -70,28 +81,37 @@ fun IntelligenceDashboardScreen(
                 // 2. Taste DNA Radar
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(16.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(AuraSpacing.M),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        Text(
+                            "TASTE SPECTRUM",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = DiscoveryViolet,
+                            letterSpacing = 1.sp
+                        )
+                        Spacer(modifier = Modifier.height(AuraSpacing.M))
                         TasteRadarChart(
                             dimensions = report.tasteProfile.dimensions,
-                            modifier = Modifier.size(280.dp)
+                            modifier = Modifier.size(260.dp)
                         )
                         
                         if (report.maturity.calibrationStatus == CalibrationStatus.INITIALIZING) {
                             Surface(
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.padding(top = 16.dp)
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.padding(top = AuraSpacing.M)
                             ) {
                                 Text(
                                     "Continue comparing items in 'Compare' to refine your Taste DNA profile.",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(12.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(AuraSpacing.S),
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                                     textAlign = TextAlign.Center
                                 )
@@ -102,16 +122,26 @@ fun IntelligenceDashboardScreen(
 
                 // 3. Top Traits
                 if (report.tasteProfile.topTraits.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Core Style Identifiers", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
+                        Text(
+                            "CORE STYLE IDENTIFIERS", 
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = AuraMutedSlate,
+                            letterSpacing = 1.sp
+                        )
                         FlowRow(
-                            mainAxisSpacing = 8.dp,
-                            crossAxisSpacing = 8.dp
+                            mainAxisSpacing = AuraSpacing.XS,
+                            crossAxisSpacing = AuraSpacing.XS
                         ) {
                             report.tasteProfile.topTraits.forEach { trait ->
                                 SuggestionChip(
                                     onClick = { },
-                                    label = { Text(trait) }
+                                    label = { Text(trait, style = MaterialTheme.typography.labelMedium) },
+                                    shape = CircleShape,
+                                    colors = SuggestionChipDefaults.suggestionChipColors(
+                                        labelColor = AuraMidnight
+                                    )
                                 )
                             }
                         }
@@ -120,6 +150,8 @@ fun IntelligenceDashboardScreen(
 
                 // 4. Interaction Quality
                 EngagementGrid(report.engagement)
+                
+                Spacer(modifier = Modifier.height(AuraSpacing.L))
             }
         }
     }
@@ -129,65 +161,72 @@ fun IntelligenceDashboardScreen(
 private fun MaturityCard(maturity: com.example.data.intelligence.AuraMaturitySnapshot) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f)),
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
             // 1. Personalization Confidence (Signal Quality)
             Text(
                 "Personalization Confidence",
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = AuraMidnight
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XXS))
             LinearProgressIndicator(
                 progress = { maturity.personalizationConfidence.toFloat() },
-                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                color = DiscoveryViolet,
+                trackColor = DiscoveryViolet.copy(alpha = 0.1f)
             )
             Text(
                 "How well Aura understands your aesthetic preferences.",
+                style = MaterialTheme.typography.bodySmall,
                 fontSize = 10.sp,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                color = AuraMutedSlate,
                 modifier = Modifier.padding(top = 4.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
 
             // 2. Data Coverage (Signal Quantity)
             Text(
                 "Library Learning Coverage",
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = AuraMidnight
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XXS))
             LinearProgressIndicator(
                 progress = { maturity.dataCoverage.toFloat() },
-                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
-                color = MaterialTheme.colorScheme.secondary,
-                trackColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                color = DiscoveryMagenta,
+                trackColor = DiscoveryMagenta.copy(alpha = 0.1f)
             )
             Text(
                 "Proportion of your library that Aura has evaluated.",
+                style = MaterialTheme.typography.bodySmall,
                 fontSize = 10.sp,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                color = AuraMutedSlate,
                 modifier = Modifier.padding(top = 4.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
 
             // 3. Metadata row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
             ) {
                 Column {
-                    Text("STATUS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
-                    Text(maturity.calibrationStatus.name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("STATUS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = AuraMutedSlate)
+                    Text(maturity.calibrationStatus.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = DiscoveryViolet)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("LEARNING DATA", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
-                    Text("${maturity.totalInteractionsAnalyzed} signals across ${maturity.itemsInLearningPool} items", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("LEARNING DATA", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = AuraMutedSlate)
+                    Text("${maturity.totalInteractionsAnalyzed} signals", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = AuraMidnight)
                 }
             }
         }
@@ -196,13 +235,19 @@ private fun MaturityCard(maturity: com.example.data.intelligence.AuraMaturitySna
 
 @Composable
 private fun EngagementGrid(engagement: com.example.data.intelligence.EngagementSnapshot) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Engagement Insight", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
+        Text(
+            "ENGAGEMENT INSIGHT", 
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = AuraMutedSlate,
+            letterSpacing = 1.sp
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             MetricBox("Comp. Rate", "${(engagement.completionRate * 100).toInt()}%", Modifier.weight(1f))
             MetricBox("Fav. Density", "${(engagement.favoriteDensity * 100).toInt()}%", Modifier.weight(1f))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             MetricBox("Skip Velocity", "${engagement.averageSkipVelocity}/min", Modifier.weight(1f))
             MetricBox("Peak Hour", "${engagement.mostActiveHour}:00", Modifier.weight(1f))
         }
@@ -213,12 +258,13 @@ private fun EngagementGrid(engagement: com.example.data.intelligence.EngagementS
 private fun MetricBox(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = AuraMutedSlate, fontWeight = FontWeight.Bold)
+            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = AuraMidnight)
         }
     }
 }

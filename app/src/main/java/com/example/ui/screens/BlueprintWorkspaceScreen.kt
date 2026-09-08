@@ -38,7 +38,19 @@ import com.example.ui.components.FindingCard
 import com.example.ui.components.ImprovementReviewCard
 import com.example.ui.components.IntelligenceMetricCard
 import com.example.ui.components.*
-import com.example.ui.theme.*
+import com.example.ui.theme.AuraBackground
+import com.example.ui.theme.AuraBorder
+import com.example.ui.theme.AuraMidnight
+import com.example.ui.theme.AuraOnSurface
+import com.example.ui.theme.AuraOnSurfaceVariant
+import com.example.ui.theme.AuraPurple
+import com.example.ui.theme.AuraSpacing
+import com.example.ui.theme.AuraSubtleBorder
+import com.example.ui.theme.AuraSubtleSurface
+import com.example.ui.theme.AuraSurface
+import com.example.ui.theme.AuraSurfaceVariant
+import com.example.ui.theme.DiscoveryGradient
+import com.example.ui.theme.DiscoveryViolet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,8 +110,8 @@ fun BlueprintWorkspaceScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                    .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.XS),
+                verticalArrangement = Arrangement.spacedBy(AuraSpacing.L)
             ) {
                 // 1. AURA INTELLIGENCE SUMMARY
                 IntelligenceSummarySection(state.summaryMetrics, onFilterSelect = { viewModel.setFilter(it) })
@@ -144,13 +156,19 @@ fun BlueprintWorkspaceScreen(
 @Composable
 private fun IntelligenceSummarySection(metrics: IntelligenceMetrics, onFilterSelect: (IntelligenceMetricsFilter) -> Unit) {
     Column {
-        Text("Aura Intelligence", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = AuraOnSurface)
-        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            "Aura Intelligence", 
+            style = MaterialTheme.typography.titleMedium, 
+            fontWeight = FontWeight.Black, 
+            color = AuraMidnight,
+            letterSpacing = (-0.5).sp
+        )
+        Spacer(modifier = Modifier.height(AuraSpacing.S))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS)
         ) {
             IntelligenceMetricCard("New Findings", metrics.newFindings) { onFilterSelect(IntelligenceMetricsFilter.NEW) }
             IntelligenceMetricCard("Needs Review", metrics.needsReview) { onFilterSelect(IntelligenceMetricsFilter.NEEDS_REVIEW) }

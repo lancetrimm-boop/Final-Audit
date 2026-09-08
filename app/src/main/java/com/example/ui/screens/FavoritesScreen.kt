@@ -46,6 +46,7 @@ import com.example.ui.components.AuraLogoIcon
 import com.example.ui.theme.AuraCrispWhite
 import com.example.ui.theme.AuraMidnight
 import com.example.ui.theme.AuraMutedSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.DiscoveryGradient
 import com.example.ui.theme.DiscoveryViolet
@@ -103,22 +104,22 @@ fun FavoritesScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 32.dp)
+                contentPadding = PaddingValues(bottom = AuraSpacing.XXL)
             ) {
                 items(sections) { section ->
-                    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                    Column(modifier = Modifier.padding(vertical = AuraSpacing.XS)) {
                         AuraSectionHeader(
                             title = section.title,
                             subtitle = section.subtitle
                         )
                         
                         LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.height(180.dp)
+                            contentPadding = PaddingValues(horizontal = AuraSpacing.M),
+                            horizontalArrangement = Arrangement.spacedBy(AuraSpacing.S),
+                            modifier = Modifier.height(160.dp)
                         ) {
                             items(section.items, key = { it.id }) { item ->
-                                Box(modifier = Modifier.width(140.dp)) {
+                                Box(modifier = Modifier.width(120.dp)) {
                                     AuraMediaTile(
                                         item = item,
                                         onClick = { onMediaSelect(item, section.items) },

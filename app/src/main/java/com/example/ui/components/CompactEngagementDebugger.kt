@@ -21,7 +21,11 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.MediaRepository
 import com.example.data.TasteDNA
-import com.example.ui.theme.*
+import com.example.ui.theme.AuraOnSurface
+import com.example.ui.theme.AuraOnSurfaceVariant
+import com.example.ui.theme.AuraPurple
+import com.example.ui.theme.AuraSpacing
+import com.example.ui.theme.AuraSurface
 
 @Composable
 fun CompactEngagementDebugger(
@@ -34,9 +38,9 @@ fun CompactEngagementDebugger(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .background(AuraSurface)
-            .padding(16.dp)
+            .padding(AuraSpacing.M)
     ) {
         // Compact Header
         Row(
@@ -49,32 +53,33 @@ fun CompactEngagementDebugger(
                     imageVector = Icons.Outlined.Tune,
                     contentDescription = null,
                     tint = AuraPurple,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(AuraSpacing.XS))
                 Text(
                     text = "AURA ENGAGEMENT TUNER",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AuraOnSurface
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    color = AuraOnSurface,
+                    letterSpacing = 0.5.sp
                 )
             }
             
             Surface(
-                color = AuraPurple.copy(alpha = 0.1f),
-                shape = RoundedCornerShape(12.dp)
+                color = AuraPurple.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(8.dp)
             ) {
                 Text(
                     text = "LIVE STATE",
-                    fontSize = 9.sp,
+                    fontSize = 8.sp,
                     fontWeight = FontWeight.Black,
                     color = AuraPurple,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.M))
 
         // Tabs for different control groups
         var selectedTab by remember { mutableIntStateOf(0) }
@@ -91,11 +96,16 @@ fun CompactEngagementDebugger(
             }
         ) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
-                Text("Engine Signals", modifier = Modifier.padding(vertical = 8.dp), fontSize = 12.sp)
+                Text(
+                    "Engine Signals", 
+                    modifier = Modifier.padding(vertical = AuraSpacing.XS), 
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.M))
 
         Box(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
             when (selectedTab) {
@@ -125,10 +135,10 @@ private fun EngineSignalInfo(repository: MediaRepository) {
 @Composable
 private fun SignalRow(label: String, value: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = AuraSpacing.XXXS),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(text = label, fontSize = 12.sp, color = AuraOnSurfaceVariant)
-        Text(text = value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuraOnSurface)
+        Text(text = label, fontSize = 11.sp, color = AuraOnSurfaceVariant)
+        Text(text = value, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuraOnSurface)
     }
 }

@@ -32,6 +32,7 @@ import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSuccess
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
@@ -87,8 +88,8 @@ fun AuraDecisionCenterScreen(
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                    .padding(horizontal = AuraSpacing.M, vertical = AuraSpacing.S),
+                verticalArrangement = Arrangement.spacedBy(AuraSpacing.L)
             ) {
                 // CORE USER QUESTION
                 DecisionHeader(attentionItems)
@@ -98,12 +99,6 @@ fun AuraDecisionCenterScreen(
                 if (actionableItems.isNotEmpty()) {
                     AttentionList(actionableItems, onNavigateToImprovement, onNavigateToFinding)
                 }
-
-                // 2. CRITICAL ISSUES
-                // (Handled by Attention Inbox now)
-                
-                // 3. AWAITING YOUR DECISION
-                // (Handled by Attention Inbox now)
 
                 // 4. IN PROGRESS
                 if (decisionCenter.inProgress.isNotEmpty()) {
@@ -125,7 +120,7 @@ fun AuraDecisionCenterScreen(
                     NoActionRequiredView(decisionCenter.inProgress.size, decisionCenter.recentlyCompleted.size, attentionItems)
                 }
 
-                Spacer(modifier = Modifier.height(40.dp))
+                Spacer(modifier = Modifier.height(AuraSpacing.XL))
             }
         }
     }
@@ -134,20 +129,20 @@ fun AuraDecisionCenterScreen(
 @Composable
 private fun DecisionHeader(attentionItems: List<AttentionItem>) {
     val itemsCount = attentionItems.count { it.requiresAction && it.status != AttentionStatus.RESOLVED }
-    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = AuraSpacing.XXS)) {
         Text(
             text = if (itemsCount > 0) "$itemsCount Actionable Briefings" else "Intelligence Briefing",
-            style = MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.ExtraBold,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
             color = if (attentionItems.any { it.priority == DecisionPriority.CRITICAL }) Color(0xFFD32F2F) else AuraMidnight,
-            letterSpacing = (-1).sp
+            letterSpacing = (-0.5).sp
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(AuraSpacing.XXS))
         Text(
             text = if (itemsCount > 0) "Review automated findings and authorize pending system optimizations." else "Aura is currently monitoring system integrity and learning from production telemetry.",
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = AuraSlate,
-            lineHeight = 24.sp
+            lineHeight = 20.sp
         )
     }
 }
@@ -155,7 +150,7 @@ private fun DecisionHeader(attentionItems: List<AttentionItem>) {
 @Composable
 private fun AttentionList(items: List<AttentionItem>, onNavigateImp: (String) -> Unit, onNavigateFind: (String) -> Unit) {
     SectionCard("Items Requiring Your Decision") {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             items.forEach { item ->
                 DecisionItemCard(item, onNavigateImp, onNavigateFind)
             }
@@ -175,7 +170,7 @@ private fun DecisionItemCard(item: AttentionItem, onNavigateImp: (String) -> Uni
         border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(AuraSpacing.M)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = item.title, 
@@ -186,22 +181,23 @@ private fun DecisionItemCard(item: AttentionItem, onNavigateImp: (String) -> Uni
                 )
                 PriorityBadge(item.priority)
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XXS))
             Text(
                 text = item.summary, 
-                style = MaterialTheme.typography.bodyMedium,
-                color = AuraSlate
+                style = MaterialTheme.typography.bodySmall,
+                color = AuraSlate,
+                lineHeight = 18.sp
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.XXS))
             Text(
-                text = item.whyItMatters, 
+                text = item.whyItMatters.uppercase(), 
                 style = MaterialTheme.typography.labelSmall,
                 color = AuraMutedSlate,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Black,
                 letterSpacing = 0.5.sp
             )
             
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(AuraSpacing.M))
             
             Button(
                 onClick = { 
@@ -210,9 +206,10 @@ private fun DecisionItemCard(item: AttentionItem, onNavigateImp: (String) -> Uni
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = DiscoveryViolet),
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp)
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(AuraSpacing.XS)
             ) {
-                Text("Review Decision", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("Review Decision", fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -221,28 +218,28 @@ private fun DecisionItemCard(item: AttentionItem, onNavigateImp: (String) -> Uni
 @Composable
 private fun InProgressSection(items: List<InWorkImprovement>, onNavigate: (String) -> Unit) {
     SectionCard("Active Workflows") {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.S)) {
             items.forEach { item ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onNavigate(item.id) }) {
                     Box(
-                        modifier = Modifier.size(36.dp).background(DiscoveryViolet.copy(alpha = 0.05f), RoundedCornerShape(10.dp)),
+                        modifier = Modifier.size(32.dp).background(DiscoveryViolet.copy(alpha = 0.05f), RoundedCornerShape(8.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(16.dp),
                             color = DiscoveryViolet,
                             strokeWidth = 2.dp
                         )
                     }
-                    Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(AuraSpacing.M))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(item.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = AuraMidnight)
-                        Text(item.progressDescription, style = MaterialTheme.typography.labelSmall, color = DiscoveryViolet, fontWeight = FontWeight.Bold)
+                        Text(item.title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Black, color = AuraMidnight)
+                        Text(item.progressDescription.uppercase(), style = MaterialTheme.typography.labelSmall, color = DiscoveryViolet, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
                         if (item.currentEvidence != null) {
-                            Text(item.currentEvidence, style = MaterialTheme.typography.bodySmall, color = AuraMutedSlate)
+                            Text(item.currentEvidence, style = MaterialTheme.typography.bodySmall, color = AuraMutedSlate, fontSize = 10.sp)
                         }
                     }
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = AuraSubtleBorder, modifier = Modifier.size(16.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = AuraSubtleBorder, modifier = Modifier.size(14.dp))
                 }
             }
         }
@@ -252,12 +249,12 @@ private fun InProgressSection(items: List<InWorkImprovement>, onNavigate: (Strin
 @Composable
 private fun RecentlyCompletedSection(items: List<IntelligenceChange>, onNavigate: (String) -> Unit) {
     SectionCard("Recently Closed") {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
             items.take(3).forEach { item ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onNavigate(item.targetId) }) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AuraSuccess, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(item.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AuraSuccess, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(AuraSpacing.S))
+                    Text(item.title, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
                     StatusBadge(item.state.name, color = AuraSuccess)
                 }
             }

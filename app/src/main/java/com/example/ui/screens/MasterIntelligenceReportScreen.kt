@@ -31,6 +31,7 @@ import com.example.ui.theme.AuraOnSurface
 import com.example.ui.theme.AuraOnSurfaceVariant
 import com.example.ui.theme.AuraPurple
 import com.example.ui.theme.AuraSlate
+import com.example.ui.theme.AuraSpacing
 import com.example.ui.theme.AuraSuccess
 import com.example.ui.theme.AuraSubtleBorder
 import com.example.ui.theme.AuraSubtleSurface
@@ -224,7 +225,7 @@ fun MasterIntelligenceReportScreen(
 @Composable
 private fun ReportStatusHeader(report: MasterIntelligenceReport) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = AuraSpacing.XS),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top
     ) {
@@ -234,12 +235,12 @@ private fun ReportStatusHeader(report: MasterIntelligenceReport) {
                 style = MaterialTheme.typography.labelSmall, 
                 fontWeight = FontWeight.Bold, 
                 color = AuraMutedSlate,
-                letterSpacing = 1.2.sp
+                letterSpacing = 1.sp
             )
             Text(
                 text = "Intelligence Briefing",
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.ExtraBold,
+                fontWeight = FontWeight.Black,
                 color = AuraMidnight
             )
             Text(
@@ -250,14 +251,14 @@ private fun ReportStatusHeader(report: MasterIntelligenceReport) {
         }
         Surface(
             color = DiscoveryViolet.copy(alpha = 0.08f),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(8.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, DiscoveryViolet.copy(alpha = 0.15f))
         ) {
             Text(
                 text = "v2.0 · PRODUCTION",
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Black,
                 color = DiscoveryViolet
             )
         }
@@ -267,20 +268,20 @@ private fun ReportStatusHeader(report: MasterIntelligenceReport) {
 @Composable
 private fun ExecutiveSummarySection(summary: ExecutiveSummary, onNavigateToWorkspace: () -> Unit) {
     SectionCard("Executive Summary") {
-        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AuraSpacing.M)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusMiniCard(
                     label = "System Health", 
                     value = summary.systemHealth, 
-                    color = if (summary.systemHealth == "HEALTHY") Color(0xFF81C784) else Color(0xFFE57373),
+                    color = if (summary.systemHealth == "HEALTHY") AuraSuccess else Color(0xFFE57373),
                     modifier = Modifier.weight(1f)
                 )
             }
 
             Text(
                 text = summary.plainEnglishSummary,
-                style = MaterialTheme.typography.bodyLarge,
-                lineHeight = 26.sp,
+                style = MaterialTheme.typography.bodyMedium,
+                lineHeight = 22.sp,
                 fontWeight = FontWeight.Medium,
                 color = AuraOnSurface
             )
@@ -308,11 +309,11 @@ private fun StatusMiniCard(label: String, value: String, color: Color, modifier:
 
 @Composable
 private fun SummaryMetricsGrid(metrics: IntelligenceMetrics) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MetricMiniCard("New", metrics.newFindings.toString(), Modifier.weight(1f))
-        MetricMiniCard("Review", metrics.needsReview.toString(), Modifier.weight(1f))
-        MetricMiniCard("Active", metrics.implementing.toString(), Modifier.weight(1f))
-        MetricMiniCard("Regressions", metrics.activeRegressions.toString(), Modifier.weight(1f), isAlert = metrics.activeRegressions > 0)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(AuraSpacing.XS)) {
+        MetricMiniCard("NEW", metrics.newFindings.toString(), Modifier.weight(1f))
+        MetricMiniCard("REVIEW", metrics.needsReview.toString(), Modifier.weight(1f))
+        MetricMiniCard("ACTIVE", metrics.implementing.toString(), Modifier.weight(1f))
+        MetricMiniCard("ALERTS", metrics.activeRegressions.toString(), Modifier.weight(1f), isAlert = metrics.activeRegressions > 0)
     }
 }
 
@@ -320,13 +321,13 @@ private fun SummaryMetricsGrid(metrics: IntelligenceMetrics) {
 private fun MetricMiniCard(label: String, value: String, modifier: Modifier, isAlert: Boolean = false) {
     Surface(
         color = if (isAlert) Color(0xFFFFDAD6) else AuraSubtleSurface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(10.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, if (isAlert) Color(0xFFBA1A1A) else AuraSubtleBorder),
         modifier = modifier
     ) {
-        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = if (isAlert) Color(0xFFBA1A1A) else DiscoveryViolet)
-            Text(label, fontSize = 10.sp, color = AuraMutedSlate)
+        Column(modifier = Modifier.padding(AuraSpacing.XS), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, fontSize = 16.sp, fontWeight = FontWeight.Black, color = if (isAlert) Color(0xFFBA1A1A) else DiscoveryViolet)
+            Text(label, fontSize = 8.sp, fontWeight = FontWeight.Black, color = AuraMutedSlate, letterSpacing = 0.5.sp)
         }
     }
 }
