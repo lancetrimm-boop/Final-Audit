@@ -5,5 +5,6 @@
         <!-- Android 12+ Splash Screen attributes -->
         <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/aura_logo_a</item>
         <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/ic_aura_splash_icon</item>
+        <item name="android:windowSplashScreenIconBackgroundColor" tools:targetApi="31">@color/aura_logo_a</item>
     </style>
 </resources>

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+        Authoritative Aura Aperture Logo
+        Scale: ~65% (70.2dp) to fit safely within the 72dp Adaptive Icon Safe Zone.
+        Background: #0F1117 (applied in background drawable)
+    -->
+
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.65"
+        android:scaleY="0.65">
+
+        <!-- Outer Ring with Gradient -->
+        <path
+            android:pathData="M54,54 m-48,0 a48,48 0 1,1 96,0 a48,48 0 1,1 -96,0 M54,54 m-44,0 a44,44 0 1,0 88,0 a44,44 0 1,0 -88,0">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="6"
+                    android:startY="54"
+                    android:endX="102"
+                    android:endY="54">
+                    <item android:offset="0.0" android:color="#8B5CF6" /> <!-- Purple -->
+                    <item android:offset="0.5" android:color="#D946EF" /> <!-- Magenta -->
+                    <item android:offset="1.0" android:color="#EC4899" /> <!-- Pink -->
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Aperture Blades (Geometric representation) -->
+        <path
+            android:pathData="M54,54 L54,10 L14,33 Z M54,54 L14,33 L14,75 Z M54,54 L14,75 L54,98 Z M54,54 L54,98 L94,75 Z M54,54 L94,75 L94,33 Z M54,54 L94,33 L54,10 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="14"
+                    android:startY="10"
+                    android:endX="94"
+                    android:endY="98">
+                    <item android:offset="0.0" android:color="#1A1C23" />
+                    <item android:offset="1.0" android:color="#0F1117" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Refined Geometric A Mark -->
+        <!-- Left Pillar (White) -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M40,30 L50,30 L20,90 L10,90 Z" />
+
+        <!-- Right Pillar (White) -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M58,30 L68,30 L98,90 L88,90 Z" />
+
+        <!-- Crossbar / Core (Gradient) -->
+        <path
+            android:pathData="M32,70 L76,70 L70,82 L38,82 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="32"
+                    android:startY="76"
+                    android:endX="76"
+                    android:endY="76">
+                    <item android:offset="0.0" android:color="#8B5CF6" />
+                    <item android:offset="0.5" android:color="#D946EF" />
+                    <item android:offset="1.0" android:color="#EC4899" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+
+</vector>
