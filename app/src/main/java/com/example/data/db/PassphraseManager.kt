@@ -35,8 +35,31 @@ object PassphraseManager {
     /**
      * Retrieves or generates the persistent 32-byte raw passphrase for database encryption.
      * This is the CANONICAL key material for binary open operations.
+     * 
+     * [REMEDIATION] Added limited retry logic for hardware KeyStore availability (P1).
      */
     fun getPassphrase(context: Context): ByteArray {
+        var attempts = 0
+        val maxAttempts = 3
+        var lastError: Throwable? = null
+
+        while (attempts < maxAttempts) {
+            try {
+                return executeGetPassphrase(context)
+            } catch (e: Exception) {
+                attempts++
+                lastError = e
+                Log.w("PassphraseManager", "Keystore acquisition attempt $attempts failed: ${e.message}")
+                if (attempts < maxAttempts) {
+                    Thread.sleep(200) // P1 Stabilization delay
+                }
+            }
+        }
+        
+        throw lastError ?: SecureStorageException.InconsistentStateException("Unknown secure storage failure")
+    }
+
+    private fun executeGetPassphrase(context: Context): ByteArray {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val encryptedBase64 = prefs.getString(ENCRYPTED_PASSPHRASE_KEY, null)
         val ivBase64 = prefs.getString(IV_KEY, null)

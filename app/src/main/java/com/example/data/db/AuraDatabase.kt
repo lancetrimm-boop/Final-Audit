@@ -808,8 +808,8 @@ abstract class AuraDatabase : RoomDatabase() {
                 INSTANCE?.let { return it }
 
                 try {
-                    // 1. Ensure SQLCipher libraries are loaded (centralized)
-                    SQLCipherInitializer.initialize(context)
+                    // [REMEDIATION] Consolidate SQLCipher initialization to MediaRepository (P0).
+                    // Native library loading is now part of the SECURE_CORE phase in the repository.
                     
                     // 2. Retrieve the canonical 32-byte raw passphrase
                     val rawKey = PassphraseManager.getPassphrase(context)

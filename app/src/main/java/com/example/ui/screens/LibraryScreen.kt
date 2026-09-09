@@ -67,6 +67,7 @@ fun LibraryScreen(
     val intelligentSort by repository.selectedIntelligentSort.collectAsStateWithLifecycle()
     val searchRequest by repository.librarySearchRequest.collectAsStateWithLifecycle()
     val activeVisualReferences by repository.activeVisualReferences.collectAsStateWithLifecycle()
+    val aiState by repository.aiState.collectAsStateWithLifecycle()
     var isSearchActive by remember { mutableStateOf(false) }
 
     // Multi-select state
@@ -325,6 +326,27 @@ fun LibraryScreen(
                         subtitle = "Your complete media collection",
                         modifier = Modifier.weight(1f)
                     )
+                    
+                    // [REMEDIATION] Background Intelligence Status (P2)
+                    if (aiState != AIState.READY && aiState != AIState.NOT_INITIALIZED && aiState != AIState.DISABLED) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(end = AuraSpacing.S)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = DiscoveryViolet
+                            )
+                            Spacer(modifier = Modifier.width(AuraSpacing.XS))
+                            Text(
+                                text = "Aura is learning...",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = DiscoveryViolet,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                     
                     // AURA DESIGN REPAIR: Contextual loading indicator instead of global line
                     if (scanProgress.isScanning || importProgress.isImporting) {

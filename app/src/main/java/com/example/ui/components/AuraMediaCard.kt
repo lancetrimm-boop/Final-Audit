@@ -624,7 +624,23 @@ fun AuraContinueWatchingCard(
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object VideoPreviewPool {
-    private const val MAX_ACTIVE_PREVIEWS = 10 // Balanced for Compare + Library
+    private var maxActivePreviews: Int = 8 // Default mid-range baseline
+
+    private fun updateMaxPreviews(context: Context) {
+        if (maxActivePreviews != 8) return // Only compute once
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memoryInfo = android.app.ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        val totalRamGb = memoryInfo.totalMem / (1024 * 1024 * 1024)
+        
+        maxActivePreviews = when {
+            totalRamGb < 6 -> 4    // Low-end
+            totalRamGb < 12 -> 8   // Mid-range
+            else -> 16             // High-end
+        }
+        Log.i("VideoPreviewPool", "Adaptive allocation: $maxActivePreviews slots (RAM: ${totalRamGb}GB)")
+    }
+    
     private const val MAX_IDLE_POOL = 4 // Strict limit on idle players to free hardware decoders
     
     // Key is "itemId_locationTag" to prevent player stealing between different UI contexts
@@ -648,6 +664,7 @@ object VideoPreviewPool {
         priority: PreviewPriority = PreviewPriority.VISIBLE,
         onFirstFrameRendered: (() -> Unit)? = null
     ): ExoPlayer? {
+        updateMaxPreviews(context)
         val poolKey = "${itemId}_$locationTag"
         
         // Update priority if already active
@@ -685,7 +702,7 @@ object VideoPreviewPool {
         // Performance Fix: Reuse players from idle pool or evict lowest priority active
         val player = when {
             idlePlayers.isNotEmpty() -> idlePlayers.removeAt(0)
-            activePlayers.size < MAX_ACTIVE_PREVIEWS -> buildNewPlayer(context)
+            activePlayers.size < maxActivePreviews -> buildNewPlayer(context)
             else -> {
                 // EVICTION STRATEGY: Find the lowest priority item to evict
                 val priorityNearby = PreviewCoordinator.priorityNearbyIds.value

@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.DatabaseState
 import com.example.data.MediaItem
@@ -74,6 +75,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // [REMEDIATION] Startup Watchdog (P0)
+        // If the database is not ready within 12 seconds, we transition to a recovery state.
+        lifecycleScope.launch {
+            kotlinx.coroutines.delay(12000)
+            if (repository.databaseState.value != DatabaseState.READY) {
+                Log.w("AuraWatchdog", "Initialization timeout reached (12s). Triggering recovery UI.")
+                repository.forceTimeoutState()
+            }
+        }
+
         repository.initDatabase(applicationContext)
         enableEdgeToEdge()
         setContent {

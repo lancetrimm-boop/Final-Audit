@@ -696,6 +696,15 @@ class MediaRepository(
         _activeVisualReferences.value = emptyList()
     }
 
+    /**
+     * [REMEDIATION] Explicitly forces the TIMEOUT state for recovery UI (P0).
+     */
+    fun forceTimeoutState() {
+        if (_databaseState.value != DatabaseState.READY) {
+            _databaseState.value = DatabaseState.TIMEOUT
+        }
+    }
+
     @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val librarySearchRequestFlow: Flow<com.example.data.semantic.SearchRequest> = librarySearchRequest
         .debounce { request ->
@@ -1149,7 +1158,10 @@ class MediaRepository(
                     launch { collectDataFlows(db) }
                     startStyleMonitoring()
                     
-                    // ASYNCHRONOUS AI INITIALIZATION (Database Ready != AI Ready)
+                    // [REMEDIATION] Decoupled AI Initialization (P0).
+                    // We DO NOT call initAI(context) synchronously here.
+                    // Instead, we let the UI observe READY and the repository handle AI hydration independently.
+                    // This prevents an AI failure from stranding the user on the splash screen.
                     initAI(context)
                     
                 } catch (t: Throwable) {
