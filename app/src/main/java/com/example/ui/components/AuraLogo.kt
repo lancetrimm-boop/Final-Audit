@@ -81,7 +81,7 @@ fun AuraLogoMark(
             .size(size)
             .clip(CircleShape)
             .border(1.5.dp, DiscoveryGradient, CircleShape)
-            .background(AuraCrispWhite),
+            .background(AuraMidnight),
         contentAlignment = Alignment.Center
     ) {
         AsyncImage(
