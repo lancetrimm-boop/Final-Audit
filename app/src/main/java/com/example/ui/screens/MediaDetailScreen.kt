@@ -1413,35 +1413,56 @@ fun MediaDetailScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         PlayerActionButton(
-                            label = if (isVisualSearchActive) "Add to Search" else "See Similar",
+                            label = "See Similar",
                             modifier = Modifier.weight(1f),
                             onClick = {
-                                if (isVisualSearchActive) {
+                                Log.d("SeeSimilarTrace", "STAGE=UI sourceId=${activeItem.id} title=\"${activeItem.title}\" uri=${activeItem.uriPath}")
+                                onMicroMoment?.invoke(activeItem.id, 5)
+                                onSeeSimilar?.invoke(activeItem)
+                                showPlayerMenu = false
+                            }
+                        )
+                        
+                        if (isVisualSearchActive) {
+                            PlayerActionButton(
+                                label = "Add to Search",
+                                modifier = Modifier.weight(1f),
+                                onClick = {
                                     onAddVisualReference?.invoke(activeItem)
                                     Toast.makeText(context, "Added to current search", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Log.d("SeeSimilarTrace", "STAGE=UI sourceId=${activeItem.id} title=\"${activeItem.title}\" uri=${activeItem.uriPath}")
-                                    onMicroMoment?.invoke(activeItem.id, 5)
-                                    onSeeSimilar?.invoke(activeItem)
+                                    showPlayerMenu = false
+                                    onBack() // AURA REPAIR: Return to library to see combined results
                                 }
-                                showPlayerMenu = false
-                            }
-                        )
-                        PlayerActionButton(
-                            label = "More Like This",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onMicroMoment?.invoke(activeItem.id, 3)
-                                Toast.makeText(context, "Increased recommendation weight", Toast.LENGTH_SHORT).show()
-                                showPlayerMenu = false
-                            }
-                        )
+                            )
+                        } else {
+                            PlayerActionButton(
+                                label = "More Like This",
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    onMicroMoment?.invoke(activeItem.id, 3)
+                                    Toast.makeText(context, "Increased recommendation weight", Toast.LENGTH_SHORT).show()
+                                    showPlayerMenu = false
+                                }
+                            )
+                        }
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        if (isVisualSearchActive) {
+                            PlayerActionButton(
+                                label = "More Like This",
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    onMicroMoment?.invoke(activeItem.id, 3)
+                                    Toast.makeText(context, "Increased recommendation weight", Toast.LENGTH_SHORT).show()
+                                    showPlayerMenu = false
+                                }
+                            )
+                        }
+                        
                         PlayerActionButton(
                             label = "Less Like This",
                             modifier = Modifier.weight(1f),
@@ -1451,17 +1472,40 @@ fun MediaDetailScreen(
                                 showPlayerMenu = false
                             }
                         )
-                        PlayerActionButton(
-                            label = "Generate Clips",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onMicroMoment?.invoke(activeItem.id, 4)
-                                showPlayerMenu = false
-                                val clips = generateClipCandidates(activeItem, durationMs)
-                                generatedClips = clips
-                                showClipsSheet = true
-                            }
-                        )
+                        
+                        if (!isVisualSearchActive) {
+                            PlayerActionButton(
+                                label = "Generate Clips",
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    onMicroMoment?.invoke(activeItem.id, 4)
+                                    showPlayerMenu = false
+                                    val clips = generateClipCandidates(activeItem, durationMs)
+                                    generatedClips = clips
+                                    showClipsSheet = true
+                                }
+                            )
+                        }
+                    }
+                    
+                    if (isVisualSearchActive) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            PlayerActionButton(
+                                label = "Generate Clips",
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    onMicroMoment?.invoke(activeItem.id, 4)
+                                    showPlayerMenu = false
+                                    val clips = generateClipCandidates(activeItem, durationMs)
+                                    generatedClips = clips
+                                    showClipsSheet = true
+                                }
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }

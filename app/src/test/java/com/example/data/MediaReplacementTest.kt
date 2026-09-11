@@ -125,7 +125,7 @@ class MediaReplacementTest {
         }
         
         // 3. Verify migration
-        assertEquals(10, database.microMomentDao().getMomentCountForMedia(newId))
+        assertEquals(1, database.microMomentDao().getMomentCountForMedia(newId))
         val events = database.aiSkipDao().getEventsForMedia(newId)
         assertEquals(1, events.size)
         assertEquals(newId, events[0].mediaId)

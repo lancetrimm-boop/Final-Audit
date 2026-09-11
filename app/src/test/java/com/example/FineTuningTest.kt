@@ -11,10 +11,12 @@ class FineTuningTest {
         val initial = TasteDNA(
             isFineTuningEnabled = true,
             vibrancy = 0.5,
-            learnedVibrancy = 0.6 // AI has adjusted it up
+            learnedVibrancy = 0.6,
+            confVibrancy = 1.0
         )
         
-        assertEquals(0.55, initial.effectiveVibrancy, 0.001)
+        // Adjustment = (0.6 - 0.5) * 1.0 * 0.2 = 0.02
+        assertEquals(0.52, initial.effectiveVibrancy, 0.001)
         
         // User moves slider to 0.7
         val updated = initial.updateBaseline(newVibrancy = 0.7)
@@ -54,13 +56,15 @@ class FineTuningTest {
     }
 
     @Test
-    fun `test Semantic Model - Effective is average of baseline and learned`() {
+    fun `test Semantic Model - Effective is influenced by learned state`() {
         val dna = TasteDNA(
             isFineTuningEnabled = true,
             vibrancy = 0.4,
-            learnedVibrancy = 0.6
+            learnedVibrancy = 0.6,
+            confVibrancy = 1.0
         )
         
-        assertEquals(0.5, dna.effectiveVibrancy, 0.001)
+        // 0.4 + (0.6 - 0.4) * 0.2 = 0.44
+        assertEquals(0.44, dna.effectiveVibrancy, 0.001)
     }
 }

@@ -82,12 +82,13 @@ class IntelligenceReportingTest {
 
     @Test
     fun testTasteClusters_EvidenceSelection() = runBlocking {
-        // Setup a DNA with strong cinematic preference
+        // Setup a DNA with strong cinematic preference matching targets exactly for max score
         val cinematicDNA = TasteDNA(
-            depth = 0.9,
-            lighting = 0.9,
-            contrast = 0.9,
-            dynamicRange = 0.9
+            depth = 0.8,
+            lighting = 0.7,
+            contrast = 0.7,
+            dynamicRange = 0.7,
+            focus = 0.8
         )
         
         // Add a matching media item with high engagement

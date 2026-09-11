@@ -59,16 +59,19 @@ class SemanticSynchronizationTest {
         semanticRepo = RoomSemanticRepresentationRepository(database.semanticRepresentationDao())
         fakeEmbeddingProvider = FakeEmbeddingProvider(descriptor)
         retriever = DefaultSemanticCandidateRetriever(semanticRepo)
+        val indexingService = DefaultSemanticIndexingService(fakeEmbeddingProvider, retriever, semanticRepo)
 
         // Inject semantic components
         val fields = mapOf(
             "semanticRepresentationRepository" to semanticRepo,
             "embeddingProvider" to fakeEmbeddingProvider,
+            "semanticIndexingService" to indexingService,
             "semanticCandidateRetriever" to retriever
         )
         
+        val repoClass = MediaRepository::class.java
         fields.forEach { (name, value) ->
-            val field = MediaRepository::class.java.getDeclaredField(name)
+            val field = repoClass.getDeclaredField(name)
             field.isAccessible = true
             field.set(repository, value)
         }
@@ -158,6 +161,7 @@ class SemanticSynchronizationTest {
 
         // 2. Delete item
         repository.deleteMediaItem(mediaId)
+        testDispatcher.scheduler.advanceUntilIdle()
 
         // 3. Verify removal
         assertEquals("Index should be empty after deletion", 0, retriever.getIndexSize(SemanticRepresentationType.CONTENT, descriptor))

@@ -1,10 +1,9 @@
 package com.example.data
 
+import android.util.Log
 import com.example.data.db.*
 import com.example.data.blueprint.*
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -158,40 +157,85 @@ class ImplementationHandoffTest {
         val attentionItems = mutableMapOf<String, AttentionItemEntity>()
         val evidenceSnapshots = mutableMapOf<String, EvidenceSnapshotEntity>()
 
-        override fun getAllFindings() = MutableStateFlow(findings.values.toList())
+        private val findingsFlow = MutableStateFlow<List<FindingEntity>>(emptyList())
+        private val improvementsFlow = MutableStateFlow<List<SuggestedImprovementEntity>>(emptyList())
+        private val artifactsFlow = MutableStateFlow<List<BlueprintArtifactEntity>>(emptyList())
+        private val runsFlow = MutableStateFlow<List<ImplementationRunEntity>>(emptyList())
+        private val sessionsFlow = MutableStateFlow<List<MonitoringSessionEntity>>(emptyList())
+        private val valResultsFlow = MutableStateFlow<List<ValidationResultEntity>>(emptyList())
+        private val historyFlow = MutableStateFlow<List<LifecycleEventEntity>>(emptyList())
+        private val checkpointFlow = MutableStateFlow<UserCheckpointEntity?>(null)
+
+        override fun getAllFindings() = findingsFlow
         override suspend fun getFindingById(id: String) = findings[id]
-        override suspend fun insertFinding(finding: FindingEntity) { findings[finding.id] = finding }
-        override suspend fun updateFinding(finding: FindingEntity) { findings[finding.id] = finding }
+        override suspend fun insertFinding(finding: FindingEntity) { 
+            findings[finding.id] = finding 
+            findingsFlow.value = findings.values.toList()
+        }
+        override suspend fun updateFinding(finding: FindingEntity) { 
+            findings[finding.id] = finding 
+            findingsFlow.value = findings.values.toList()
+        }
 
-        override fun getAllImprovements() = MutableStateFlow(improvements.values.toList())
+        override fun getAllImprovements() = improvementsFlow
         override suspend fun getImprovementById(id: String) = improvements[id]
-        override suspend fun insertImprovement(improvement: SuggestedImprovementEntity) { improvements[improvement.id] = improvement }
-        override suspend fun updateImprovement(improvement: SuggestedImprovementEntity) { improvements[improvement.id] = improvement }
+        override suspend fun insertImprovement(improvement: SuggestedImprovementEntity) { 
+            improvements[improvement.id] = improvement 
+            improvementsFlow.value = improvements.values.toList()
+        }
+        override suspend fun updateImprovement(improvement: SuggestedImprovementEntity) { 
+            improvements[improvement.id] = improvement 
+            improvementsFlow.value = improvements.values.toList()
+        }
 
-        override fun getArtifactsForImprovement(improvementId: String) = MutableStateFlow(artifacts.values.filter { it.improvementId == improvementId })
+        override fun getArtifactsForImprovement(improvementId: String) = 
+            artifactsFlow.map { list -> list.filter { it.improvementId == improvementId } }
         override suspend fun getArtifactById(id: String) = artifacts[id]
-        override suspend fun insertArtifact(artifact: BlueprintArtifactEntity) { artifacts[artifact.id] = artifact }
+        override suspend fun insertArtifact(artifact: BlueprintArtifactEntity) { 
+            artifacts[artifact.id] = artifact 
+            artifactsFlow.value = artifacts.values.toList()
+        }
 
-        override fun getAllImplementationRuns() = MutableStateFlow(implementationRuns.values.toList())
-        override fun getImplementationRunsForImprovement(improvementId: String) = MutableStateFlow(implementationRuns.values.filter { it.improvementId == improvementId })
+        override fun getAllImplementationRuns() = runsFlow
+        override fun getImplementationRunsForImprovement(improvementId: String) = 
+            runsFlow.map { list -> list.filter { it.improvementId == improvementId } }
         override suspend fun getImplementationRunById(id: String) = implementationRuns[id]
-        override suspend fun insertImplementationRun(run: ImplementationRunEntity) { implementationRuns[run.id] = run }
-        override suspend fun updateImplementationRun(run: ImplementationRunEntity) { implementationRuns[run.id] = run }
+        override suspend fun insertImplementationRun(run: ImplementationRunEntity) { 
+            implementationRuns[run.id] = run 
+            runsFlow.value = implementationRuns.values.toList()
+        }
+        override suspend fun updateImplementationRun(run: ImplementationRunEntity) { 
+            implementationRuns[run.id] = run 
+            runsFlow.value = implementationRuns.values.toList()
+        }
 
-        override fun getVerificationResultsForImprovement(improvementId: String) = MutableStateFlow(verificationResults.values.filter { it.improvementId == improvementId })
+        override fun getVerificationResultsForImprovement(improvementId: String) = MutableStateFlow(emptyList<VerificationResultEntity>())
         override suspend fun insertVerificationResult(result: VerificationResultEntity) { verificationResults[result.id] = result }
 
-        override fun getAllMonitoringSessions() = MutableStateFlow(monitoringSessions.values.toList())
-        override fun getMonitoringSessionsForImprovement(improvementId: String) = MutableStateFlow(monitoringSessions.values.filter { it.improvementId == improvementId })
+        override fun getAllMonitoringSessions() = sessionsFlow
+        override fun getMonitoringSessionsForImprovement(improvementId: String) = 
+            sessionsFlow.map { list -> list.filter { it.improvementId == improvementId } }
         override suspend fun getMonitoringSessionById(id: String) = monitoringSessions[id]
-        override suspend fun insertMonitoringSession(session: MonitoringSessionEntity) { monitoringSessions[session.id] = session }
-        override suspend fun updateMonitoringSession(session: MonitoringSessionEntity) { monitoringSessions[session.id] = session }
+        override suspend fun insertMonitoringSession(session: MonitoringSessionEntity) { 
+            monitoringSessions[session.id] = session 
+            sessionsFlow.value = monitoringSessions.values.toList()
+        }
+        override suspend fun updateMonitoringSession(session: MonitoringSessionEntity) { 
+            monitoringSessions[session.id] = session 
+            sessionsFlow.value = monitoringSessions.values.toList()
+        }
 
-        override fun getValidationResultsForImprovement(improvementId: String) = MutableStateFlow(validationResults.values.filter { it.improvementId == improvementId })
-        override suspend fun insertValidationResult(result: ValidationResultEntity) { validationResults[result.id] = result }
+        override fun getValidationResultsForImprovement(improvementId: String) = valResultsFlow
+        override suspend fun insertValidationResult(result: ValidationResultEntity) { 
+            validationResults[result.id] = result 
+            valResultsFlow.value = validationResults.values.toList()
+        }
 
-        override fun getLifecycleHistory(targetId: String) = MutableStateFlow(history.filter { it.targetId == targetId })
-        override suspend fun insertLifecycleEvent(event: LifecycleEventEntity) { history.add(event) }
+        override fun getLifecycleHistory(targetId: String) = historyFlow.map { list -> list.filter { it.targetId == targetId } }
+        override suspend fun insertLifecycleEvent(event: LifecycleEventEntity) { 
+            history.add(event) 
+            historyFlow.value = history.toList()
+        }
 
         override suspend fun insertEvidenceSnapshot(snapshot: EvidenceSnapshotEntity) { evidenceSnapshots[snapshot.improvementId] = snapshot }
         override suspend fun getEvidenceSnapshot(improvementId: String) = evidenceSnapshots[improvementId]
@@ -202,38 +246,38 @@ class ImplementationHandoffTest {
         override suspend fun updateAttentionItem(item: AttentionItemEntity) { attentionItems[item.id] = item }
         override suspend fun deleteActiveAttentionItemByDeduplicationKey(key: String) { attentionItems.entries.removeIf { it.value.deduplicationKey == key && it.value.status == AttentionStatus.NEW } }
 
-        override suspend fun insertCheckpoint(checkpoint: UserCheckpointEntity) { checkpoints[checkpoint.checkpointId] = checkpoint }
+        override suspend fun insertCheckpoint(checkpoint: UserCheckpointEntity) { checkpoints[checkpoint.checkpointId] = checkpoint; checkpointFlow.value = checkpoint }
         override suspend fun getCheckpoint(id: String) = checkpoints[id]
-        override fun observeCheckpoint(id: String) = MutableStateFlow(checkpoints[id])
+        override fun observeCheckpoint(id: String) = checkpointFlow
 
-        override fun getPendingEvents() = MutableStateFlow<List<IntelligenceEventEntity>>(emptyList())
+        override fun getPendingEvents() = flowOf(emptyList<IntelligenceEventEntity>())
         override suspend fun insertEvent(event: IntelligenceEventEntity) {}
         override suspend fun updateEvent(event: IntelligenceEventEntity) {}
-        override fun getAllIntelligenceEvents() = MutableStateFlow<List<IntelligenceEventEntity>>(emptyList())
-        override fun getAllStoredEvidence() = MutableStateFlow<List<EvidenceEntity>>(emptyList())
-        override fun getAllSavedReports() = MutableStateFlow<List<SavedIntelligenceReportEntity>>(emptyList())
+        override fun getAllIntelligenceEvents() = flowOf(emptyList<IntelligenceEventEntity>())
+        override fun getAllStoredEvidence() = flowOf(emptyList<EvidenceEntity>())
+        override fun getAllSavedReports() = flowOf(emptyList<SavedIntelligenceReportEntity>())
         override suspend fun getSavedReportById(id: String) = null
         override suspend fun insertSavedReport(report: SavedIntelligenceReportEntity) {}
-        override fun getAuditHistory(targetId: String) = MutableStateFlow<List<IntegrityAuditEntity>>(emptyList())
+        override fun getAuditHistory(targetId: String) = flowOf(emptyList<IntegrityAuditEntity>())
         override suspend fun insertAudit(audit: IntegrityAuditEntity) {}
-        override fun getArtifactsForBlueprint(blueprintId: String) = MutableStateFlow<List<BlueprintArtifactEntity>>(emptyList())
-        override fun getImprovementsForFinding(findingId: String) = MutableStateFlow<List<SuggestedImprovementEntity>>(emptyList())
-        override fun getAllActions() = MutableStateFlow<List<IntelligenceActionEntity>>(emptyList())
-        override fun getActionsForImprovement(improvementId: String) = MutableStateFlow<List<IntelligenceActionEntity>>(emptyList())
+        override fun getArtifactsForBlueprint(blueprintId: String) = flowOf(emptyList<BlueprintArtifactEntity>())
+        override fun getImprovementsForFinding(findingId: String) = flowOf(emptyList<SuggestedImprovementEntity>())
+        override fun getAllActions() = flowOf(emptyList<IntelligenceActionEntity>())
+        override fun getActionsForImprovement(improvementId: String) = flowOf(emptyList<IntelligenceActionEntity>())
         override suspend fun getActionById(id: String) = null
         override suspend fun insertAction(action: IntelligenceActionEntity) {}
         override suspend fun updateAction(action: IntelligenceActionEntity) {}
-        override fun getVerificationResultsForRun(runId: String) = MutableStateFlow<List<VerificationResultEntity>>(emptyList())
-        override fun getRegressionAlertsForImprovement(improvementId: String) = MutableStateFlow<List<RegressionAlertEntity>>(emptyList())
+        override fun getVerificationResultsForRun(runId: String) = flowOf(emptyList<VerificationResultEntity>())
+        override fun getRegressionAlertsForImprovement(improvementId: String) = flowOf(emptyList<RegressionAlertEntity>())
         override suspend fun getRegressionAlertById(id: String) = null
         override suspend fun insertRegressionAlert(alert: RegressionAlertEntity) {}
         override suspend fun updateRegressionAlert(alert: RegressionAlertEntity) {}
-        override fun getRollbackRunsForImprovement(improvementId: String) = MutableStateFlow<List<RollbackRunEntity>>(emptyList())
+        override fun getRollbackRunsForImprovement(improvementId: String) = flowOf(emptyList<RollbackRunEntity>())
         override suspend fun getRollbackRunById(id: String) = null
         override suspend fun insertRollbackRun(run: RollbackRunEntity) {}
         override suspend fun updateRollbackRun(run: RollbackRunEntity) {}
         override suspend fun getReviewMetadata(targetId: String) = null
         override suspend fun insertReviewMetadata(metadata: ReviewMetadataEntity) {}
-        override fun getAllRegressionAlerts() = MutableStateFlow<List<RegressionAlertEntity>>(emptyList())
+        override fun getAllRegressionAlerts() = flowOf(emptyList<RegressionAlertEntity>())
     }
 }

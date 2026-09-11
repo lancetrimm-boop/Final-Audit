@@ -20,6 +20,8 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [33])
 class PlaybackDiagnosticsViewModelTest {
 
     private val dao: PlaybackErrorLogDao = mock()
@@ -67,7 +69,7 @@ class PlaybackDiagnosticsViewModelTest {
         
         testDispatcher.scheduler.advanceUntilIdle()
         
-        val summary = viewModel.eligibilitySummary.first()
+        val summary = viewModel.eligibilitySummary.first { it.uniqueFiles > 0 }
         assertEquals(1, summary.uniqueFiles)
         assertEquals(3, summary.totalErrors)
         assertEquals("media_1", summary.candidates[0].mediaId)

@@ -41,8 +41,9 @@ class VideoIntelligenceReranker : MultimodalReranker {
 
         /**
          * Maximum boost factor for videos with a strongly matching individual frame.
+         * Increased in Repair to allow strong deep matches to overtake aggregate matches.
          */
-        private const val MAX_FRAME_SIMILARITY_BOOST = 1.25
+        private const val MAX_FRAME_SIMILARITY_BOOST = 3.0
 
         /**
          * Threshold for considering a frame similarity "stronger" than aggregate similarity.
@@ -119,10 +120,10 @@ class VideoIntelligenceReranker : MultimodalReranker {
                         if (gain > SIMILARITY_GAIN_THRESHOLD) {
                             val promotion = 1.0 + (gain * (MAX_FRAME_SIMILARITY_BOOST - 1.0) / 0.5)
                             boostedScore *= promotion.coerceAtMost(MAX_FRAME_SIMILARITY_BOOST.toDouble())
-                            explanation += " [Max Sim: ${"%.3f".format(maxSim)}] [Scene Promotion]"
+                            explanation += " [Max Frame Similarity: ${"%.3f".format(maxSim)}] [Max Frame Promotion]"
                             reasons.add(MatchReason(MatchReasonType.DEEP_SCENE_MATCH, maxSim, "Strong match to a specific scene in this video"))
                         } else {
-                            explanation += " [Max Sim: ${"%.3f".format(maxSim)}]"
+                            explanation += " [Max Frame Similarity: ${"%.3f".format(maxSim)}]"
                         }
                     }
                 }

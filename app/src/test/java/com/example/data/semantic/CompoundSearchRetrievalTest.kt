@@ -25,7 +25,7 @@ class CompoundSearchRetrievalTest {
 
         val item = MediaItem(id = "item1", title = "Beach", mediaType = "PHOTO")
         val candidates = listOf(IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f, "Match"))
-        val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, 10L)
+        val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, latencyMs = 10L)
 
         whenever(core.processRequest(any())).thenReturn(response)
 
@@ -46,7 +46,7 @@ class CompoundSearchRetrievalTest {
 
         val item = MediaItem(id = "item_fused", title = "Sunset", mediaType = "PHOTO")
         val candidates = listOf(IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f, "Fused Match"))
-        val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, 10L)
+        val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, latencyMs = 10L)
 
         whenever(core.processRequest(any())).thenReturn(response)
 

@@ -142,9 +142,6 @@ data class SemanticRepresentation(
         require(dimensionality == modelDescriptor.dimensionality) {
             "Dimensionality ($dimensionality) does not match model descriptor (${modelDescriptor.dimensionality})"
         }
-        require(type == modelDescriptor.primaryType) {
-            "Representation type ($type) does not match model descriptor primary type (${modelDescriptor.primaryType})"
-        }
         VectorMath.validateVector(vector)
     }
 

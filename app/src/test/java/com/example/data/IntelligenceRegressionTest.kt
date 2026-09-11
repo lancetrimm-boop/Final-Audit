@@ -24,7 +24,9 @@ class IntelligenceRegressionTest {
     @Before
     fun setup() {
         fakeDao = FakeIntelligenceDao()
-        repository = IntelligenceRepository(fakeDao, org.mockito.Mockito.mock(MediaRepository::class.java))
+        val mockMediaRepository = org.mockito.Mockito.mock(MediaRepository::class.java)
+        org.mockito.kotlin.whenever(mockMediaRepository.tasteDNA).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA()))
+        repository = IntelligenceRepository(fakeDao, mockMediaRepository)
     }
 
     @Test

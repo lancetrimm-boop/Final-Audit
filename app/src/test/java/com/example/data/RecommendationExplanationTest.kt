@@ -1,5 +1,6 @@
 package com.example.data
 
+import com.example.data.intelligence.*
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -9,10 +10,6 @@ class RecommendationExplanationTest {
         vibrancy = 0.8, // User likes vibrant
         learnedVibrancy = 0.8,
         isFineTuningEnabled = true
-    )
-    
-    private val stats = IntelligenceStats(
-        topGenres = listOf("Action", "Nature")
     )
 
     @Test
@@ -25,12 +22,14 @@ class RecommendationExplanationTest {
             moodTags = listOf("vibrant"),
             rating = 5.0f // Boost match score
         )
+        
+        // High rating takes priority in generator logic
+        val candidate = IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f)
 
-        val explanation = RecommendationExplanationGenerator.generate(item, tasteDNA, stats, emptyMap())
+        val explanation = RecommendationExplanationGenerator.generate(candidate, tasteDNA)
         
         assertNotNull(explanation)
         assertEquals("Based on your high rating", explanation?.primaryReason)
-        // Wait, Based on high rating will take priority now.
     }
 
     @Test
@@ -42,22 +41,22 @@ class RecommendationExplanationTest {
             mediaType = "PHOTO",
             genre = "Nature",
             moodTags = listOf("vibrant"),
-            eloRating = 2000.0, // Boost match score via ELO (+0.5)
+            eloRating = 2000.0,
             creatorId = creatorId,
-            viewCount = 10, // Reduce uncertainty
+            viewCount = 10,
             exposureCount = 10
         )
         
-        val creators = mapOf(
-            creatorId to CreatorProfile(id = creatorId, name = "Aura Artist", platform = "LOCAL", affinityScore = 1.0)
+        val evidence = listOf(
+            EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, 0.8f, 0.9f, EvidenceStatus.INFERRED, "TasteDNA")
         )
+        val candidate = IntelligenceCandidate(item, evidence, 1.0, 1.0f, 0.8f)
 
-        val explanation = RecommendationExplanationGenerator.generate(item, tasteDNA, stats, creators)
+        val explanation = RecommendationExplanationGenerator.generate(candidate, tasteDNA)
         
         assertNotNull(explanation)
         assertEquals("High predicted match", explanation?.primaryReason)
         assertTrue(explanation?.detailPoints?.any { it.contains("Vibrancy") } == true)
-        assertTrue(explanation?.detailPoints?.any { it.contains("Aura Artist") } == true)
     }
 
     @Test
@@ -69,8 +68,10 @@ class RecommendationExplanationTest {
             genre = "Nature",
             isFavorite = true
         )
+        
+        val candidate = IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f)
 
-        val explanation = RecommendationExplanationGenerator.generate(item, tasteDNA, stats, emptyMap())
+        val explanation = RecommendationExplanationGenerator.generate(candidate, tasteDNA)
         
         assertNotNull(explanation)
         assertEquals("Similar to your favorites", explanation?.primaryReason)
@@ -83,13 +84,18 @@ class RecommendationExplanationTest {
             id = "test3",
             title = "New Style",
             mediaType = "PHOTO",
-            genre = "Sci-Fi", // Outside top genres
+            genre = "Sci-Fi", 
             viewCount = 0,
             exposureCount = 0,
             moodTags = listOf("experimental")
         )
+        
+        val evidence = listOf(
+            EvidenceItem(EvidenceType.EXPLORATION_VALUE, 0.8f, 0.7f, EvidenceStatus.INFERRED, "ExplorationEngine")
+        )
+        val candidate = IntelligenceCandidate(item, evidence, 0.9, 0.0f, 0.8f)
 
-        val explanation = RecommendationExplanationGenerator.generate(item, tasteDNA, stats, emptyMap())
+        val explanation = RecommendationExplanationGenerator.generate(candidate, tasteDNA)
         
         assertNotNull(explanation)
         assertEquals("Expand your taste", explanation?.primaryReason)
@@ -103,7 +109,7 @@ class RecommendationExplanationTest {
             id = "test4",
             title = "Generic Item",
             mediaType = "PHOTO",
-            genre = "Action", // In top genres to avoid novelty
+            genre = "Action",
             viewCount = 10,
             exposureCount = 20,
             rating = 0f
@@ -111,8 +117,11 @@ class RecommendationExplanationTest {
         
         // Neutral DNA
         val neutralDNA = TasteDNA()
+        
+        // Low score candidate
+        val candidate = IntelligenceCandidate(item, emptyList(), 0.1, 0.1f, 0f)
 
-        val explanation = RecommendationExplanationGenerator.generate(item, neutralDNA, stats, emptyMap())
+        val explanation = RecommendationExplanationGenerator.generate(candidate, neutralDNA)
         
         // Should be null if we can't find a strong reason
         assertNull(explanation)

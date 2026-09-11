@@ -1,12 +1,11 @@
 package com.example.data
 
+import android.util.Log
 import com.example.data.db.*
 import com.example.data.blueprint.*
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -120,56 +119,85 @@ class IntelligenceMonitoringTest {
         val sessions = mutableMapOf<String, MonitoringSessionEntity>()
         val validationResults = mutableMapOf<String, ValidationResultEntity>()
 
-        override fun getAllFindings(): Flow<List<FindingEntity>> = MutableStateFlow(findings.values.toList())
-        override suspend fun getFindingById(id: String): FindingEntity? = findings[id]
-        override suspend fun insertFinding(finding: FindingEntity) { findings[finding.id] = finding }
-        override suspend fun updateFinding(finding: FindingEntity) { findings[finding.id] = finding }
+        private val findingsFlow = MutableStateFlow<List<FindingEntity>>(emptyList())
+        private val improvementsFlow = MutableStateFlow<List<SuggestedImprovementEntity>>(emptyList())
+        private val runsFlow = MutableStateFlow<List<ImplementationRunEntity>>(emptyList())
+        private val sessionsFlow = MutableStateFlow<List<MonitoringSessionEntity>>(emptyList())
+        private val valResultsFlow = MutableStateFlow<List<ValidationResultEntity>>(emptyList())
 
-        override fun getAllImprovements(): Flow<List<SuggestedImprovementEntity>> = MutableStateFlow(improvements.values.toList())
+        override fun getAllFindings(): Flow<List<FindingEntity>> = findingsFlow
+        override suspend fun getFindingById(id: String): FindingEntity? = findings[id]
+        override suspend fun insertFinding(finding: FindingEntity) { 
+            findings[finding.id] = finding 
+            findingsFlow.value = findings.values.toList()
+        }
+        override suspend fun updateFinding(finding: FindingEntity) { 
+            findings[finding.id] = finding 
+            findingsFlow.value = findings.values.toList()
+        }
+
+        override fun getAllImprovements(): Flow<List<SuggestedImprovementEntity>> = improvementsFlow
         override fun getImprovementsForFinding(findingId: String): Flow<List<SuggestedImprovementEntity>> = 
-            MutableStateFlow(improvements.values.filter { it.findingId == findingId })
+            improvementsFlow.map { list -> list.filter { it.findingId == findingId } }
         override suspend fun getImprovementById(id: String): SuggestedImprovementEntity? = improvements[id]
-        override suspend fun insertImprovement(improvement: SuggestedImprovementEntity) { improvements[improvement.id] = improvement }
-        override suspend fun updateImprovement(improvement: SuggestedImprovementEntity) { improvements[improvement.id] = improvement }
+        override suspend fun insertImprovement(improvement: SuggestedImprovementEntity) { 
+            improvements[improvement.id] = improvement 
+            improvementsFlow.value = improvements.values.toList()
+        }
+        override suspend fun updateImprovement(improvement: SuggestedImprovementEntity) { 
+            improvements[improvement.id] = improvement 
+            improvementsFlow.value = improvements.values.toList()
+        }
 
         override fun getLifecycleHistory(targetId: String): Flow<List<LifecycleEventEntity>> = 
-            MutableStateFlow(events.filter { it.targetId == targetId })
+            flowOf(events.filter { it.targetId == targetId })
         override suspend fun insertLifecycleEvent(event: LifecycleEventEntity) { events.add(event) }
 
-        override fun getAllActions(): Flow<List<IntelligenceActionEntity>> = MutableStateFlow(actions.values.toList())
-        override fun getActionsForImprovement(improvementId: String): Flow<List<IntelligenceActionEntity>> = 
-            MutableStateFlow(actions.values.filter { it.improvementId == improvementId })
-        override suspend fun getActionById(id: String): IntelligenceActionEntity? = actions[id]
-        override suspend fun insertAction(action: IntelligenceActionEntity) { actions[action.id] = action }
-        override suspend fun updateAction(action: IntelligenceActionEntity) { actions[action.id] = action }
+        override fun getAllActions(): Flow<List<IntelligenceActionEntity>> = flowOf(emptyList())
+        override fun getActionsForImprovement(improvementId: String): Flow<List<IntelligenceActionEntity>> = flowOf(emptyList())
+        override suspend fun getActionById(id: String): IntelligenceActionEntity? = null
+        override suspend fun insertAction(action: IntelligenceActionEntity) {}
+        override suspend fun updateAction(action: IntelligenceActionEntity) {}
 
-        override fun getArtifactsForBlueprint(blueprintId: String): Flow<List<BlueprintArtifactEntity>> = 
-            MutableStateFlow(artifacts.values.filter { it.blueprintId == blueprintId })
-        override fun getArtifactsForImprovement(improvementId: String): Flow<List<BlueprintArtifactEntity>> = 
-            MutableStateFlow(artifacts.values.filter { it.improvementId == improvementId })
+        override fun getArtifactsForBlueprint(blueprintId: String): Flow<List<BlueprintArtifactEntity>> = flowOf(emptyList())
+        override fun getArtifactsForImprovement(improvementId: String): Flow<List<BlueprintArtifactEntity>> = flowOf(emptyList())
         override suspend fun getArtifactById(id: String): BlueprintArtifactEntity? = artifacts[id]
         override suspend fun insertArtifact(artifact: BlueprintArtifactEntity) { artifacts[artifact.id] = artifact }
 
         override fun getImplementationRunsForImprovement(improvementId: String): Flow<List<ImplementationRunEntity>> = 
-            MutableStateFlow(runs.values.filter { it.improvementId == improvementId }.sortedByDescending { it.startTime })
+            runsFlow.map { list -> list.filter { it.improvementId == improvementId }.sortedByDescending { it.startTime } }
         override suspend fun getImplementationRunById(id: String): ImplementationRunEntity? = runs[id]
-        override suspend fun insertImplementationRun(run: ImplementationRunEntity) { runs[run.id] = run }
-        override suspend fun updateImplementationRun(run: ImplementationRunEntity) { runs[run.id] = run }
+        override suspend fun insertImplementationRun(run: ImplementationRunEntity) { 
+            runs[run.id] = run 
+            runsFlow.value = runs.values.toList()
+        }
+        override suspend fun updateImplementationRun(run: ImplementationRunEntity) { 
+            runs[run.id] = run 
+            runsFlow.value = runs.values.toList()
+        }
 
-        override fun getVerificationResultsForImprovement(improvementId: String): Flow<List<VerificationResultEntity>> = 
-            MutableStateFlow(results.values.filter { it.improvementId == improvementId })
-        override fun getVerificationResultsForRun(runId: String): Flow<List<VerificationResultEntity>> = 
-            MutableStateFlow(results.values.filter { it.runId == runId })
+        override fun getVerificationResultsForImprovement(improvementId: String): Flow<List<VerificationResultEntity>> = flowOf(emptyList())
+        override fun getVerificationResultsForRun(runId: String): Flow<List<VerificationResultEntity>> = flowOf(emptyList())
         override suspend fun insertVerificationResult(result: VerificationResultEntity) { results[result.id] = result }
 
         override fun getMonitoringSessionsForImprovement(improvementId: String): Flow<List<MonitoringSessionEntity>> = 
-            MutableStateFlow(sessions.values.filter { it.improvementId == improvementId }.sortedByDescending { it.startTime })
+            sessionsFlow.map { list -> list.filter { it.improvementId == improvementId }.sortedByDescending { it.startTime } }
+        override fun getAllMonitoringSessions(): Flow<List<MonitoringSessionEntity>> = sessionsFlow
         override suspend fun getMonitoringSessionById(id: String): MonitoringSessionEntity? = sessions[id]
-        override suspend fun insertMonitoringSession(session: MonitoringSessionEntity) { sessions[session.id] = session }
-        override suspend fun updateMonitoringSession(session: MonitoringSessionEntity) { sessions[session.id] = session }
+        override suspend fun insertMonitoringSession(session: MonitoringSessionEntity) { 
+            sessions[session.id] = session 
+            sessionsFlow.value = sessions.values.toList()
+        }
+        override suspend fun updateMonitoringSession(session: MonitoringSessionEntity) { 
+            sessions[session.id] = session 
+            sessionsFlow.value = sessions.values.toList()
+        }
 
         override fun getValidationResultsForImprovement(improvementId: String): Flow<List<ValidationResultEntity>> = 
-            MutableStateFlow(validationResults.values.filter { it.improvementId == improvementId })
-        override suspend fun insertValidationResult(result: ValidationResultEntity) { validationResults[result.id] = result }
+            valResultsFlow.map { list -> list.filter { it.improvementId == improvementId } }
+        override suspend fun insertValidationResult(result: ValidationResultEntity) { 
+            validationResults[result.id] = result 
+            valResultsFlow.value = validationResults.values.toList()
+        }
     }
 }

@@ -34,7 +34,7 @@ class MobileCLIPEmbeddingProviderTest {
         assertEquals(SemanticRepresentationType.VISUAL, rep.type)
         assertEquals(512, rep.dimensionality)
         assertEquals(512, rep.vector.size)
-        assertEquals("mobileclip-s0-image", rep.modelDescriptor.modelId)
+        assertEquals("mobileclip-s0", rep.modelDescriptor.modelId)
 
         // Verify finite values
         for (v in rep.vector) {

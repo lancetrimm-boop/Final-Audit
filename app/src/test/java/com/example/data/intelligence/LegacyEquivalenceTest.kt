@@ -53,9 +53,15 @@ class LegacyEquivalenceTest {
         `when`(repository.getMediaItemById("item_shared")).thenReturn(item1)
         `when`(repository.getMediaItemById("item_lex_2")).thenReturn(item2)
         `when`(repository.getMediaItemById("item_sem_1")).thenReturn(item3)
+        
+        val allMedia = listOf(item1, item2, item3)
+        `when`(repository.mediaItems).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(allMedia))
+        `when`(repository.isItemVisibleInLibrary(any())).thenReturn(true)
+        
         `when`(repository.tasteDNA).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA()))
         `when`(repository.intelligenceStats).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(IntelligenceStats()))
         `when`(repository.creatorProfiles).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(emptyMap()))
+        `when`(repository.signatureStyleProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(SignatureStyleProfile(emptyList(), emptyList())))
 
         // 3. Execution
         // Legacy (Simplified for test comparison)
@@ -101,6 +107,7 @@ class LegacyEquivalenceTest {
         `when`(repository.preferenceProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA.PreferenceProfile()))
         `when`(repository.intelligenceStats).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(IntelligenceStats()))
         `when`(repository.creatorProfiles).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(emptyMap()))
+        `when`(repository.signatureStyleProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(SignatureStyleProfile(emptyList(), emptyList())))
         `when`(repository.getMediaItemById("item1")).thenReturn(item1)
         `when`(repository.getMediaItemById("item2")).thenReturn(item2)
 

@@ -210,6 +210,9 @@ class RoomSemanticRepresentationRepository(
                 modelVersion = domain.modelDescriptor.modelVersion,
                 documentVersion = domain.documentVersion,
                 dimensionality = domain.dimensionality,
+                runtimeFormat = domain.modelDescriptor.runtimeFormat.name,
+                quantization = domain.modelDescriptor.quantization.name,
+                artifactHash = domain.modelDescriptor.artifactHash,
                 vectorData = serialized,
                 isNormalized = isNormalized,
                 sourceDataHash = domain.sourceDataHash,
@@ -225,7 +228,10 @@ class RoomSemanticRepresentationRepository(
                 modelId = entity.modelId,
                 modelVersion = entity.modelVersion,
                 dimensionality = entity.dimensionality,
-                primaryType = type
+                primaryType = type,
+                runtimeFormat = try { ModelRuntimeFormat.valueOf(entity.runtimeFormat) } catch (e: Exception) { ModelRuntimeFormat.ONNX },
+                quantization = try { QuantizationType.valueOf(entity.quantization) } catch (e: Exception) { QuantizationType.NONE_FP32 },
+                artifactHash = entity.artifactHash
             )
             val vector = VectorMath.deserialize(entity.vectorData, expectedDimension = entity.dimensionality)
 
@@ -260,6 +266,9 @@ class RoomSemanticRepresentationRepository(
                 modelVersion = domain.modelDescriptor.modelVersion,
                 documentVersion = domain.documentVersion,
                 dimensionality = domain.dimensionality,
+                runtimeFormat = domain.modelDescriptor.runtimeFormat.name,
+                quantization = domain.modelDescriptor.quantization.name,
+                artifactHash = domain.modelDescriptor.artifactHash,
                 vectorData = VectorMath.serialize(domain.vector),
                 createdAt = domain.createdAt
             )
@@ -270,7 +279,10 @@ class RoomSemanticRepresentationRepository(
                 modelId = entity.modelId,
                 modelVersion = entity.modelVersion,
                 dimensionality = entity.dimensionality,
-                primaryType = SemanticRepresentationType.VISUAL
+                primaryType = SemanticRepresentationType.VISUAL,
+                runtimeFormat = try { ModelRuntimeFormat.valueOf(entity.runtimeFormat) } catch (e: Exception) { ModelRuntimeFormat.ONNX },
+                quantization = try { QuantizationType.valueOf(entity.quantization) } catch (e: Exception) { QuantizationType.NONE_FP32 },
+                artifactHash = entity.artifactHash
             )
             return VideoFrameRepresentation(
                 id = entity.id,

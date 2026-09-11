@@ -28,6 +28,9 @@ data class SemanticRepresentationEntity(
     val modelVersion: Int,
     val documentVersion: Int,
     val dimensionality: Int,
+    val runtimeFormat: String = "ONNX",
+    val quantization: String = "NONE_FP32",
+    val artifactHash: String? = null,
     val vectorData: ByteArray,
     val isNormalized: Boolean,
     val sourceDataHash: String,
@@ -93,6 +96,9 @@ data class VideoFrameRepresentationEntity(
     val modelVersion: Int,
     val documentVersion: Int,
     val dimensionality: Int,
+    val runtimeFormat: String = "ONNX",
+    val quantization: String = "NONE_FP32",
+    val artifactHash: String? = null,
     val vectorData: ByteArray,
     val createdAt: Long = System.currentTimeMillis()
 ) {

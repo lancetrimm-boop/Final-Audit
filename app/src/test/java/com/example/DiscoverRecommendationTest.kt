@@ -6,8 +6,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.*
+import org.mockito.Mockito.mock
+import org.mockito.kotlin.any
+import org.mockito.kotlin.whenever
 
 class DiscoverRecommendationTest {
 
@@ -41,8 +42,8 @@ class DiscoverRecommendationTest {
         val repository = mock(MediaRepository::class.java)
         val core = mock(AuraIntelligenceCore::class.java)
         
-        `when`(repository.intelligenceCore).thenReturn(core)
-        `when`(repository.mediaItems).thenReturn(MutableStateFlow(listOf(favoriteItem, unseenItem)))
+        whenever(repository.intelligenceCore).thenReturn(core)
+        whenever(repository.mediaItems).thenReturn(MutableStateFlow(listOf(favoriteItem, unseenItem)))
         
         return repository
     }
@@ -54,17 +55,17 @@ class DiscoverRecommendationTest {
             val core = repository.intelligenceCore!!
 
             // Mock Core response for Hero category
-            `when`(core.processRequest(any(IntelligenceRequest::class.java))).thenAnswer { invocation ->
+            whenever(core.processRequest(any())).thenAnswer { invocation ->
                 val req = invocation.arguments[0] as IntelligenceRequest
                 val candidates = if (req.limit == 1) {
-                    listOf(IntelligenceCandidate(favoriteItem, emptyList(), 1.0, 1.0f, 0f, "High predicted match"))
+                    listOf(IntelligenceCandidate(favoriteItem.copy(selectionReason = "High predicted match"), emptyList(), 1.0, 1.0f, 0f, "High predicted match"))
                 } else {
                     listOf(
-                        IntelligenceCandidate(favoriteItem, emptyList(), 1.0, 1.0f, 0f, "Similar to favorites"),
-                        IntelligenceCandidate(unseenItem, emptyList(), 0.5, 0.5f, 0f, "Fresh for you")
+                        IntelligenceCandidate(favoriteItem.copy(selectionReason = "Similar to favorites"), emptyList(), 1.0, 1.0f, 0f, "Similar to favorites"),
+                        IntelligenceCandidate(unseenItem.copy(selectionReason = "Fresh for you"), emptyList(), 0.5, 0.5f, 0f, "Fresh for you")
                     )
                 }
-                IntelligenceResponse(req.requestId, req.mode, candidates, 0L)
+                IntelligenceResponse(req.requestId, req.mode, candidates, latencyMs = 0L)
             }
 
             val categories = RecommendationEngine.computeDiscoverCategories(
@@ -86,17 +87,17 @@ class DiscoverRecommendationTest {
             val core = repository.intelligenceCore!!
 
             // Mock Core response where unseen item is hero
-            `when`(core.processRequest(any(IntelligenceRequest::class.java))).thenAnswer { invocation ->
+            whenever(core.processRequest(any())).thenAnswer { invocation ->
                 val req = invocation.arguments[0] as IntelligenceRequest
                 val candidates = if (req.limit == 1) {
-                    listOf(IntelligenceCandidate(unseenItem, emptyList(), 1.0, 1.0f, 0f, "Aura is learning your preference"))
+                    listOf(IntelligenceCandidate(unseenItem.copy(selectionReason = "Aura is learning your preference"), emptyList(), 1.0, 1.0f, 0f, "Aura is learning your preference"))
                 } else {
                     listOf(
-                        IntelligenceCandidate(unseenItem, emptyList(), 1.0, 1.0f, 0f, "Fresh for you"),
-                        IntelligenceCandidate(favoriteItem, emptyList(), 0.5, 0.5f, 0f, "Similar to favorites")
+                        IntelligenceCandidate(unseenItem.copy(selectionReason = "Fresh for you"), emptyList(), 1.0, 1.0f, 0f, "Fresh for you"),
+                        IntelligenceCandidate(favoriteItem.copy(selectionReason = "Similar to favorites"), emptyList(), 0.5, 0.5f, 0f, "Similar to favorites")
                     )
                 }
-                IntelligenceResponse(req.requestId, req.mode, candidates, 0L)
+                IntelligenceResponse(req.requestId, req.mode, candidates, latencyMs = 0L)
             }
 
             val categories = RecommendationEngine.computeDiscoverCategories(

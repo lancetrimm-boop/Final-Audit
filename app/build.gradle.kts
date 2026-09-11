@@ -19,7 +19,7 @@ android {
     applicationId = "com.aistudio.auramediaplayer.v3.ppqtdt"
     minSdk = 24
     targetSdk = 36
-    versionCode = 4
+    versionCode = 5
     versionName = "1.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -116,7 +116,12 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions { 
+    unitTests { 
+      isIncludeAndroidResources = true 
+      isReturnDefaultValues = true
+    } 
+  }
 
   sourceSets {
     getByName("debug") {

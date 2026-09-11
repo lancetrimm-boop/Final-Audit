@@ -414,8 +414,9 @@ fun AuraMainContent(repository: MediaRepository) {
                     onSeeSimilar = { targetItem ->
                         val requestId = java.util.UUID.randomUUID().toString().take(6)
                         coroutineScope.launch {
-                            val similar = repository.getSimilarMedia(targetItem, requestId)
-                            if (similar.isNotEmpty()) {
+                            val response = repository.getSimilarMedia(targetItem, requestId)
+                            if (response.isSuccess && response.candidates.isNotEmpty()) {
+                                val similar = response.candidates.map { it.item }
                                 repository.setPlaylist(items = similar, initialIndex = 0, sourceTitle = "Similar — ${targetItem.title}")
                                 activeMomentsMode = null // Exit slideshow to play similar items
                             }
@@ -503,10 +504,11 @@ fun AuraMainContent(repository: MediaRepository) {
                         val requestId = java.util.UUID.randomUUID().toString().take(6)
                         Log.d("SeeSimilarTrace", "STAGE=ORCHESTRATOR requestId=$requestId sourceId=${targetItem.id} title=\"${targetItem.title}\"")
                         coroutineScope.launch {
-                            val similar = repository.getSimilarMedia(targetItem, requestId)
-                            Log.d("SeeSimilarTrace", "STAGE=RESULT requestId=$requestId resultCount=${similar.size}")
+                            val response = repository.getSimilarMedia(targetItem, requestId)
+                            Log.d("SeeSimilarTrace", "STAGE=RESULT requestId=$requestId resultCount=${response.candidates.size}")
                             
-                            if (similar.isNotEmpty()) {
+                            if (response.isSuccess && response.candidates.isNotEmpty()) {
+                                val similar = response.candidates.map { it.item }
                                 repository.setPlaylist(items = similar, initialIndex = 0, sourceTitle = "See Similar — ${targetItem.title}")
                                 
                                 // Verification check: Did the playlist actually update?
@@ -518,6 +520,9 @@ fun AuraMainContent(repository: MediaRepository) {
                                     Log.e("SeeSimilarTrace", "STAGE=PLAYLIST_FAILURE requestId=$requestId - Playlist became empty after sanitization.")
                                     android.widget.Toast.makeText(context, "No playable similar items found", android.widget.Toast.LENGTH_LONG).show()
                                 }
+                            } else if (!response.isSuccess) {
+                                val msg = if (response.errorMessage == "STILL_PROCESSING") "Visual Search Failed: Still Processing" else "Intelligence Error: ${response.errorMessage}"
+                                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
                             } else {
                                 Log.d("SeeSimilarTrace", "STAGE=NO_RESULTS requestId=$requestId")
                                 android.widget.Toast.makeText(context, "No similar media found", android.widget.Toast.LENGTH_SHORT).show()

@@ -18,7 +18,11 @@ class StartupReliabilityTest {
 
     @Before
     fun setUp() {
-        repository = MediaRepository.instance
+        whenever(mockContext.applicationContext).thenReturn(mockContext)
+        val mockPrefs: android.content.SharedPreferences = mock()
+        whenever(mockContext.getSharedPreferences(any(), any())).thenReturn(mockPrefs)
+        // Use a new instance with a controlled dispatcher for testing
+        repository = MediaRepository(kotlinx.coroutines.test.StandardTestDispatcher())
         repository.resetTestingState()
     }
 
@@ -26,14 +30,13 @@ class StartupReliabilityTest {
     fun testInitializationOwner_MultipleCalls_OneJob() = runTest {
         // First call starts initialization
         repository.initDatabase(mockContext)
-        val diagnostics1 = repository.getStartupDiagnostics()
-        assertEquals(DatabaseState.INITIALIZING, diagnostics1.databaseState)
+        
+        // We use StandardTestDispatcher so we can check state BEFORE the coroutine runs
+        assertEquals(DatabaseState.INITIALIZING, repository.databaseState.value)
 
         // Second call should return immediately due to synchronized and initJob check
         repository.initDatabase(mockContext)
-        val diagnostics2 = repository.getStartupDiagnostics()
-        assertEquals(DatabaseState.INITIALIZING, diagnostics2.databaseState)
-        assertEquals(diagnostics1.startTime, diagnostics2.startTime)
+        assertEquals(DatabaseState.INITIALIZING, repository.databaseState.value)
     }
 
     @Test

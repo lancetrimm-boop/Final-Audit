@@ -36,14 +36,15 @@ class PersonalizationAuditTest {
 
     @Test
     fun `test TasteDNA Dynamic Update - Incremental Learning`() {
-        var dna = TasteDNA(isFineTuningEnabled = true, vibrancy = 0.5, learnedVibrancy = 0.5)
+        var dna = TasteDNA(isFineTuningEnabled = true, vibrancy = 0.5, learnedVibrancy = 0.5, confVibrancy = 1.0)
         
         // AI Skip Behavior or Pairwise Vote Adjustment
         val amount = 0.1
         dna = dna.updateLearnedDimension("vibrancy", amount, 0.15)
         
         assertEquals(0.6, dna.learnedVibrancy, 0.001)
-        assertEquals(0.55, dna.effectiveVibrancy, 0.001)
+        // 0.5 + (0.6 - 0.5) * 1.0 * 0.2 = 0.52
+        assertEquals(0.52, dna.effectiveVibrancy, 0.001)
     }
 
     @Test

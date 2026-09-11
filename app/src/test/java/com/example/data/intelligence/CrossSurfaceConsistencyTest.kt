@@ -5,7 +5,9 @@ import com.example.data.semantic.*
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
-import org.mockito.Mockito.*
+import org.mockito.Mockito.mock
+import org.mockito.kotlin.any
+import org.mockito.kotlin.whenever
 
 class CrossSurfaceConsistencyTest {
 
@@ -16,19 +18,19 @@ class CrossSurfaceConsistencyTest {
         val item1 = MediaItem(id = "item1", title = "A", mediaType = "PHOTO", compatibilityStatus = CompatibilityStatus.PLAYABLE)
         val item2 = MediaItem(id = "item2", title = "B", mediaType = "PHOTO", compatibilityStatus = CompatibilityStatus.PLAYABLE)
         
-        `when`(repository.mediaItems).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(listOf(item1, item2)))
-        `when`(repository.tasteDNA).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA()))
-        `when`(repository.intelligenceStats).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(IntelligenceStats()))
-        `when`(repository.creatorProfiles).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(emptyMap()))
-        `when`(repository.preferenceProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA.PreferenceProfile()))
-        `when`(repository.getMediaItemById("item1")).thenReturn(item1)
-        `when`(repository.getMediaItemById("item2")).thenReturn(item2)
-        `when`(repository.isItemVisibleInLibrary(any())).thenReturn(true)
-        `when`(repository.signatureStyleProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(SignatureStyleProfile(emptyList(), emptyList())))
+        whenever(repository.mediaItems).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(listOf(item1, item2)))
+        whenever(repository.tasteDNA).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA()))
+        whenever(repository.intelligenceStats).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(IntelligenceStats()))
+        whenever(repository.creatorProfiles).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(emptyMap()))
+        whenever(repository.preferenceProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA.PreferenceProfile()))
+        whenever(repository.getMediaItemById("item1")).thenReturn(item1)
+        whenever(repository.getMediaItemById("item2")).thenReturn(item2)
+        whenever(repository.isItemVisibleInLibrary(any())).thenReturn(true)
+        whenever(repository.signatureStyleProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(SignatureStyleProfile(emptyList(), emptyList())))
 
         val router = mock(RetrievalRouter::class.java)
         // Router returns item2 as #1, item1 as #2
-        `when`(router.retrieve(any())).thenReturn(mapOf(
+        whenever(router.retrieve(any())).thenReturn(mapOf(
             SearchChannel.KEYWORD to listOf(
                 RankedChannelItem("item2", 10f, 1),
                 RankedChannelItem("item1", 5f, 2)

@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.Manifest
 import android.os.Build
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -66,9 +67,21 @@ fun LibraryScreen(
     val standardSort by repository.selectedStandardSort.collectAsStateWithLifecycle()
     val intelligentSort by repository.selectedIntelligentSort.collectAsStateWithLifecycle()
     val searchRequest by repository.librarySearchRequest.collectAsStateWithLifecycle()
+    val searchError by repository.searchErrorMessage.collectAsStateWithLifecycle()
     val activeVisualReferences by repository.activeVisualReferences.collectAsStateWithLifecycle()
     val aiState by repository.aiState.collectAsStateWithLifecycle()
     var isSearchActive by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    // AURA REPAIR: Global search error feedback
+    LaunchedEffect(searchError) {
+        searchError?.let { error ->
+            val msg = if (error == "STILL_PROCESSING") "Visual Search Failed: Still Processing" else error
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+        }
+    }
 
     // Multi-select state
     var isSelectionMode by remember { mutableStateOf(false) }
@@ -79,9 +92,6 @@ fun LibraryScreen(
         initialFirstVisibleItemScrollOffset = repository.libraryScrollOffset
     )
 
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    
     // Library UI Preferences (Update 4)
     val libraryPrefs = remember(repository) { repository.libraryPreferences }
     val gridDensity by (libraryPrefs?.gridDensity ?: MutableStateFlow(160f)).collectAsStateWithLifecycle()
@@ -273,11 +283,14 @@ fun LibraryScreen(
                     onSearchSimilar = {
                         val selectedItems = selectedIds.mapNotNull { mediaItemsMap[it] }
                         if (selectedItems.isNotEmpty()) {
+                            // AURA REGRESSION REPAIR: Start clean ONLY if from outside active search
+                            if (!isSearchActive) {
+                                repository.clearSearch()
+                            }
+
                             if (selectedItems.size >= 2) {
                                 repository.searchByMultipleImages(selectedItems)
                             } else {
-                                // AURA REPAIR: Use stable identity-based addition instead of bitmap extraction
-                                repository.clearSearch() // Start fresh for "See Similar"
                                 repository.addVisualReference(selectedItems[0])
                             }
                             isSelectionMode = false
@@ -442,7 +455,7 @@ fun LibraryScreen(
             // Manual scans are already handled by PullToRefreshBox.
 
             PullToRefreshBox(
-                isRefreshing = scanProgress.isScanning && scanProgress.isManual,
+                isRefreshing = (scanProgress.isScanning && scanProgress.isManual) || (latestSortedItemsFromRepo.isEmpty() && isSearchActive && searchError == null),
                 onRefresh = { 
                     repository.refreshSort()
                     stableItems = emptyList() // Force reload on manual refresh
@@ -455,10 +468,20 @@ fun LibraryScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 if (displayItems.isEmpty()) {
-                    EmptyLibraryView(
-                        onImportClick = { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
-                        onScanClick = { scanPermissionLauncher.launch(permissionsToRequest) }
-                    )
+                    if (isSearchActive) {
+                        EmptySearchStateView(
+                            isStillProcessing = searchError == "STILL_PROCESSING",
+                            onClearSearch = {
+                                isSearchActive = false
+                                repository.clearSearch()
+                            }
+                        )
+                    } else {
+                        EmptyLibraryView(
+                            onImportClick = { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+                            onScanClick = { scanPermissionLauncher.launch(permissionsToRequest) }
+                        )
+                    }
                 } else {
                     Box(
                         modifier = Modifier
@@ -555,6 +578,50 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun EmptySearchStateView(
+    isStillProcessing: Boolean,
+    onClearSearch: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(AuraSpacing.XL),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = if (isStillProcessing) Icons.Default.Sync else Icons.Default.SearchOff,
+            contentDescription = null,
+            tint = AuraMutedSlate.copy(alpha = 0.3f),
+            modifier = Modifier.size(56.dp)
+        )
+        Spacer(modifier = Modifier.height(AuraSpacing.M))
+        Text(
+            text = if (isStillProcessing) "Analyzing Media" else "No matches found",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Black,
+            color = AuraMidnight,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(AuraSpacing.XS))
+        Text(
+            text = if (isStillProcessing) 
+                "Aura is still generating embeddings for your library. This may take a few moments." 
+                else "We couldn't find any media matching your current constraints.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = AuraSlate,
+            textAlign = TextAlign.Center,
+            lineHeight = 20.sp
+        )
+        Spacer(modifier = Modifier.height(AuraSpacing.L))
+        AuraButton(
+            text = "CLEAR SEARCH",
+            onClick = onClearSearch
+        )
     }
 }
 

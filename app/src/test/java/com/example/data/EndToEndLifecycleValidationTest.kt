@@ -34,9 +34,10 @@ class EndToEndLifecycleValidationTest {
         val report = repository.generateClosedLoopReport()
         val finding = repository.createFindingFromReport(report, "Personalization Optimization")
         
-        assertEquals(IntelligenceLifecycleState.FINDING_DETECTED, finding.lifecycleState)
+        // AURA REPAIR: Actionable findings are now automatically moved to SUGGESTED_IMPROVEMENT
+        assertEquals(IntelligenceLifecycleState.SUGGESTED_IMPROVEMENT, finding.lifecycleState)
         assertEquals(1, fakeDao.findings.size)
-        println("PASS: Finding Created")
+        println("PASS: Finding Created (Auto-Actionable)")
 
         // 2. SUGGESTED IMPROVEMENT CREATED (Automated Pipeline)
         val improvements = fakeDao.getAllImprovements().first()

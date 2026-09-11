@@ -41,7 +41,15 @@ object LegacyDatabaseEncryptionMigrator {
 
         if (isDatabaseEncrypted(dbPath)) {
             Log.i(TAG, "Database is already encrypted. Validating key format...")
-            val binaryKey = PassphraseManager.getPassphrase(context)
+            
+            val binaryKey = try {
+                PassphraseManager.getPassphrase(context)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to retrieve encryption key for validation: ${e.message}")
+                // AURA REPAIR: If we can't get the key but it IS encrypted, return AlreadyEncrypted 
+                // to signal that we don't need a transition from plaintext.
+                return TransitionResult.AlreadyEncrypted 
+            }
             
             // 1. Try primary binary key (Current Standard)
             try {

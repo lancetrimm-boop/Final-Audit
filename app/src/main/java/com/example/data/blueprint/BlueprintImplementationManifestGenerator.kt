@@ -47,6 +47,11 @@ object BlueprintImplementationManifestGenerator {
             modifications.add(mapTasteDnaToCodePlan(mod, blueprint, highestTier))
         }
 
+        // Map Recommendation Engine Modifications from Section 9
+        blueprint.recommendationEngineModifications.forEach { mod ->
+            modifications.add(mapRecommendationToCodePlan(mod, blueprint, highestTier))
+        }
+
         return BlueprintImplementationManifest(
             manifestId = UUID.randomUUID().toString(),
             blueprintId = blueprint.identity.blueprintId,
@@ -130,6 +135,39 @@ object BlueprintImplementationManifestGenerator {
             requiredTests = listOf("TasteDNATest.kt"),
             validationCriteria = "Alignment with user engagement trends",
             rollbackCriteria = "User engagement regression",
+            implementationStatus = ImplementationStatus.PENDING,
+            isCausallyValidated = false,
+            filesToModify = listOf(fileName),
+            repositoryUrl = currentRepositoryUrl,
+            branch = currentBranch,
+            commitHash = currentCommitHash
+        )
+    }
+
+    private fun mapRecommendationToCodePlan(
+        mod: com.example.data.RecommendationEngineModification,
+        blueprint: StrategyBlueprint,
+        highestTier: EvidenceTier
+    ): CodeModificationPlan {
+        val fileName = "RecommendationEngine.kt"
+        return CodeModificationPlan(
+            modificationId = UUID.randomUUID().toString(),
+            componentName = "RecommendationEngine",
+            sourceFile = fileName,
+            packageName = "com.example.data",
+            className = "RecommendationEngine",
+            methodOrProperty = mod.parameterOrWeightName,
+            blueprintExpectedValue = mod.previousValue.toString(),
+            proposedValue = mod.proposedValue.toString(),
+            changeType = ImplementationChangeType.WEIGHT_CHANGE,
+            expectedBehavioralEffect = "Optimizing recommendation filtering",
+            evidenceSupportingChange = mod.justification,
+            evidenceTier = highestTier,
+            confidence = 1.0,
+            risk = blueprint.riskAssessment,
+            requiredTests = listOf("RecommendationEngineTest.kt"),
+            validationCriteria = "Personalization score >= ${blueprint.targetState.targetValue}",
+            rollbackCriteria = "Personalization score drops below baseline ${blueprint.baselineState.engagementScore}",
             implementationStatus = ImplementationStatus.PENDING,
             isCausallyValidated = false,
             filesToModify = listOf(fileName),

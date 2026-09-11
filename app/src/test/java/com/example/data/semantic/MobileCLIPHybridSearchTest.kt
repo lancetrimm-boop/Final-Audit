@@ -17,7 +17,7 @@ class MobileCLIPHybridSearchTest {
             
             val item = MediaItem(id = "media_shared", title = "Shared Match", mediaType = "PHOTO")
             val candidates = listOf(IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f, "Fused Match"))
-            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, 5L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, latencyMs = 5L)
             
             whenever(core.processRequest(any())).thenReturn(response)
 
@@ -37,7 +37,7 @@ class MobileCLIPHybridSearchTest {
             val core: AuraIntelligenceCore = mock()
             val engine = DefaultHybridSearchEngine(core)
             
-            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, emptyList(), 2L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, emptyList(), latencyMs = 2L)
             whenever(core.processRequest(any())).thenReturn(response)
 
             val result = engine.search("query", HybridSearchConfig())

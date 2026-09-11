@@ -1,15 +1,13 @@
 package com.example.data
 
 import android.graphics.Bitmap
-import com.example.data.semantic.HybridSearchEngine
-import com.example.data.semantic.HybridSearchResult
-import com.example.data.semantic.SearchQueryType
-import com.example.data.semantic.SearchRequest
+import com.example.data.semantic.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -19,15 +17,15 @@ import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MediaRepositorySearchTest {
-// ... (rest of the class)
 
+    private val testDispatcher = kotlinx.coroutines.test.StandardTestDispatcher()
     private lateinit var repository: MediaRepository
     private val hybridSearchEngine: HybridSearchEngine = mock()
 
     @Before
     fun setUp() {
-        // MediaRepository is a singleton in this project structure
-        repository = MediaRepository.instance
+        // AURA TEST REPAIR: Do not use the singleton instance, create a fresh one with test dispatcher.
+        repository = MediaRepository(testDispatcher)
         
         // Inject mock engine
         val field = MediaRepository::class.java.getDeclaredField("hybridSearchEngine")
@@ -38,7 +36,7 @@ class MediaRepositorySearchTest {
     }
 
     @Test
-    fun testTextSearch_WrapsInRequest() = runTest {
+    fun testTextSearch_WrapsInRequest() = runTest(testDispatcher) {
         val query = "beach"
         val mockResult = HybridSearchResult(
             query = query,
@@ -69,7 +67,7 @@ class MediaRepositorySearchTest {
     }
 
     @Test
-    fun testVisualSearch_CallsEngine() = runTest {
+    fun testVisualSearch_CallsEngine() = runTest(testDispatcher) {
         val mockBitmap: Bitmap = mock()
         whenever(mockBitmap.width).thenReturn(100)
         whenever(mockBitmap.height).thenReturn(100)
@@ -82,9 +80,13 @@ class MediaRepositorySearchTest {
         whenever(mockProvider.isReady()).thenReturn(true)
         
         val vector = FloatArray(512) { 0.5f }
+        val mockDescriptor: EmbeddingModelDescriptor = mock()
+        whenever(mockDescriptor.dimensionality).thenReturn(512)
+        whenever(mockDescriptor.primaryType).thenReturn(com.example.data.semantic.SemanticRepresentationType.VISUAL)
+        
         val mockRep = com.example.data.semantic.SemanticRepresentation(
             id = "q", mediaId = "q", type = com.example.data.semantic.SemanticRepresentationType.VISUAL,
-            modelDescriptor = mock(), dimensionality = 512, vector = vector, sourceDataHash = "h"
+            modelDescriptor = mockDescriptor, dimensionality = 512, vector = vector, sourceDataHash = "h"
         )
         whenever(mockProvider.generateEmbedding(any(), any(), any())).thenReturn(com.example.data.semantic.EmbeddingResult.Success(mockRep))
 
@@ -119,7 +121,7 @@ class MediaRepositorySearchTest {
     }
 
     @Test
-    fun testClearSearch_RestoresTextEmpty() = runTest {
+    fun testClearSearch_RestoresTextEmpty() = runTest(testDispatcher) {
         repository.clearSearch()
         assertEquals("", repository.librarySearchQuery)
         val currentRequest = repository.librarySearchRequest.value
@@ -128,18 +130,40 @@ class MediaRepositorySearchTest {
     }
 
     @Test
-    fun testTransition_VisualToCompound() = runTest {
+    fun testTransition_VisualToCompound() = runTest(testDispatcher) {
         val vector = FloatArray(512) { 0.1f }
-        // 1. Establish Visual Search
-        val visualReq = SearchRequest.Visual(vector, "uri")
-        val field = MediaRepository::class.java.getDeclaredField("_librarySearchRequest")
+        // 1. Establish Visual Search by setting a reference item
+        val item = MediaItem(id = "ref1", title = "Ref", mediaType = "PHOTO", compatibilityStatus = CompatibilityStatus.PLAYABLE)
+        
+        // Mock semantic repository and provider
+        val semanticRepo: SemanticRepresentationRepository = mock()
+        val descriptor = EmbeddingModelDescriptor("test", 1, 512, SemanticRepresentationType.VISUAL)
+        val rep = SemanticRepresentation(
+            id = "r1", mediaId = "ref1", type = SemanticRepresentationType.VISUAL,
+            modelDescriptor = descriptor, dimensionality = 512, vector = vector, sourceDataHash = "h"
+        )
+        whenever(semanticRepo.getSpecificRepresentation(eq("ref1"), any(), any())).thenReturn(rep)
+        
+        val repoField = MediaRepository::class.java.getDeclaredField("semanticRepresentationRepository")
+        repoField.isAccessible = true
+        repoField.set(repository, semanticRepo)
+
+        val mockProvider: MobileCLIPEmbeddingProvider = mock()
+        whenever(mockProvider.descriptor).thenReturn(descriptor)
+        val providerField = MediaRepository::class.java.getDeclaredField("mobileCLIPProvider")
+        providerField.isAccessible = true
+        providerField.set(repository, mockProvider)
+
+        val field = MediaRepository::class.java.getDeclaredField("_activeVisualReferences")
         field.isAccessible = true
-        (field.get(repository) as MutableStateFlow<SearchRequest>).value = visualReq
+        (field.get(repository) as MutableStateFlow<List<MediaItem>>).value = listOf(item)
 
         // 2. Set Text Query
         repository.librarySearchQuery = "sunset"
+        
+        // 3. Verify Compound State (derived reactively)
+        advanceUntilIdle()
 
-        // 3. Verify Compound State
         val current = repository.librarySearchRequest.value
         assertEquals(SearchQueryType.COMPOUND, current.queryType)
         assertEquals("sunset", current.query)
@@ -147,16 +171,19 @@ class MediaRepositorySearchTest {
     }
 
     @Test
-    fun testTransition_CompoundToText() = runTest {
-        val vector = FloatArray(512) { 0.1f }
+    fun testTransition_CompoundToText() = runTest(testDispatcher) {
         // 1. Establish Compound Search
-        val compReq = SearchRequest.Compound("beach", vector, "uri")
-        val field = MediaRepository::class.java.getDeclaredField("_librarySearchRequest")
+        repository.librarySearchQuery = "beach"
+        val item = MediaItem(id = "ref1", title = "Ref", mediaType = "PHOTO", compatibilityStatus = CompatibilityStatus.PLAYABLE)
+        
+        val field = MediaRepository::class.java.getDeclaredField("_activeVisualReferences")
         field.isAccessible = true
-        (field.get(repository) as MutableStateFlow<SearchRequest>).value = compReq
+        (field.get(repository) as MutableStateFlow<List<MediaItem>>).value = listOf(item)
 
         // 2. Remove Anchor
         repository.removeVisualAnchor()
+        
+        advanceUntilIdle()
 
         // 3. Verify Text-only State
         val current = repository.librarySearchRequest.value

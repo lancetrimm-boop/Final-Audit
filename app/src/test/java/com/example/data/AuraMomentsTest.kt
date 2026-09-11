@@ -6,9 +6,11 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.mockito.Mockito.*
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
 import org.mockito.kotlin.any
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.argThat
 
 class AuraMomentsTest {
 
@@ -58,7 +60,7 @@ class AuraMomentsTest {
             whenever(repository.mediaItems).thenReturn(MutableStateFlow(library))
             
             val candidates = library.map { IntelligenceCandidate(it, emptyList(), 1.0, 1.0f, 0f) }
-            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, 10L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, latencyMs = 10L)
             
             whenever(core.processRequest(any())).thenReturn(response)
 

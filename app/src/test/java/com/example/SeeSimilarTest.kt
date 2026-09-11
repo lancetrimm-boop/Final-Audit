@@ -18,10 +18,13 @@ class SeeSimilarTest {
 
     @Before
     fun setUp() {
-        repository = mock(MediaRepository::class.java)
+        repository = spy(MediaRepository())
         core = mock(AuraIntelligenceCore::class.java)
-        whenever(repository.intelligenceCore).thenReturn(core)
-        whenever(repository.mediaItems).thenReturn(MutableStateFlow(emptyList()))
+        
+        // Use reflection to set private set intelligenceCore
+        val coreField = MediaRepository::class.java.getDeclaredField("intelligenceCore")
+        coreField.isAccessible = true
+        coreField.set(repository, core)
     }
 
     @Test
@@ -40,10 +43,11 @@ class SeeSimilarTest {
             val candidates = listOf(
                 IntelligenceCandidate(candItem, emptyList(), 1.0, 1.0f, 0f, "Visual Match")
             )
-            val response = IntelligenceResponse("req", IntelligenceMode.SIMILAR, candidates, 10L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SIMILAR, candidates, latencyMs = 10L)
             whenever(core.processRequest(any())).thenReturn(response)
 
-            val results = repository.getSimilarMedia(refItem)
+            val responseResult = repository.getSimilarMedia(refItem)
+            val results = responseResult.candidates.map { it.item }
             
             assertFalse("Results should not contain the reference item", results.any { it.id == refItem.id })
             assertEquals(1, results.size)

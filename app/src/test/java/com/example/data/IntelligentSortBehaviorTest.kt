@@ -22,6 +22,36 @@ class IntelligentSortBehaviorTest {
     @Before
     fun setUp() {
         repository = MediaRepository(testDispatcher)
+        
+        // Provide a mock core to handle intelligent sorts
+        val core = org.mockito.Mockito.mock(com.example.data.intelligence.AuraIntelligenceCore::class.java)
+        
+        kotlinx.coroutines.runBlocking {
+            org.mockito.kotlin.whenever(core.processRequest(org.mockito.kotlin.any())).thenAnswer { invocation ->
+                val req = invocation.arguments[0] as com.example.data.intelligence.IntelligenceRequest
+                val items = repository.mediaItems.value
+                
+                val sortedItems = when (req.sortOption) {
+                    "REDISCOVER" -> items.filter { it.isFavorite }
+                    "DISCOVER" -> items.filter { it.viewCount == 0 || it.exposureCount < 5 }
+                    "PERSONALIZED" -> items.filter { item ->
+                        val isLiked = item.isFavorite || item.rating >= 4.0f
+                        val isRecent = item.lastViewedTimestamp?.let { System.currentTimeMillis() - it < 3600000 } ?: false
+                        !isLiked && !isRecent
+                    }
+                    else -> items
+                }
+                
+                val candidates = sortedItems.map { 
+                    com.example.data.intelligence.IntelligenceCandidate(it, emptyList(), 1.0, 1.0f, 0f) 
+                }
+                com.example.data.intelligence.IntelligenceResponse(req.requestId, req.mode, candidates, isSuccess = true, latencyMs = 0L)
+            }
+        }
+        
+        val coreField = MediaRepository::class.java.getDeclaredField("intelligenceCore")
+        coreField.isAccessible = true
+        coreField.set(repository, core)
     }
 
     private fun createMediaItem(

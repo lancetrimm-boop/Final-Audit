@@ -173,8 +173,24 @@ object RecommendationEngine {
             }
         }
         
-        // Final fallback (Safe degraded state)
-        return repository.mediaItems.value.shuffled().take(100).map { it to 1.0f }
+        // Final fallback (Safe degraded state - used in tests or when AI core is starting)
+        val basePool = repository.mediaItems.value.filter { 
+            AuraMediaCompatibilityEngine.isEligibleForImport(it.compatibilityStatus) && !it.isDeleted
+        }.filter { (repository as? MediaRepository)?.compareSelectionSession?.value?.selectedIds?.contains(it.id) ?: true }
+        
+        val sortedPool = when (compareStrategy) {
+            CompareStrategy.REDISCOVER -> basePool.sortedByDescending { it.rating }
+            CompareStrategy.LEAST_INTERACTED -> basePool.sortedBy { it.viewCount }
+            CompareStrategy.EXPLORE -> basePool.shuffled()
+            else -> when (compareSort) {
+                CompareSortOption.NEWEST -> basePool.sortedByDescending { it.dateAdded }
+                CompareSortOption.OLDEST -> basePool.sortedBy { it.dateAdded }
+                CompareSortOption.LARGEST_FILES -> basePool.sortedByDescending { it.sizeBytes }
+                else -> basePool.sortedByDescending { it.rating }
+            }
+        }
+        
+        return sortedPool.take(100).map { it to 1.0f }
     }
 
     fun selectNextPairFromPool(

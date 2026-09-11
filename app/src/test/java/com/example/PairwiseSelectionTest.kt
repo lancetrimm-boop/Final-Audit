@@ -56,7 +56,7 @@ class PairwiseSelectionTest {
                 IntelligenceCandidate(item1, emptyList(), 1.0, 1.0f, 0f),
                 IntelligenceCandidate(item2, emptyList(), 0.9, 0.9f, 0f)
             )
-            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, 10L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, latencyMs = 10L)
             whenever(core.processRequest(any())).thenReturn(response)
 
             // We test the selectNextPairFromPool which still lives in RecommendationEngine

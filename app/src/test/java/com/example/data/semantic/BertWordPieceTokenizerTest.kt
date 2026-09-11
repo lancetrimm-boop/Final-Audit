@@ -19,7 +19,7 @@ class BertWordPieceTokenizerTest {
         assertEquals(BertWordPieceTokenizer.CLS_TOKEN, output.tokens[0])
         assertEquals(BertWordPieceTokenizer.SEP_TOKEN, output.tokens[output.tokens.size - 1])
         
-        assertEquals(output.tokens.size.toLong(), output.inputIds.size)
+        assertEquals(output.tokens.size, output.inputIds.size)
         assertEquals(1L, output.attentionMask[0])
         assertEquals(1L, output.attentionMask[output.attentionMask.size - 1])
     }
@@ -45,7 +45,7 @@ class BertWordPieceTokenizerTest {
         val output = tokenizer.tokenize(text, maxSeqLength = maxLen)
         
         assertEquals(maxLen, output.tokens.size)
-        assertEquals(maxLen.toLong(), output.inputIds.size)
+        assertEquals(maxLen, output.inputIds.size)
         assertEquals(BertWordPieceTokenizer.CLS_TOKEN, output.tokens[0])
         assertEquals(BertWordPieceTokenizer.SEP_TOKEN, output.tokens[maxLen - 1])
     }
@@ -66,10 +66,17 @@ class BertWordPieceTokenizerTest {
 
     @Test
     fun testUnknownToken() {
-        val text = "xyzzyquicksilver" // Highly unlikely to be in our tiny vocab
-        val output = tokenizer.tokenize(text)
+        // Create a tokenizer with a very limited vocab that doesn't include 'x'
+        val limitedTokenizer = BertWordPieceTokenizer(customVocab = mapOf(
+            BertWordPieceTokenizer.PAD_TOKEN to 0,
+            BertWordPieceTokenizer.UNK_TOKEN to 100,
+            BertWordPieceTokenizer.CLS_TOKEN to 101,
+            BertWordPieceTokenizer.SEP_TOKEN to 102
+        ))
+        val text = "xyz"
+        val output = limitedTokenizer.tokenize(text)
         
-        assertTrue(output.tokens.contains(BertWordPieceTokenizer.UNK_TOKEN))
+        assertTrue("Tokens should contain UNK: ${output.tokens}", output.tokens.contains(BertWordPieceTokenizer.UNK_TOKEN))
         val unkIndex = output.tokens.indexOf(BertWordPieceTokenizer.UNK_TOKEN)
         assertEquals(BertWordPieceTokenizer.UNK_TOKEN_ID.toLong(), output.inputIds[unkIndex])
     }

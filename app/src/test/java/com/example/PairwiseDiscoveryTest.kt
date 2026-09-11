@@ -32,7 +32,7 @@ class PairwiseDiscoveryTest {
                 IntelligenceCandidate(item2, emptyList(), 1.0, 1.0f, 0f, "High uncertainty bonus"),
                 IntelligenceCandidate(item1, emptyList(), 0.5, 0.5f, 0f, "Already mature")
             )
-            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, 10L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, latencyMs = 10L)
             whenever(core.processRequest(any())).thenReturn(response)
 
             // Verify that Core results guide the pool

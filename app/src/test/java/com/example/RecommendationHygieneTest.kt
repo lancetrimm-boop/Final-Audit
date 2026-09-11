@@ -29,7 +29,7 @@ class RecommendationHygieneTest {
             val candidates = listOf(
                 IntelligenceCandidate(unratedItem, emptyList(), 1.0, 1.0f, 0f, "For You")
             )
-            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, 10L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, latencyMs = 10L)
             whenever(core.processRequest(org.mockito.kotlin.any())).thenReturn(response)
 
             val coreRequest = IntelligenceRequest(mode = IntelligenceMode.SORT, sortOption = "PERSONALIZED")
@@ -55,7 +55,7 @@ class RecommendationHygieneTest {
             val heroItem = MediaItem(id = "hero", title = "Hero", mediaType = "VIDEO")
             val heroResponse = IntelligenceResponse("req", IntelligenceMode.DISCOVER, listOf(
                 IntelligenceCandidate(heroItem, emptyList(), 1.0, 1.0f, 0f)
-            ), 0L)
+            ), latencyMs = 0L)
             
             `when`(core.processRequest(any())).thenReturn(heroResponse)
             

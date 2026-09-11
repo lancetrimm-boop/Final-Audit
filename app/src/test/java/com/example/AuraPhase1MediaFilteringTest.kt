@@ -39,7 +39,7 @@ class AuraPhase1MediaFilteringTest {
     }
 
     @Test
-    fun testMediaValidityFiltering() {
+    fun testMediaValidityFiltering() = runTest(testDispatcher) {
         val items = listOf(
             createMediaItem("1", CompatibilityStatus.PLAYABLE),
             createMediaItem("2", CompatibilityStatus.CORRUPT),
@@ -59,15 +59,15 @@ class AuraPhase1MediaFilteringTest {
             tasteDNA = TasteDNA()
         )
 
-        // Should exclude: 2 (CORRUPT), 3 (UNSUPPORTED), 4 (DELETED), 5 (UNTESTED), 7 (isDeleted=true)
-        // Should preserve: 1 (PLAYABLE), 6 (NEEDS_TRANSCODE)
-        assertEquals(2, filtered.size)
+        // Should exclude: 2 (CORRUPT), 3 (UNSUPPORTED), 4 (DELETED), 7 (isDeleted=true)
+        // Should preserve: 1 (PLAYABLE), 5 (UNTESTED), 6 (NEEDS_TRANSCODE)
+        assertEquals(3, filtered.size)
         assertTrue(filtered.any { it.id == "1" })
+        assertTrue(filtered.any { it.id == "5" })
         assertTrue(filtered.any { it.id == "6" })
         assertFalse(filtered.any { it.id == "2" })
         assertFalse(filtered.any { it.id == "3" })
         assertFalse(filtered.any { it.id == "4" })
-        assertFalse(filtered.any { it.id == "5" })
         assertFalse(filtered.any { it.id == "7" })
     }
 

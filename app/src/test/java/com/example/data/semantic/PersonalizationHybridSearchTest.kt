@@ -14,7 +14,7 @@ class PersonalizationHybridSearchTest {
             val core: AuraIntelligenceCore = mock()
             val engine = DefaultHybridSearchEngine(core)
             
-            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, emptyList(), 1L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, emptyList(), latencyMs = 1L)
             whenever(core.processRequest(any())).thenReturn(response)
             
             engine.search(SearchRequest.Text("query"))

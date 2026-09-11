@@ -5,7 +5,11 @@ import com.example.data.intelligence.*
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
-import org.mockito.Mockito.*
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
+import org.mockito.kotlin.any
+import org.mockito.kotlin.whenever
+import org.mockito.kotlin.argThat
 
 class HybridSearchEngineTest {
 
@@ -91,16 +95,16 @@ class HybridSearchEngineTest {
             
             val item = MediaItem(id = "item1", title = "Test", mediaType = "PHOTO")
             val candidates = listOf(IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f, "Match"))
-            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, 10L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, latencyMs = 10L)
             
-            `when`(core.processRequest(any())).thenReturn(response)
+            whenever(core.processRequest(any())).thenReturn(response)
             
             val result = engine.search(SearchRequest.Text("query"))
             
             assertTrue(result.isSuccess)
             assertEquals(1, result.candidates.size)
             assertEquals("item1", result.candidates[0].mediaId)
-            verify(core).processRequest(argThat { it.mode == IntelligenceMode.SEARCH && it.query == "query" })
+            verify(core).processRequest(argThat { req -> req.mode == IntelligenceMode.SEARCH && req.query == "query" })
         }
     }
 

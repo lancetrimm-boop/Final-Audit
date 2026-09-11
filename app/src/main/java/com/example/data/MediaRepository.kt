@@ -524,6 +524,9 @@ class MediaRepository(
     private val _librarySearchQuery = MutableStateFlow("")
     private val _activeVisualReferences = MutableStateFlow<List<MediaItem>>(emptyList())
     
+    private val _searchErrorMessage = MutableStateFlow<String?>(null)
+    val searchErrorMessage: StateFlow<String?> = _searchErrorMessage.asStateFlow()
+
     /**
      * Authoritative set of visual reference items for iterative search.
      */
@@ -599,7 +602,7 @@ class MediaRepository(
             bitmap
         }
         
-        scope.launch(Dispatchers.Default) {
+        scope.launch(dispatcher) {
             try {
                 val provider = mobileCLIPProvider
                 if (provider == null || !provider.isReady()) return@launch
@@ -618,8 +621,12 @@ class MediaRepository(
                         uriPath = uri ?: "",
                         imageUrl = uri ?: ""
                     )
-                    // Reset and set as single anchor
-                    _activeVisualReferences.value = listOf(mockItem)
+                    
+                    // AURA REGRESSION REPAIR: Save generated representation so it can be resolved by deriveSearchRequest
+                    semanticRepresentationRepository?.saveRepresentation(result.representation)
+                    
+                    // AURA REGRESSION REPAIR: Accumulate instead of reset
+                    _activeVisualReferences.update { it + mockItem }
                 }
             } catch (e: Exception) {
                 Log.e("MediaRepository", "Failed to encode reference image.", e)
@@ -638,7 +645,7 @@ class MediaRepository(
         _activeVisualReferences.value = _activeVisualReferences.value + item
         
         // Asynchronously ensure representation exists
-        scope.launch(Dispatchers.Default) {
+        scope.launch(dispatcher) {
             val descriptor = mobileCLIPProvider?.descriptor ?: return@launch
             val exists = semanticRepresentationRepository?.exists(
                 item.id, SemanticRepresentationType.VISUAL, descriptor
@@ -672,12 +679,15 @@ class MediaRepository(
      */
     fun searchByMultipleImages(items: List<MediaItem>) {
         Log.i("MediaRepository", "Executing multi-visual search for ${items.size} items.")
-        // Phase 2 Fix: Set batch as the current authoritative reference set
-        _activeVisualReferences.value = items
+        // Phase 2 Fix: Accumulate items with deduplication
+        _activeVisualReferences.update { current ->
+            val newItems = items.filter { newItem -> current.none { it.id == newItem.id } }
+            current + newItems
+        }
         
         // Ensure all batch items have embeddings
         items.forEach { item ->
-            scope.launch(Dispatchers.Default) {
+            scope.launch(dispatcher) {
                 val descriptor = mobileCLIPProvider?.descriptor ?: return@launch
                 val exists = semanticRepresentationRepository?.exists(
                     item.id, SemanticRepresentationType.VISUAL, descriptor
@@ -846,6 +856,7 @@ class MediaRepository(
         }
 
         if (isSearchBlank) {
+            _searchErrorMessage.value = null
             val sorted = getFilteredAndSortedMedia(
                 filterType = filter,
                 sortCategory = category,
@@ -870,6 +881,7 @@ class MediaRepository(
                     val searchResult = hybridEngine.search(searchRequest, com.example.data.semantic.HybridSearchConfig(topK = 100))
                     
                     if (searchResult.isSuccess) {
+                        _searchErrorMessage.value = null
                         val allItemsMap = items.associateBy { it.id }
                         val results = searchResult.candidates
                             .mapNotNull { allItemsMap[it.mediaId] }
@@ -884,6 +896,7 @@ class MediaRepository(
                         android.util.Log.i("AURA_SEARCH_FLOW", "Hybrid search [${searchResult.requestId}]: Query=\"$queryLabel\", Candidates=${searchResult.candidates.size}, Displayed=${results.size}")
                         emit(results)
                     } else {
+                        _searchErrorMessage.value = searchResult.errorMessage
                         val fallbackQuery = searchRequest.query ?: ""
                         if (fallbackQuery.isNotBlank()) {
                             android.util.Log.w("AURA_SEARCH_FLOW", "Hybrid search failed: ${searchResult.errorMessage}. Falling back to legacy.")
@@ -1077,6 +1090,15 @@ class MediaRepository(
             _startupStartTime.value = System.currentTimeMillis()
             _initializationDetail.value = "Starting secure database initialization..."
             Log.d("AURA_INIT", "Starting secure database initialization...")
+
+            // AURA STARTUP WATCHDOG: Transitions to TIMEOUT state if initialization hangs (P0 Reliability)
+            scope.launch {
+                kotlinx.coroutines.delay(10000)
+                if (_databaseState.value == DatabaseState.INITIALIZING || _databaseState.value == DatabaseState.VERIFYING) {
+                    Log.w("AURA_INIT", "Startup watchdog triggered timeout.")
+                    _databaseState.value = DatabaseState.TIMEOUT
+                }
+            }
 
             initJob = scope.launch {
                 try {
@@ -2101,6 +2123,7 @@ class MediaRepository(
             CompatibilityStatus.NEEDS_TRANSCODE,
             CompatibilityStatus.ANALYSIS_PENDING,
             CompatibilityStatus.ANALYSIS_IN_PROGRESS,
+            CompatibilityStatus.ANALYSIS_FAILED,
             CompatibilityStatus.UNTESTED
         )
         val sanitized = items.filter { item ->
@@ -3548,7 +3571,7 @@ class MediaRepository(
         }
     }
 
-    suspend fun getSimilarMedia(item: MediaItem, requestId: String = "NONE"): List<MediaItem> {
+    suspend fun getSimilarMedia(item: MediaItem, requestId: String = "NONE"): com.example.data.intelligence.IntelligenceResponse {
         val core = intelligenceCore
         if (core != null) {
             val request = com.example.data.intelligence.IntelligenceRequest(
@@ -3558,14 +3581,17 @@ class MediaRepository(
                 limit = 30,
                 requestId = if (requestId == "NONE") java.util.UUID.randomUUID().toString().take(8) else requestId
             )
-            val response = core.processRequest(request)
-            if (response.isSuccess) {
-                return response.candidates.map { it.item }
-            }
+            return core.processRequest(request)
         }
         
-        // Final Degraded Fallback
-        return emptyList()
+        return com.example.data.intelligence.IntelligenceResponse(
+            requestId = requestId,
+            mode = com.example.data.intelligence.IntelligenceMode.SIMILAR,
+            candidates = emptyList(),
+            latencyMs = 0,
+            isSuccess = false,
+            errorMessage = "Intelligence Core Unavailable"
+        )
     }
 
     fun setMediaItemsForTesting(items: List<MediaItem>) {
@@ -4008,6 +4034,7 @@ stats ->
         val items = inputItems.filter { item ->
             matchesFilterType(item, filterType) && isItemVisibleInLibrary(item)
         }
+        Log.d("AURA_FILTER", "Pipeline pool: ${inputItems.size} -> ${items.size} after filter (type=$filterType)")
 
         return if (sortCategory == SortCategory.STANDARD) {
             val sorted = when (standardSort) {
@@ -4027,7 +4054,9 @@ stats ->
             }
             // AURA LABEL FIX: Standard sort results must not display stale ephemeral AI labels.
             sorted.map { item ->
-                if (isEphemeralReason(item.selectionReason)) item.copy(selectionReason = null) else item
+                // Apply system labels if missing (e.g. for items set directly in tests or from memory)
+                val systemReason = if (item.compatibilityStatus == CompatibilityStatus.ANALYSIS_FAILED) "Retry Analysis" else item.selectionReason
+                if (isEphemeralReason(systemReason)) item.copy(selectionReason = null) else item.copy(selectionReason = systemReason)
             }
         } else {
             // DELEGATE TO CORE (Update 9 Consolidation)
@@ -4064,7 +4093,8 @@ stats ->
 
     private fun isEphemeralReason(reason: String?): Boolean {
         if (reason == null) return false
-        return reason in EPHEMERAL_AI_REASONS || MATCH_PERCENT_REGEX.matches(reason)
+        val lowerReason = reason.lowercase()
+        return EPHEMERAL_AI_REASONS.any { it.lowercase() == lowerReason } || MATCH_PERCENT_REGEX.matches(reason)
     }
 
     private fun MediaItem.toEntity(): MediaEntity {
@@ -4287,6 +4317,7 @@ stats ->
             CompatibilityStatus.NEEDS_TRANSCODE,
             CompatibilityStatus.ANALYSIS_PENDING,
             CompatibilityStatus.ANALYSIS_IN_PROGRESS,
+            CompatibilityStatus.ANALYSIS_FAILED,
             CompatibilityStatus.UNTESTED
         )
         return !item.isDeleted && item.compatibilityStatus in visibleStatuses

@@ -61,7 +61,7 @@ class AuraLibrarySortingTest {
     )
 
     @Test
-    fun testStandardSort_Title() {
+    fun testStandardSort_Title() = runBlocking {
         val items = listOf(
             createItem("1", "Banana"),
             createItem("2", "Apple"),
@@ -84,7 +84,7 @@ class AuraLibrarySortingTest {
     }
 
     @Test
-    fun testStandardSort_Duration() {
+    fun testStandardSort_Duration() = runBlocking {
         val items = listOf(
             createItem("1", "Short", durationMs = 1000),
             createItem("2", "Long", durationMs = 5000),
@@ -113,7 +113,7 @@ class AuraLibrarySortingTest {
                 IntelligenceCandidate(items[2], emptyList(), 1.0, 1.0f, 0f, "New Discovery"),
                 IntelligenceCandidate(items[1], emptyList(), 0.5, 0.5f, 0f, "New Discovery")
             )
-            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, 10L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, latencyMs = 10L)
             whenever(core.processRequest(any())).thenReturn(response)
 
             val sorted = repository.getFilteredAndSortedMedia(
@@ -138,7 +138,7 @@ class AuraLibrarySortingTest {
             val candidates = listOf(
                 IntelligenceCandidate(items[1], emptyList(), 100.0, 5.0f, 10f, "Blast from the Past")
             )
-            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, 10L)
+            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, latencyMs = 10L)
             whenever(core.processRequest(any())).thenReturn(response)
 
             val sorted = repository.getFilteredAndSortedMedia(

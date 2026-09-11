@@ -3,7 +3,7 @@ package com.example.ui.screens
 import com.example.data.*
 import com.example.data.db.*
 import com.example.data.blueprint.*
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -33,7 +33,8 @@ class SystemAnalysisTest {
         ))
         repository.createFindingFromReport(report, "Regression Detected")
         
-        val state = viewModel.state.first { !it.isLoading }
+        // Wait for ViewModel to process the update
+        val state = viewModel.state.first { it.findings.isNotEmpty() }
         val analysis = state.systemAnalysis
         
         assertNotNull(analysis)
@@ -50,7 +51,7 @@ class SystemAnalysisTest {
         ))
         repository.createFindingFromReport(report, "Performance Boost")
         
-        val state = viewModel.state.first { !it.isLoading }
+        val state = viewModel.state.first { it.findings.isNotEmpty() }
         val analysis = state.systemAnalysis
         
         assertNotNull(analysis)
@@ -66,7 +67,7 @@ class SystemAnalysisTest {
         ))
         repository.createFindingFromReport(report, "Potential Improvement")
         
-        val state = viewModel.state.first { !it.isLoading }
+        val state = viewModel.state.first { it.findings.isNotEmpty() }
         val analysis = state.systemAnalysis
         
         assertNotNull(analysis)
@@ -82,7 +83,7 @@ class SystemAnalysisTest {
         ))
         repository.createFindingFromReport(report, "System Stable")
         
-        val state = viewModel.state.first { !it.isLoading }
+        val state = viewModel.state.first { it.findings.isNotEmpty() }
         val analysis = state.systemAnalysis
         
         assertNotNull(analysis)
@@ -94,28 +95,59 @@ class SystemAnalysisTest {
      * Re-using the fake DAO from the repository test.
      */
     class FakeIntelligenceDao : StubIntelligenceDao() {
-        val findings = mutableMapOf<String, FindingEntity>()
-        val improvements = mutableMapOf<String, SuggestedImprovementEntity>()
-        val events = mutableListOf<LifecycleEventEntity>()
-        val actions = mutableMapOf<String, IntelligenceActionEntity>()
+        internal val findings = mutableMapOf<String, FindingEntity>()
+        internal val improvements = mutableMapOf<String, SuggestedImprovementEntity>()
+        internal val alerts = mutableMapOf<String, RegressionAlertEntity>()
+        internal val events = mutableListOf<LifecycleEventEntity>()
+        internal val actions = mutableMapOf<String, IntelligenceActionEntity>()
+        internal val checkpoint = MutableStateFlow<UserCheckpointEntity?>(null)
 
-        override fun getAllFindings() = kotlinx.coroutines.flow.MutableStateFlow(findings.values.toList().sortedByDescending { it.dateDiscovered })
+        private val findingsFlow = MutableStateFlow<List<FindingEntity>>(emptyList<FindingEntity>())
+        private val improvementsFlow = MutableStateFlow<List<SuggestedImprovementEntity>>(emptyList<SuggestedImprovementEntity>())
+        private val alertsFlow = MutableStateFlow<List<RegressionAlertEntity>>(emptyList<RegressionAlertEntity>())
+
+        override fun getAllFindings() = findingsFlow
         override suspend fun getFindingById(id: String) = findings[id]
-        override suspend fun insertFinding(finding: FindingEntity) { findings[finding.id] = finding }
-        override suspend fun updateFinding(finding: FindingEntity) { findings[finding.id] = finding }
-        override fun getAllImprovements() = kotlinx.coroutines.flow.MutableStateFlow(improvements.values.toList())
-        override fun getImprovementsForFinding(findingId: String) = kotlinx.coroutines.flow.MutableStateFlow(improvements.values.filter { it.findingId == findingId })
+        override suspend fun insertFinding(finding: FindingEntity) { 
+            findings[finding.id] = finding 
+            findingsFlow.value = findings.values.toList().sortedByDescending { it.dateDiscovered }
+        }
+        override suspend fun updateFinding(finding: FindingEntity) { 
+            findings[finding.id] = finding 
+            findingsFlow.value = findings.values.toList().sortedByDescending { it.dateDiscovered }
+        }
+
+        override fun getAllImprovements() = improvementsFlow
+        override fun getImprovementsForFinding(findingId: String) = flowOf(improvements.values.filter { it.findingId == findingId })
         override suspend fun getImprovementById(id: String) = improvements[id]
-        override suspend fun insertImprovement(improvement: SuggestedImprovementEntity) { improvements[improvement.id] = improvement }
-        override suspend fun updateImprovement(improvement: SuggestedImprovementEntity) { improvements[improvement.id] = improvement }
-        override fun getLifecycleHistory(targetId: String) = kotlinx.coroutines.flow.MutableStateFlow(events.filter { it.targetId == targetId })
+        override suspend fun insertImprovement(improvement: SuggestedImprovementEntity) { 
+            improvements[improvement.id] = improvement 
+            improvementsFlow.value = improvements.values.toList()
+        }
+        override suspend fun updateImprovement(improvement: SuggestedImprovementEntity) { 
+            improvements[improvement.id] = improvement 
+            improvementsFlow.value = improvements.values.toList()
+        }
+
+        override fun getAllRegressionAlerts() = alertsFlow
+        override suspend fun insertRegressionAlert(alert: RegressionAlertEntity) {
+            alerts[alert.id] = alert
+            alertsFlow.value = alerts.values.toList()
+        }
+
+        override suspend fun insertCheckpoint(cp: UserCheckpointEntity) { checkpoint.value = cp }
+        override fun observeCheckpoint(id: String) = checkpoint
+
+        override fun getLifecycleHistory(targetId: String) = flowOf(events.filter { it.targetId == targetId })
         override suspend fun insertLifecycleEvent(event: LifecycleEventEntity) { events.add(event) }
-        override fun getAllActions() = kotlinx.coroutines.flow.MutableStateFlow(actions.values.toList())
-        override fun getActionsForImprovement(improvementId: String) = kotlinx.coroutines.flow.MutableStateFlow(actions.values.filter { it.improvementId == improvementId })
+        
+        override fun getAllActions() = flowOf(actions.values.toList())
+        override fun getActionsForImprovement(improvementId: String) = flowOf(actions.values.filter { it.improvementId == improvementId })
         override suspend fun getActionById(id: String) = actions[id]
         override suspend fun insertAction(action: IntelligenceActionEntity) { actions[action.id] = action }
         override suspend fun updateAction(action: IntelligenceActionEntity) { actions[action.id] = action }
-        override fun getArtifactsForBlueprint(blueprintId: String) = kotlinx.coroutines.flow.MutableStateFlow(emptyList<BlueprintArtifactEntity>())
+        
+        override fun getArtifactsForBlueprint(blueprintId: String) = flowOf(emptyList<BlueprintArtifactEntity>())
         override suspend fun insertArtifact(artifact: BlueprintArtifactEntity) {}
     }
 }

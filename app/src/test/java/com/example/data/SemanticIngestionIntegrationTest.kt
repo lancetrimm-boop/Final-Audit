@@ -50,11 +50,6 @@ class SemanticIngestionIntegrationTest {
 
         semanticRepo = RoomSemanticRepresentationRepository(database.semanticRepresentationDao())
         
-        // Inject semantic components
-        val repoField = MediaRepository::class.java.getDeclaredField("semanticRepresentationRepository")
-        repoField.isAccessible = true
-        repoField.set(repository, semanticRepo)
-
         val descriptor = EmbeddingModelDescriptor(
             modelId = "test-model",
             modelVersion = 1,
@@ -62,10 +57,23 @@ class SemanticIngestionIntegrationTest {
             primaryType = SemanticRepresentationType.CONTENT
         )
         fakeEmbeddingProvider = FakeEmbeddingProvider(descriptor)
+        val retriever = DefaultSemanticCandidateRetriever(semanticRepo)
+        val indexingService = DefaultSemanticIndexingService(fakeEmbeddingProvider, retriever, semanticRepo)
+
+        // Inject semantic components
+        val fields = mapOf(
+            "semanticRepresentationRepository" to semanticRepo,
+            "embeddingProvider" to fakeEmbeddingProvider,
+            "semanticIndexingService" to indexingService,
+            "semanticCandidateRetriever" to retriever
+        )
         
-        val providerField = MediaRepository::class.java.getDeclaredField("embeddingProvider")
-        providerField.isAccessible = true
-        providerField.set(repository, fakeEmbeddingProvider)
+        val repoClass = MediaRepository::class.java
+        fields.forEach { (name, value) ->
+            val field = repoClass.getDeclaredField(name)
+            field.isAccessible = true
+            field.set(repository, value)
+        }
     }
 
     @After

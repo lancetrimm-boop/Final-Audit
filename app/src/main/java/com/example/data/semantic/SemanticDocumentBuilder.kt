@@ -17,7 +17,7 @@ object SemanticDocumentBuilder {
      * Authoritative version of the document synthesis logic.
      * Incrementing this will force re-indexing of all items to capture new semantic signals.
      */
-    const val DOCUMENT_VERSION = 1
+    const val DOCUMENT_VERSION = 2
 
     /**
      * Builds a structured textual document for the given MediaItem.
@@ -26,7 +26,12 @@ object SemanticDocumentBuilder {
         val sb = StringBuilder()
 
         // 1. Title (Authoritative semantic anchor)
-        val cleanTitle = item.title.trim()
+        var cleanTitle = item.title.trim()
+        if (cleanTitle.isBlank()) {
+            // AURA REPAIR: Fallback to filename if title is blank (common in raw camera imports)
+            cleanTitle = item.uriPath.substringAfterLast('/').substringBeforeLast('.')
+        }
+        
         if (cleanTitle.isNotBlank()) {
             sb.append("Title: $cleanTitle\n")
         }

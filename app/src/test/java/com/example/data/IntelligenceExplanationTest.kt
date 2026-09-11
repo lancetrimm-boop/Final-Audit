@@ -1,12 +1,10 @@
 package com.example.data
 
+import android.util.Log
 import com.example.data.db.*
 import com.example.data.blueprint.*
 import com.example.ui.screens.*
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -40,9 +38,17 @@ class IntelligenceExplanationTest {
 
     @Test
     fun test02_GenerateImprovementExplanation() = runTest {
-        val report = ClosedLoopEngine.evaluate(50.0, 65.0, 70.0, emptyList())
+        val evidence = listOf(
+            EvidenceRecord(
+                tier = EvidenceTier.EXPERIMENTAL,
+                sampleCount = 10,
+                score = 65.0,
+                quality = 0.8
+            )
+        )
+        val report = ClosedLoopEngine.evaluate(50.0, 65.0, 70.0, evidence)
         val finding = repository.createFindingFromReport(report, "Test Finding")
-        val imp = repository.getAllImprovements().first()[0]
+        val imp = repository.getAllImprovements().first().first()
         
         val viewModel = IntelligenceViewModel(repository)
         viewModel.askAuraToExplain(imp)
@@ -57,25 +63,46 @@ class IntelligenceExplanationTest {
         val findings = mutableMapOf<String, FindingEntity>()
         val improvements = mutableMapOf<String, SuggestedImprovementEntity>()
         val checkpoints = mutableMapOf<String, UserCheckpointEntity>()
+        val events = mutableListOf<LifecycleEventEntity>()
 
-        override fun getAllFindings(): Flow<List<FindingEntity>> = MutableStateFlow(findings.values.toList())
+        private val findingsFlow = MutableStateFlow<List<FindingEntity>>(emptyList())
+        private val improvementsFlow = MutableStateFlow<List<SuggestedImprovementEntity>>(emptyList())
+        private val historyFlow = MutableStateFlow<List<LifecycleEventEntity>>(emptyList())
+
+        override fun getAllFindings(): Flow<List<FindingEntity>> = findingsFlow
         override suspend fun getFindingById(id: String) = findings[id]
-        override suspend fun insertFinding(finding: FindingEntity) { findings[finding.id] = finding }
-        override suspend fun updateFinding(finding: FindingEntity) { findings[finding.id] = finding }
+        override suspend fun insertFinding(finding: FindingEntity) { 
+            findings[finding.id] = finding 
+            findingsFlow.value = findings.values.toList()
+        }
+        override suspend fun updateFinding(finding: FindingEntity) { 
+            findings[finding.id] = finding 
+            findingsFlow.value = findings.values.toList()
+        }
 
-        override fun getAllImprovements(): Flow<List<SuggestedImprovementEntity>> = MutableStateFlow(improvements.values.toList())
+        override fun getAllImprovements(): Flow<List<SuggestedImprovementEntity>> = improvementsFlow
         override suspend fun getImprovementById(id: String) = improvements[id]
-        override suspend fun insertImprovement(improvement: SuggestedImprovementEntity) { improvements[improvement.id] = improvement }
-        override suspend fun updateImprovement(improvement: SuggestedImprovementEntity) { improvements[improvement.id] = improvement }
+        override suspend fun insertImprovement(improvement: SuggestedImprovementEntity) { 
+            improvements[improvement.id] = improvement 
+            improvementsFlow.value = improvements.values.toList()
+        }
+        override suspend fun updateImprovement(improvement: SuggestedImprovementEntity) { 
+            improvements[improvement.id] = improvement 
+            improvementsFlow.value = improvements.values.toList()
+        }
 
         override suspend fun getCheckpoint(id: String) = checkpoints[id]
-        override fun observeCheckpoint(id: String): Flow<UserCheckpointEntity?> = MutableStateFlow(checkpoints[id])
+        override fun observeCheckpoint(id: String): Flow<UserCheckpointEntity?> = flowOf(checkpoints[id])
         override suspend fun insertCheckpoint(checkpoint: UserCheckpointEntity) { checkpoints[checkpoint.checkpointId] = checkpoint }
+
+        override fun getLifecycleHistory(targetId: String) = historyFlow.map { list -> list.filter { it.targetId == targetId } }
+        override suspend fun insertLifecycleEvent(event: LifecycleEventEntity) { 
+            events.add(event) 
+            historyFlow.value = events.toList()
+        }
 
         // Minimal implementation for other required methods
         override fun getImprovementsForFinding(findingId: String) = flowOf(emptyList<SuggestedImprovementEntity>())
-        override fun getLifecycleHistory(targetId: String) = flowOf(emptyList<LifecycleEventEntity>())
-        override suspend fun insertLifecycleEvent(event: LifecycleEventEntity) {}
         override fun getAllActions() = flowOf(emptyList<IntelligenceActionEntity>())
         override fun getActionsForImprovement(improvementId: String) = flowOf(emptyList<IntelligenceActionEntity>())
         override suspend fun getActionById(id: String) = null

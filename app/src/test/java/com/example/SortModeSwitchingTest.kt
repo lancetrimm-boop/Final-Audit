@@ -21,6 +21,24 @@ class SortModeSwitchingTest {
     @Before
     fun setUp() {
         repository = MediaRepository(dispatcher = testDispatcher)
+        
+        // Provide a mock core to handle intelligent sorts
+        val core = org.mockito.Mockito.mock(com.example.data.intelligence.AuraIntelligenceCore::class.java)
+        kotlinx.coroutines.runBlocking {
+            org.mockito.kotlin.whenever(core.processRequest(org.mockito.kotlin.any())).thenAnswer { invocation ->
+                val req = invocation.arguments[0] as com.example.data.intelligence.IntelligenceRequest
+                val items = repository.mediaItems.value
+                val candidates = items.map { 
+                    val reason = if (req.sortOption == "SURPRISE_ME") "SURPRISE!" else null
+                    com.example.data.intelligence.IntelligenceCandidate(it.copy(selectionReason = reason), emptyList(), 1.0, 1.0f, 0f) 
+                }
+                com.example.data.intelligence.IntelligenceResponse(req.requestId, req.mode, candidates, isSuccess = true, latencyMs = 0L)
+            }
+        }
+        val coreField = MediaRepository::class.java.getDeclaredField("intelligenceCore")
+        coreField.isAccessible = true
+        coreField.set(repository, core)
+
         // Set database state to READY
         val stateField = MediaRepository::class.java.getDeclaredField("_databaseState")
         stateField.isAccessible = true

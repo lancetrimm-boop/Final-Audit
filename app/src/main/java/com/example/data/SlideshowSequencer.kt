@@ -10,7 +10,7 @@ import com.example.data.semantic.VectorMath
 object SlideshowSequencer {
     private const val INITIAL_DUPLICATE_THRESHOLD = 0.98
     private const val IDEAL_TRANSITION_MIN = 0.6
-    private const val IDEAL_TRANSITION_MAX = 0.8
+    private const val IDEAL_TRANSITION_MAX = 0.9
 
     data class SequencingConfig(
         val targetLength: Int = 20,
@@ -48,15 +48,36 @@ object SlideshowSequencer {
                 remaining.remove(next)
                 current = next
             } else {
-                // RESILIENT FALLBACK: If individual candidates lack data or pathfinding fails,
-                // continue using the next available core candidate.
+                // RESILIENT FALLBACK: If pathfinding fails, use the next available core candidate.
                 val fallback = remaining.removeAt(0)
+                
+                // AURA REPAIR: Even in fallback, skip near-duplicates already in the sequence.
+                val isDup = isDuplicateOfAny(fallback, result, embeddings, config.nearDuplicateThreshold)
+                if (isDup) continue
+                
                 result.add(fallback)
                 current = fallback
             }
         }
 
         return result
+    }
+
+    private fun isDuplicateOfAny(
+        candidate: IntelligenceCandidate,
+        history: List<IntelligenceCandidate>,
+        embeddings: Map<String, FloatArray>,
+        threshold: Double
+    ): Boolean {
+        val candidateVector = embeddings[candidate.item.id] ?: return false
+        return history.any { prev ->
+            val prevVector = embeddings[prev.item.id] ?: return@any false
+            try {
+                VectorMath.cosineSimilarity(candidateVector, prevVector) > threshold
+            } catch (e: Exception) {
+                false
+            }
+        }
     }
 
     private fun findNextBest(
@@ -83,8 +104,8 @@ object SlideshowSequencer {
                 }
             } else 0.5 // Default neutral if missing
 
-            // DUPLICATE GUARD: Hard penalty for high similarity (Empirical Tuning Target)
-            if (similarity > config.nearDuplicateThreshold) {
+            // DUPLICATE GUARD: Hard penalty for high similarity to CURRENT or ANY previous item (P1 UX Stability)
+            if (similarity > config.nearDuplicateThreshold || isDuplicateOfAny(candidate, history, embeddings, config.nearDuplicateThreshold)) {
                 return@forEach 
             }
 

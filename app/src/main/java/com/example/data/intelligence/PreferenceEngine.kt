@@ -54,7 +54,7 @@ object PreferenceEngine {
                         val signalValue = 0.5 + (0.5 * multiplier * (if (weight >= 0) 1.0 else -1.0))
                         
                         dimensionSignals.getOrPut(dim) { mutableListOf() }
-                            .add(WeightedSignal(signalValue, effectiveWeight.coerceAtLeast(0.0)))
+                            .add(WeightedSignal(signalValue, kotlin.math.abs(effectiveWeight)))
                     }
                 }
             }
@@ -62,7 +62,7 @@ object PreferenceEngine {
             // For behavioral-only events (like Skip Sensitivity)
             if (event.type == AuraInteractionType.MEDIA_ABANDONED.name && event.mediaId == null) {
                  dimensionSignals.getOrPut("skipSensitivity") { mutableListOf() }
-                     .add(WeightedSignal(1.0, effectiveWeight))
+                     .add(WeightedSignal(1.0, kotlin.math.abs(effectiveWeight)))
             }
 
             // Update 9.1: Visual Context Signals

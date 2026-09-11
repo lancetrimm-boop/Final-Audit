@@ -24,7 +24,7 @@ class VisualSearchIntegrationTest {
         
         val item = MediaItem(id = "media_1", title = "Visual Match", mediaType = "PHOTO")
         val candidates = listOf(IntelligenceCandidate(item, emptyList(), 1.0, 1.0f, 0f, "Visual Match"))
-        val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, 10L)
+        val response = IntelligenceResponse("req", IntelligenceMode.SEARCH, candidates, latencyMs = 10L)
 
         whenever(core.processRequest(any())).thenReturn(response)
 

@@ -59,11 +59,10 @@ class MobileCLIPTextEncoderTest {
         val result = provider.generateEmbedding("query_123", SemanticInput.Text(query), "hash")
 
         if (result is EmbeddingResult.Failure) {
-            println("Failure: ${result.message}")
-            result.cause?.printStackTrace()
+            fail("Failure: ${result.message}")
         }
-        assertTrue("Expected Success, got $result", result is EmbeddingResult.Success)
-        val vector = (result as EmbeddingResult.Success).representation.vector
+        val success = result as EmbeddingResult.Success
+        val vector = success.representation.vector
 
         assertEquals(512, vector.size)
         assertEquals(1.0f, VectorMath.magnitude(vector), 1e-4f)
@@ -79,6 +78,10 @@ class MobileCLIPTextEncoderTest {
         val query = "sunset over the ocean"
         val res1 = provider.generateEmbedding("q1", SemanticInput.Text(query), "h")
         val res2 = provider.generateEmbedding("q2", SemanticInput.Text(query), "h")
+
+        if (res1 is EmbeddingResult.Failure || res2 is EmbeddingResult.Failure) {
+            fail("Embedding generation failed")
+        }
 
         val vec1 = (res1 as EmbeddingResult.Success).representation.vector
         val vec2 = (res2 as EmbeddingResult.Success).representation.vector
@@ -108,6 +111,11 @@ class MobileCLIPTextEncoderTest {
         
         val textQuery = "dog"
         val textResult = provider.generateEmbedding("q", SemanticInput.Text(textQuery), "h")
+        
+        if (textResult is EmbeddingResult.Failure) {
+            fail("Text embedding failed: ${textResult.message}")
+        }
+        
         val textVector = (textResult as EmbeddingResult.Success).representation.vector
         
         // Mock a 512-d visual vector (e.g. from Step 4)

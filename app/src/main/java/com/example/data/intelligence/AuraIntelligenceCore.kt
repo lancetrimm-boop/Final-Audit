@@ -25,29 +25,40 @@ class AuraIntelligenceCore(
 
         val startTime = System.currentTimeMillis()
         
-        val candidates = when(request.mode) {
-            IntelligenceMode.SEARCH -> handleSearch(request)
-            IntelligenceMode.SORT -> handleSort(request)
-            IntelligenceMode.SIMILAR -> handleSimilar(request)
-            IntelligenceMode.DISCOVER -> handleDiscover(request)
+        try {
+            val candidates = when(request.mode) {
+                IntelligenceMode.SEARCH -> handleSearch(request)
+                IntelligenceMode.SORT -> handleSort(request)
+                IntelligenceMode.SIMILAR -> handleSimilar(request)
+                IntelligenceMode.DISCOVER -> handleDiscover(request)
+            }
+
+            val sealedResults = seal(candidates)
+
+            val latency = System.currentTimeMillis() - startTime
+            
+            val response = IntelligenceResponse(
+                requestId = request.requestId,
+                mode = request.mode,
+                candidates = sealedResults,
+                visibilitySealed = true, // Mark as sealed
+                latencyMs = latency
+            )
+
+            // 1. Cache Write
+            IntelligenceCache.putResponse(request, response)
+            
+            response
+        } catch (e: Exception) {
+            IntelligenceResponse(
+                requestId = request.requestId,
+                mode = request.mode,
+                candidates = emptyList(),
+                latencyMs = System.currentTimeMillis() - startTime,
+                isSuccess = false,
+                errorMessage = e.message
+            )
         }
-
-        val sealedResults = seal(candidates)
-
-        val latency = System.currentTimeMillis() - startTime
-        
-        val response = IntelligenceResponse(
-            requestId = request.requestId,
-            mode = request.mode,
-            candidates = sealedResults,
-            visibilitySealed = true, // Mark as sealed
-            latencyMs = latency
-        )
-
-        // 1. Cache Write
-        IntelligenceCache.putResponse(request, response)
-        
-        response
     }
 
     private suspend fun handleSearch(request: IntelligenceRequest): List<IntelligenceCandidate> {
@@ -361,14 +372,19 @@ class AuraIntelligenceCore(
         val refItem = repository.getMediaItemById(refId)
         
         // 1. Resolve context and embedding for reference item (Update 9.1 Consolidation)
-        val query = request.query ?: refItem?.title
-        val visualVector = request.visualVector ?: repository.let { repo ->
-            val provider = repo.mobileCLIPProvider
-            val semanticRepo = repo.semanticRepresentationRepository
-            if (provider != null && semanticRepo != null) {
-                 semanticRepo.getSpecificRepresentation(refId, SemanticRepresentationType.VISUAL, provider.descriptor)?.vector
-            } else null
+        val provider = repository.mobileCLIPProvider
+        val semanticRepo = repository.semanticRepresentationRepository
+        
+        val visualVector = request.visualVector ?: if (provider != null && semanticRepo != null) {
+             semanticRepo.getSpecificRepresentation(refId, SemanticRepresentationType.VISUAL, provider.descriptor)?.vector
+        } else null
+
+        // AURA REPAIR: Identify processing delay for specific reference search
+        if (visualVector == null) {
+            throw IllegalStateException("STILL_PROCESSING")
         }
+        
+        val query = request.query ?: refItem?.title
         
         // 2. Execute retrieval via Router (Unified Path)
         val similarRequest = request.copy(visualVector = visualVector, query = query)

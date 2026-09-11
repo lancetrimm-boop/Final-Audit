@@ -184,10 +184,6 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
     }
 
     private fun generateVisualDescription(dimensions: Map<String, Double>, topTraits: List<String>): String {
-        if (topTraits.isEmpty()) {
-            return "Aura is still learning your visual preferences. Continue interacting with media to build your Taste DNA."
-        }
-
         val strongInsights = mutableListOf<String>()
         
         // 1. Core Aesthetic (Color & Light)

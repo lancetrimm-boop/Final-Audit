@@ -10,6 +10,7 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mockito.mock
+import org.mockito.kotlin.whenever
 import java.util.UUID
 
 /**
@@ -23,7 +24,9 @@ class IntelligenceExecutionPipelineTest {
     @Before
     fun setup() {
         fakeDao = FakeIntelligenceDao()
-        repository = IntelligenceRepository(fakeDao, mock(MediaRepository::class.java))
+        val mockMediaRepository = mock(MediaRepository::class.java)
+        whenever(mockMediaRepository.tasteDNA).thenReturn(MutableStateFlow(TasteDNA()))
+        repository = IntelligenceRepository(fakeDao, mockMediaRepository)
     }
 
     @Test

@@ -85,11 +85,10 @@ class SoftIntersectionScorerTest {
     @Test
     fun testIdenticalReferences() {
         // Multiple identical references should yield same score as single reference (effectively)
-        // [1, 0] and [1, 0] (not orthogonal, but let's test)
-        val r1 = floatArrayOf(1f, 0f)
+        val r1 = createReferences(1)[0]
         val refs = listOf(r1, r1)
         
-        val candidate = floatArrayOf(0.8f, 0.6f) // sim = 0.8
+        val candidate = createCandidate(listOf(0.80f)) 
         val result = SoftIntersectionScorer.score(candidate, refs)
         
         // GM = (0.8 * 0.8)^0.5 = 0.8
@@ -100,10 +99,10 @@ class SoftIntersectionScorerTest {
 
     @Test
     fun testConflictingReferences() {
-        val refs = createReferences(2) // Orthogonal bases
+        val refs = createReferences(2) // Orthogonal bases (512 dimensions)
         
         // Candidate is [1, 0] (perfect match to R1, zero to R2)
-        val candidate = floatArrayOf(1f, 0f)
+        val candidate = createCandidate(listOf(1f, 0f))
         val result = SoftIntersectionScorer.score(candidate, refs)
         
         // R2 similarity is 0.0 < floor 0.25
