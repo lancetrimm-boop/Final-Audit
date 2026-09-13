@@ -1,11 +1,13 @@
 package com.example.ui.screens
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AuraMomentsEngine
 import com.example.data.MediaItem
 import com.example.data.MediaRepository
 import com.example.data.MomentsMode
+import com.example.data.media.MomentExporter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +19,11 @@ class SlideshowViewModel(
 
     private val _uiState = MutableStateFlow<SlideshowUiState>(SlideshowUiState.Loading)
     val uiState: StateFlow<SlideshowUiState> = _uiState.asStateFlow()
+
+    private val _exportState = MutableStateFlow<MomentExporter.ExportState>(MomentExporter.ExportState.Idle)
+    val exportState: StateFlow<MomentExporter.ExportState> = _exportState.asStateFlow()
+
+    private var momentExporter: MomentExporter? = null
 
     fun generateSlideshow(mode: MomentsMode) {
         viewModelScope.launch {
@@ -33,6 +40,29 @@ class SlideshowViewModel(
                 _uiState.value = SlideshowUiState.Ready(items)
             }
         }
+    }
+
+    fun exportMoment(context: Context) {
+        val currentState = _uiState.value
+        if (currentState !is SlideshowUiState.Ready) return
+
+        viewModelScope.launch {
+            if (momentExporter == null) {
+                val entitlementRepo = repository.entitlementRepository 
+                    ?: throw IllegalStateException("EntitlementRepository not initialized")
+                momentExporter = MomentExporter(context.applicationContext, entitlementRepo)
+            }
+
+            _exportState.value = MomentExporter.ExportState.Exporting(0)
+            val result = momentExporter!!.exportMoment(currentState.items) { progress ->
+                _exportState.value = MomentExporter.ExportState.Exporting(progress)
+            }
+            _exportState.value = result
+        }
+    }
+
+    fun clearExportState() {
+        _exportState.value = MomentExporter.ExportState.Idle
     }
 
     sealed class SlideshowUiState {

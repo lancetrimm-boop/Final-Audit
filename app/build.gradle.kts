@@ -189,6 +189,7 @@ dependencies {
   implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.google.billing)
   implementation(libs.sqlcipher)
   implementation(libs.onnxruntime.android)
   implementation(libs.google.play.asset.delivery)

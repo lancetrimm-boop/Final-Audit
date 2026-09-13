@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -119,13 +120,17 @@ fun AuraMomentsSlideshowScreen(
                 }
             }
             is SlideshowViewModel.SlideshowUiState.Ready -> {
+                val exportState by viewModel.exportState.collectAsStateWithLifecycle()
+                
                 SlideshowRenderer(
                     items = state.items,
                     mode = mode,
                     repository = repository,
                     onClose = onClose,
                     modifier = modifier,
-                    onSeeSimilar = onSeeSimilar
+                    onSeeSimilar = onSeeSimilar,
+                    exportState = exportState,
+                    onExport = { viewModel.exportMoment(context) }
                 )
             }
         }
@@ -139,7 +144,9 @@ private fun SlideshowRenderer(
     repository: MediaRepository,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    onSeeSimilar: (MediaItem) -> Unit = {}
+    onSeeSimilar: (MediaItem) -> Unit = {},
+    exportState: com.example.data.media.MomentExporter.ExportState = com.example.data.media.MomentExporter.ExportState.Idle,
+    onExport: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val playbackManager = remember { SlideshowPlaybackManager(context) }
@@ -297,15 +304,38 @@ private fun SlideshowRenderer(
                         }
                     }
 
-                    IconButton(
-                        onClick = onClose,
-                        modifier = Modifier.testTag("moments_slideshow_close_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = Color.White
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (exportState is com.example.data.media.MomentExporter.ExportState.Exporting) {
+                            Text(
+                                text = "EXPORTING ${exportState.progress}%",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                        } else {
+                            IconButton(
+                                onClick = onExport,
+                                modifier = Modifier.testTag("moments_slideshow_export_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Export Moment",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = onClose,
+                            modifier = Modifier.testTag("moments_slideshow_close_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -449,4 +479,3 @@ private fun SlideshowRenderer(
         }
     }
 }
-

@@ -245,6 +245,14 @@ class MediaRepository(
         private set
 
     @Volatile
+    var entitlementRepository: com.example.data.entitlement.EntitlementRepository? = null
+        private set
+
+    @Volatile
+    var billingManager: com.example.data.billing.BillingManager? = null
+        private set
+
+    @Volatile
     var interactionRepository: InteractionRepository? = null
         internal set
 
@@ -1160,6 +1168,8 @@ class MediaRepository(
                     }
 
                     intelligenceRepository = IntelligenceRepository(db.intelligenceDao(), this@MediaRepository, moshi, scope, db)
+                    entitlementRepository = com.example.data.entitlement.EntitlementRepository(db.userPreferenceDao(), scope)
+                    billingManager = com.example.data.billing.BillingManager(context.applicationContext, entitlementRepository!!, scope)
                     val errorRepo = PlaybackErrorLogRepository(db.playbackErrorLogDao(), scope)
                     playbackErrorLogRepository = errorRepo
                     flushPendingErrorLogs(errorRepo)
@@ -1174,6 +1184,7 @@ class MediaRepository(
                     
                     // AURA STABILITY: Ensure all mandatory repositories are initialized before marking READY
                     checkNotNull(intelligenceRepository) { "intelligenceRepository failed to initialize" }
+                    checkNotNull(entitlementRepository) { "entitlementRepository failed to initialize" }
                     checkNotNull(playbackErrorLogRepository) { "playbackErrorLogRepository failed to initialize" }
                     checkNotNull(conversionQueueRepository) { "conversionQueueRepository failed to initialize" }
                     checkNotNull(semanticRepresentationRepository) { "semanticRepresentationRepository failed to initialize" }
