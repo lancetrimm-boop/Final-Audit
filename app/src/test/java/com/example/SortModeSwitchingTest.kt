@@ -51,13 +51,19 @@ class SortModeSwitchingTest {
         val itemB = MediaItem(id = "b", title = "A-Item", mediaType = "PHOTO", compatibilityStatus = CompatibilityStatus.PLAYABLE)
         repository.setMediaItemsForTesting(listOf(itemA, itemB))
 
+        // Keep flow active in background
+        val collectJob = backgroundScope.launch {
+            repository.latestAiSortRecommendation.collect { }
+        }
+
         // 1. Set to Surprise Me
         repository.sortCategory = SortCategory.INTELLIGENT
         repository.intelligentSort = IntelligentSortOption.SURPRISE_ME
         advanceUntilIdle()
         
         val surpriseResults = repository.latestAiSortRecommendation.value
-        assertTrue(surpriseResults.any { it.selectionReason == "SURPRISE!" })
+        assertTrue("Should have results", surpriseResults.isNotEmpty())
+        assertTrue("Should have surprise label", surpriseResults.any { it.selectionReason == "SURPRISE!" })
 
         // 2. Switch to Standard Title A-Z
         repository.sortCategory = SortCategory.STANDARD
@@ -65,10 +71,13 @@ class SortModeSwitchingTest {
         advanceUntilIdle()
 
         val standardResults = repository.latestAiSortRecommendation.value
+        assertTrue("Should have results after switch", standardResults.isNotEmpty())
         assertEquals("A-Item", standardResults[0].title)
         assertEquals("B-Item", standardResults[1].title)
         assertNull("Labels should be cleared in standard sort", standardResults[0].selectionReason)
         assertNull("Labels should be cleared in standard sort", standardResults[1].selectionReason)
+        
+        collectJob.cancel()
     }
 
     @Test
@@ -81,11 +90,16 @@ class SortModeSwitchingTest {
         )
         repository.setMediaItemsForTesting(listOf(item1))
 
+        backgroundScope.launch {
+            repository.latestAiSortRecommendation.collect { }
+        }
+
         repository.sortCategory = SortCategory.STANDARD
         repository.standardSort = StandardSortOption.NEWEST_FIRST
         advanceUntilIdle()
 
         val results = repository.latestAiSortRecommendation.value
+        assertTrue("Should have results", results.isNotEmpty())
         assertEquals("RETRY ANALYSIS", results[0].selectionReason?.uppercase())
     }
 

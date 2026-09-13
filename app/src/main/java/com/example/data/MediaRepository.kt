@@ -826,8 +826,8 @@ class MediaRepository(
     private val latestSortedFullItemsFlow: StateFlow<List<MediaItem>> = combine(
         mediaItems, _tasteDNA, _preferenceProfile, _libraryFilter, 
         _activeSortCategory, _selectedStandardSort, _selectedIntelligentSort,
-        librarySearchRequestFlow, _librarySessionSeed, _discoveryPolicy, 
-        _userIntent, _intelligenceStats, _creatorProfiles
+        librarySearchRequestFlow, _activeVisualReferences, _librarySessionSeed, 
+        _discoveryPolicy, _userIntent, _intelligenceStats, _creatorProfiles
     ) { args -> args }
     .transformLatest { args ->
         @Suppress("UNCHECKED_CAST")
@@ -839,17 +839,20 @@ class MediaRepository(
         val standardSort = args[5] as StandardSortOption
         val intelligentSort = args[6] as IntelligentSortOption
         val searchRequest = args[7] as com.example.data.semantic.SearchRequest
-        val seed = args[8] as Long
-        val policy = args[9] as DiscoveryPolicy
-        val intent = args[10] as UserIntent
-        val stats = args[11] as IntelligenceStats
         @Suppress("UNCHECKED_CAST")
-        val creators = args[12] as Map<String, CreatorProfile>
+        val references = args[8] as List<MediaItem>
+        val seed = args[9] as Long
+        val policy = args[10] as DiscoveryPolicy
+        val intent = args[11] as UserIntent
+        val stats = args[12] as IntelligenceStats
+        @Suppress("UNCHECKED_CAST")
+        val creators = args[13] as Map<String, CreatorProfile>
 
         android.util.Log.i("AURA_SORT_FLOW", "Pipeline recomputing. Category: $category, IntSort: $intelligentSort, StdSort: $standardSort, Pool: ${items.size}")
 
+        val hasReferences = references.isNotEmpty()
         val isSearchBlank = when (searchRequest) {
-            is com.example.data.semantic.SearchRequest.Text -> searchRequest.query.isBlank()
+            is com.example.data.semantic.SearchRequest.Text -> searchRequest.query.isBlank() && !hasReferences
             is com.example.data.semantic.SearchRequest.Visual -> false
             is com.example.data.semantic.SearchRequest.Compound -> false
             is com.example.data.semantic.SearchRequest.MultiVisual -> false
@@ -874,6 +877,13 @@ class MediaRepository(
             android.util.Log.i("AURA_SORT_FLOW", "Emission: Sorted list of ${sorted.size} items.")
             emit(sorted)
         } else {
+            // AURA REPAIR: Identify processing delay for iterative search
+            if (hasReferences && searchRequest is com.example.data.semantic.SearchRequest.Text) {
+                _searchErrorMessage.value = "STILL_PROCESSING"
+                emit(emptyList())
+                return@transformLatest
+            }
+
             // Hybrid Search Path (Stage 10.4 Reactive Integration)
             val hybridEngine = hybridSearchEngine
             if (hybridEngine != null && hybridEngine.isSemanticReady()) {
@@ -926,7 +936,7 @@ class MediaRepository(
             }
         }
     }
-    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .flowOn(dispatcher)
     .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**
@@ -941,7 +951,7 @@ class MediaRepository(
             uiItems
         }
         .distinctUntilChanged()
-        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .flowOn(dispatcher)
         .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**
@@ -993,7 +1003,7 @@ class MediaRepository(
             ))
         }
     }
-    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .flowOn(dispatcher)
     .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private fun MediaItem.toLibraryItemUi(): LibraryItemUi {
@@ -1353,7 +1363,7 @@ class MediaRepository(
                     Log.d("AuraStyles", "Recalculating Signature Styles for ${items.size} items...")
                     val startTime = System.currentTimeMillis()
                     
-                    val profile = withContext(Dispatchers.Default) {
+                    val profile = withContext(dispatcher) {
                         com.example.data.intelligence.SignatureStyleProvider.calculateStyleProfile(dna, items)
                     }
                     
@@ -3572,6 +3582,29 @@ class MediaRepository(
     }
 
     suspend fun getSimilarMedia(item: MediaItem, requestId: String = "NONE"): com.example.data.intelligence.IntelligenceResponse {
+        // AURA REPAIR: Priority Indexing Gate
+        val provider = mobileCLIPProvider
+        val semanticRepo = semanticRepresentationRepository
+        if (provider != null && semanticRepo != null) {
+            val exists = semanticRepo.exists(item.id, SemanticRepresentationType.VISUAL, provider.descriptor)
+            if (!exists) {
+                // Trigger priority indexing for this item
+                scope.launch {
+                    applicationContext?.let { ctx ->
+                        visualIndexingService?.indexVisual(ctx, item)
+                    }
+                }
+                return com.example.data.intelligence.IntelligenceResponse(
+                    requestId = requestId,
+                    mode = com.example.data.intelligence.IntelligenceMode.SIMILAR,
+                    candidates = emptyList(),
+                    latencyMs = 0,
+                    isSuccess = false,
+                    errorMessage = "STILL_PROCESSING"
+                )
+            }
+        }
+
         val core = intelligenceCore
         if (core != null) {
             val request = com.example.data.intelligence.IntelligenceRequest(
@@ -4086,8 +4119,9 @@ stats ->
     }
 
     private val EPHEMERAL_AI_REASONS = setOf(
-        "Surprise!", "For You", "Hidden Gem", "Best Match", 
-        "Personalized", "New Discovery", "Blast from the Past", "Your Favorite"
+        "Surprise!", "Surprise Me", "For You", "Hidden Gem", "Best Match", 
+        "Personalized", "New Discovery", "Blast from the Past", "Your Favorite",
+        "Discover Sort", "Explore"
     )
     private val MATCH_PERCENT_REGEX = Regex("""\d+% Match""")
 
@@ -4563,5 +4597,6 @@ enum class IntelligentSortOption(val displayName: String, val description: Strin
     FAVORITES("Favorites", "Everything you've liked and rated highly."),
     EXPLORE("Explore", "Broaden your taste with something new."),
     LEAST_INTERACTED("Least Interacted", "Surface items that need your rating."),
+    RANKING_REFINEMENT("Refinement", "Surface items to calibrate your Taste DNA."),
     SURPRISE_ME("Surprise Me", "A fresh random selection from your library.")
 }

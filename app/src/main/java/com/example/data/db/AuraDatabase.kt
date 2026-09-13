@@ -213,7 +213,7 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
         SearchFeedbackEntity::class,
         InteractionEventEntity::class
     ],
-    version = 43,
+    version = 44,
     exportSchema = false
 )
 @androidx.room.TypeConverters(IntelligenceConverters::class)
@@ -802,6 +802,23 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_43_44 = object : Migration(43, 44) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // AURA REPAIR: Add missing architecture metadata columns to semantic tables (P0 Recovery)
+                // These were omitted in the original table creation SQL in MIGRATION_37_38 and MIGRATION_40_41.
+                
+                // 1. semantic_representations
+                try { db.execSQL("ALTER TABLE `semantic_representations` ADD COLUMN `runtimeFormat` TEXT NOT NULL DEFAULT 'ONNX'") } catch (e: Exception) {}
+                try { db.execSQL("ALTER TABLE `semantic_representations` ADD COLUMN `quantization` TEXT NOT NULL DEFAULT 'NONE_FP32'") } catch (e: Exception) {}
+                try { db.execSQL("ALTER TABLE `semantic_representations` ADD COLUMN `artifactHash` TEXT DEFAULT NULL") } catch (e: Exception) {}
+
+                // 2. video_frame_representations
+                try { db.execSQL("ALTER TABLE `video_frame_representations` ADD COLUMN `runtimeFormat` TEXT NOT NULL DEFAULT 'ONNX'") } catch (e: Exception) {}
+                try { db.execSQL("ALTER TABLE `video_frame_representations` ADD COLUMN `quantization` TEXT NOT NULL DEFAULT 'NONE_FP32'") } catch (e: Exception) {}
+                try { db.execSQL("ALTER TABLE `video_frame_representations` ADD COLUMN `artifactHash` TEXT DEFAULT NULL") } catch (e: Exception) {}
+            }
+        }
+
         fun getInstance(context: Context): AuraDatabase {
             return INSTANCE ?: synchronized(this) {
                 // Return instance if created while waiting for lock
@@ -864,7 +881,8 @@ abstract class AuraDatabase : RoomDatabase() {
                         MIGRATION_39_40,
                         MIGRATION_40_41,
                         MIGRATION_41_42,
-                        MIGRATION_42_43
+                        MIGRATION_42_43,
+                        MIGRATION_43_44
                     )
                     .build()
                     INSTANCE = instance

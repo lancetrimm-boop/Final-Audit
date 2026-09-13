@@ -133,8 +133,8 @@ fun LibraryScreen(
     }
 
     // Sync searchQuery with searchRequest when it changes from other sources
-    LaunchedEffect(searchRequest) {
-        isSearchActive = searchRequest !is SearchRequest.Text || searchRequest.query?.isNotEmpty() == true || searchRequest.visualVector != null
+    LaunchedEffect(searchRequest, activeVisualReferences) {
+        isSearchActive = activeVisualReferences.isNotEmpty() || searchRequest !is SearchRequest.Text || searchRequest.query?.isNotEmpty() == true || searchRequest.visualVector != null
     }
 
     // Automatically scroll to top when filters or sorts change
@@ -468,12 +468,23 @@ fun LibraryScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 if (displayItems.isEmpty()) {
+                    val allItems by repository.mediaItems.collectAsStateWithLifecycle()
+                    val isLibraryEmpty = allItems.isEmpty()
+
                     if (isSearchActive) {
                         EmptySearchStateView(
                             isStillProcessing = searchError == "STILL_PROCESSING",
                             onClearSearch = {
                                 isSearchActive = false
                                 repository.clearSearch()
+                            }
+                        )
+                    } else if (!isLibraryEmpty && activeCategory == SortCategory.INTELLIGENT) {
+                        EmptySortStateView(
+                            vibeName = intelligentSort.displayName,
+                            onReset = {
+                                repository.sortCategory = SortCategory.STANDARD
+                                repository.standardSort = StandardSortOption.NEWEST_FIRST
                             }
                         )
                     } else {
@@ -578,6 +589,48 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun EmptySortStateView(
+    vibeName: String,
+    onReset: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(AuraSpacing.XL),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.FilterListOff,
+            contentDescription = null,
+            tint = AuraMutedSlate.copy(alpha = 0.3f),
+            modifier = Modifier.size(56.dp)
+        )
+        Spacer(modifier = Modifier.height(AuraSpacing.M))
+        Text(
+            text = "No items in $vibeName",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Black,
+            color = AuraMidnight,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(AuraSpacing.XS))
+        Text(
+            text = "Aura couldn't find any media that matches this vibe right now. Try interacting with more items or choosing a different sort.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = AuraSlate,
+            textAlign = TextAlign.Center,
+            lineHeight = 20.sp
+        )
+        Spacer(modifier = Modifier.height(AuraSpacing.L))
+        AuraButton(
+            text = "RESET TO STANDARD",
+            onClick = onReset
+        )
     }
 }
 
@@ -1030,6 +1083,7 @@ private fun CompactControlsRow(
                     IntelligentSortOption.FAVORITES -> "Favorites"
                     IntelligentSortOption.EXPLORE -> "Explore"
                     IntelligentSortOption.LEAST_INTERACTED -> "Review"
+                    IntelligentSortOption.RANKING_REFINEMENT -> "Calibrate"
                     IntelligentSortOption.SURPRISE_ME -> "Random"
                 },
                 isSelected = true,

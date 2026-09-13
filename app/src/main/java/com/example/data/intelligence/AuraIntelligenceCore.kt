@@ -173,28 +173,31 @@ class AuraIntelligenceCore(
                 )
 
                 val recentThreshold = 3600000L // 1 hour
-                items.filter { item ->
-                    // Standard Personalized Sort filter: Exclude already liked or recently viewed
-                    val isLiked = item.isFavorite || item.rating >= 4.0f
-                    val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
-                    !isLiked && !isRecent
-                }.map { item ->
+                items.map { item ->
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
-                    val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
+                    val baseScore = ExplorationEngine.calculatePolicyScore(evidence, strategy)
                     
                     val personalScore = scorePersonalization(item, tasteDNA)
                     val evidenceItems = mutableListOf<EvidenceItem>()
                     evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "ExplorationEngine"))
                     evidenceItems.add(EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, personalScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA"))
                     
+                    // AURA REPAIR: Soft penalties instead of hard filters
+                    val isLiked = item.isFavorite || item.rating >= 4.0f
+                    val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
+                    
+                    var score = baseScore.toDouble()
+                    if (isLiked) score -= 0.5 // Penalty for already liked items to surface new content
+                    if (isRecent) score -= 0.8 // Heavy penalty for recently viewed
+
                     // Update 9: Relationship Evidence
                     val relBonus = scoreRelationships(item, request.relatedMediaIds, evidenceItems)
 
                     IntelligenceCandidate(
                         item = item,
                         evidence = evidenceItems,
-                        rankScore = score.toDouble() + relBonus,
-                        primaryRelevanceScore = score,
+                        rankScore = score + relBonus,
+                        primaryRelevanceScore = score.toFloat(),
                         secondaryEvidenceScore = personalScore,
                         provenance = when {
                             evidence.exploitationScore > 0.6 && evidence.familiarityScore > 0.4 -> "For You"
@@ -214,9 +217,15 @@ class AuraIntelligenceCore(
                     profile = request.profile ?: repository.preferenceProfile.value
                 ).copy(exploitationWeight = 0.2f, explorationWeight = 0.8f)
 
-                items.filter { it.viewCount == 0 || it.exposureCount < 3 }.map { item ->
+                items.map { item ->
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
-                    val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
+                    val baseScore = ExplorationEngine.calculatePolicyScore(evidence, strategy)
+                    
+                    // AURA REPAIR: Soft penalties
+                    val seenCount = item.viewCount + (item.exposureCount / 5)
+                    val seenPenalty = (seenCount * 0.1).coerceAtMost(0.9)
+                    
+                    val score = baseScore.toDouble() * (1.0 - seenPenalty)
                     
                     val evidenceItems = mutableListOf<EvidenceItem>()
                     evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine"))
@@ -227,8 +236,8 @@ class AuraIntelligenceCore(
                     IntelligenceCandidate(
                         item = item,
                         evidence = evidenceItems,
-                        rankScore = score.toDouble() + relBonus,
-                        primaryRelevanceScore = score,
+                        rankScore = score + relBonus,
+                        primaryRelevanceScore = score.toFloat(),
                         secondaryEvidenceScore = 0f,
                         provenance = "Discover Sort"
                     )

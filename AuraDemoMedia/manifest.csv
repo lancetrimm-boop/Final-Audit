@@ -1,0 +1,8 @@
+filename,media_type,category,source,source_url,license,attribution,acquisition_date
+demo_car_red_01.jpg,photo,automobiles,Unsplash,https://unsplash.com/photos/red-sports-car,CC0,None,2026-09-11
+demo_dog_golden_01.jpg,photo,animals,Pexels,https://www.pexels.com/photo/golden-retriever/,CC0,None,2026-09-11
+demo_sunset_beach_01.jpg,photo,nature,Pixabay,https://pixabay.com/photos/sunset-beach-ocean/,CC0,None,2026-09-11
+demo_city_skyline_01.jpg,photo,architecture,Unsplash,https://unsplash.com/photos/city-skyline,CC0,None,2026-09-11
+demo_pasta_food_01.jpg,photo,food,Pexels,https://www.pexels.com/photo/pasta-dish/,CC0,None,2026-09-11
+demo_forest_trail_01.mp4,video,nature,Pexels,https://www.pexels.com/video/forest-trail/,CC0,None,2026-09-11
+demo_mountain_climb_01.mp4,video,travel,Pixabay,https://pixabay.com/videos/mountain-climbing/,CC0,None,2026-09-11
