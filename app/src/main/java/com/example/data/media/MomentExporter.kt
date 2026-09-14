@@ -58,8 +58,9 @@ class MomentExporter(
         
         try {
             val editedMediaItems = items.map { auraItem ->
-                val uri = Uri.parse(auraItem.uriPath.ifBlank { auraItem.imageUrl })
+                val uriStr = auraItem.uriPath.ifBlank { auraItem.imageUrl }
                 val isPhoto = auraItem.mediaType == "PHOTO"
+                val uri = Uri.parse(uriStr)
                 
                 val mediaItemBuilder = MediaItem.Builder()
                     .setUri(uri)
@@ -67,6 +68,7 @@ class MomentExporter(
                 if (isPhoto) {
                     // CRITICAL: Must set image mime type for ImageAssetLoader to be selected
                     mediaItemBuilder.setMimeType(MimeTypes.IMAGE_JPEG)
+                    mediaItemBuilder.setImageDurationMs(PHOTO_DURATION_US / 1000)
                 }
                 
                 if (auraItem.mediaType == "VIDEO" && auraItem.durationMs > VIDEO_MAX_DURATION_MS) {
@@ -77,11 +79,13 @@ class MomentExporter(
                     )
                 }
                 
-                val editedBuilder = EditedMediaItem.Builder(mediaItemBuilder.build())
+                val mediaItem = mediaItemBuilder.build()
+                val editedBuilder = EditedMediaItem.Builder(mediaItem)
                     .setRemoveAudio(isPhoto)
                 
                 if (isPhoto) {
-                    editedBuilder.setDurationUs(PHOTO_DURATION_US)
+                    // CRITICAL: Must set frame rate for ImageAssetLoader
+                    editedBuilder.setFrameRate(30)
                 }
                 
                 editedBuilder.build()

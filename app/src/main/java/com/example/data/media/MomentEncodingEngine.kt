@@ -46,8 +46,7 @@ class Media3MomentEncodingEngine(private val context: Context) : MomentEncodingE
         transformer.addListener(listener)
         transformer.start(composition, outputFile.absolutePath)
         
-        val scope = CoroutineScope(Dispatchers.Default + Job())
-        val progressJob = scope.launch {
+        val progressJob = launch(Dispatchers.Main) {
             val progressHolder = androidx.media3.transformer.ProgressHolder()
             while (deferred.isActive) {
                 val state = transformer.getProgress(progressHolder)

@@ -88,7 +88,11 @@ fun AuraMomentsSlideshowScreen(
     val viewModel: SlideshowViewModel = viewModel(
         factory = object : androidx.lifecycle.ViewModelProvider.Factory {
             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                return SlideshowViewModel(repository) as T
+                val vm = SlideshowViewModel(repository)
+                repository.entitlementRepository?.let { entitlement ->
+                    vm.momentExporter = com.example.data.media.MomentExporter(context.applicationContext, entitlement)
+                }
+                return vm as T
             }
         }
     )

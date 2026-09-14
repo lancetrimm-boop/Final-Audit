@@ -23,7 +23,7 @@ class SlideshowViewModel(
     private val _exportState = MutableStateFlow<MomentExporter.ExportState>(MomentExporter.ExportState.Idle)
     val exportState: StateFlow<MomentExporter.ExportState> = _exportState.asStateFlow()
 
-    private var momentExporter: MomentExporter? = null
+    var momentExporter: MomentExporter? = null
 
     fun generateSlideshow(mode: MomentsMode) {
         viewModelScope.launch {

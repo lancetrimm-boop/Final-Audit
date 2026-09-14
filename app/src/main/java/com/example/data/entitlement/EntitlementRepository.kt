@@ -81,14 +81,14 @@ class EntitlementRepository(
      */
     fun isFeatureAvailable(feature: ProFeature): Boolean {
         val current = _proState.value
-        return if (current.isPro) {
-            true
+        if (current.isPro) {
+            return true
         } else {
             // Asynchronously notify that a Pro feature was requested and denied
             scope.launch {
                 _accessDeniedEvents.emit(feature)
             }
-            false
+            return false
         }
     }
 }
