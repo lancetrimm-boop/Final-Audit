@@ -21,6 +21,7 @@ data class CleanupIntelligenceUiState(
     val lowestScoreItems: List<CleanupRecommendation> = emptyList(),
     val highestScoreItems: List<MediaItem> = emptyList(),
     val isLoading: Boolean = true,
+    val isLocked: Boolean = false,
     val currentSort: CleanupSort = CleanupSort.LOWEST_KEEP_SCORE
 )
 
@@ -32,7 +33,9 @@ enum class CleanupSort {
 }
 
 class CleanupIntelligenceViewModel(
-    private val repository: MediaRepository
+    private val repository: MediaRepository,
+    private val entitlementRepository: com.example.data.entitlement.EntitlementRepository,
+    private val backgroundDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CleanupIntelligenceUiState())
@@ -43,8 +46,13 @@ class CleanupIntelligenceViewModel(
     }
 
     fun refreshAnalysis() {
+        if (!entitlementRepository.isFeatureAvailable(com.example.data.entitlement.ProFeature.CLEANUP_AUTOMATION)) {
+            _uiState.update { it.copy(isLocked = true, isLoading = false) }
+            return
+        }
+
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isLoading = true, isLocked = false) }
             
             // 1. Fetch all media items
             val allItems = repository.mediaItems.value
@@ -54,14 +62,26 @@ class CleanupIntelligenceViewModel(
             }
 
             // Perform heavy processing in background
-            withContext(Dispatchers.Default) {
+            withContext(backgroundDispatcher) {
                 // 2. Gather signals and calculate Keep Scores
                 val tasteDNA = repository.tasteDNA.value
                 val stats = repository.intelligenceStats.value
                 
+                val allIds = allItems.map { it.id }
+                val skipCounts = repository.getSkipCounts(allIds)
+                val hashFrequencies = repository.getContentHashFrequencies()
+
                 val keepScoreResults = allItems.map { item ->
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats)
                     
+                    // Estimate watch duration based on current progress and total duration
+                    // Documented: Estimated watched duration (progress * duration)
+                    val estimatedWatchDuration = (item.progress * item.durationMs) / 1000f
+
+                    // Rarity: 1.0 / frequency of same content hash
+                    val frequency = hashFrequencies[item.contentHash] ?: 1
+                    val rarityScore = 1.0f / frequency
+
                     KeepScoreEngine.calculateScore(
                         KeepScoreInput(
                             mediaId = item.id,
@@ -71,12 +91,13 @@ class CleanupIntelligenceViewModel(
                             lastExposedTimestamp = item.lastExposedTimestamp,
                             viewCount = item.viewCount,
                             playCount = item.viewCount, 
-                            averageWatchDuration = if (item.viewCount > 0) 15f else 0f, // Heuristic for now
+                            averageWatchDuration = estimatedWatchDuration,
                             completionPercentage = item.progress,
-                            skipCount = 0,
+                            skipCount = skipCounts[item.id] ?: 0,
                             rating = item.rating,
                             isFavorite = item.isFavorite,
                             tasteAlignmentScore = evidence.exploitationScore,
+                            rarityScore = rarityScore,
                             contentHash = item.contentHash
                         )
                     )
@@ -91,7 +112,11 @@ class CleanupIntelligenceViewModel(
                         viewCount = item.viewCount,
                         mediaType = item.mediaType,
                         contentHash = item.contentHash,
-                        isFavorite = item.isFavorite
+                        isFavorite = item.isFavorite,
+                        width = item.width,
+                        height = item.height,
+                        durationMs = item.durationMs,
+                        dateAdded = item.dateAdded
                     )
                 }
 
@@ -108,28 +133,12 @@ class CleanupIntelligenceViewModel(
                 val sortedRecs = sortRecommendations(recommendations, _uiState.value.currentSort)
                 
                 // Protect high-value items list (Top 10 by Keep Score)
-                val protectedItems = allItems.map { item ->
-                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats)
-                    val score = KeepScoreEngine.calculateScore(
-                        KeepScoreInput(
-                            mediaId = item.id,
-                            fileSize = item.sizeBytes,
-                            dateAdded = item.dateAdded,
-                            exposureCount = item.exposureCount,
-                            lastExposedTimestamp = item.lastExposedTimestamp,
-                            viewCount = item.viewCount,
-                            playCount = item.viewCount,
-                            averageWatchDuration = if (item.viewCount > 0) 15f else 0f,
-                            completionPercentage = item.progress,
-                            skipCount = 0,
-                            rating = item.rating,
-                            isFavorite = item.isFavorite,
-                            tasteAlignmentScore = evidence.exploitationScore,
-                            contentHash = item.contentHash
-                        )
-                    ).keepScore
-                    item to score
-                }.sortedByDescending { it.second }.take(10).map { it.first }
+                val resultsMap = keepScoreResults.associateBy { it.mediaId }
+                val protectedItems = allItems
+                    .map { it to (resultsMap[it.id]?.keepScore ?: 0f) }
+                    .sortedByDescending { it.second }
+                    .take(10)
+                    .map { it.first }
 
                 _uiState.update { state ->
                     state.copy(

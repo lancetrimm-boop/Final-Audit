@@ -14,7 +14,9 @@ data class CleanupReviewUiState(
     val selectedCategory: CleanupCategory = CleanupCategory.FORGOTTEN,
     val selectedIds: Set<String> = emptySet(),
     val isLoading: Boolean = true,
+    val isLocked: Boolean = false,
     val isDeleting: Boolean = false,
+    val requiresInternalConfirmation: Boolean = false,
     val storageRecoveryEstimate: Long = 0L,
     val categoryStats: Map<CleanupCategory, CategoryStat> = emptyMap(),
     val currentSort: ReviewSort = ReviewSort.LOWEST_KEEP_SCORE
@@ -34,7 +36,9 @@ enum class ReviewSort {
 }
 
 class CleanupReviewViewModel(
-    private val repository: MediaRepository
+    private val repository: MediaRepository,
+    private val entitlementRepository: com.example.data.entitlement.EntitlementRepository,
+    private val backgroundDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default
 ) : ViewModel() {
 
     val deleteManager = repository.safeDeleteManager
@@ -47,31 +51,52 @@ class CleanupReviewViewModel(
         
         viewModelScope.launch {
             deleteManager.deletionState.collect { state ->
-                if (state == DeletionState.CONFIRMED || state == DeletionState.CANCELLED || state == DeletionState.FAILED) {
-                    _uiState.update { it.copy(isDeleting = false) }
-                    if (state == DeletionState.CONFIRMED) {
-                        loadRecommendations() // Refresh
+                when (state) {
+                    DeletionState.CONFIRMED, DeletionState.CANCELLED, DeletionState.FAILED -> {
+                        _uiState.update { it.copy(isDeleting = false, requiresInternalConfirmation = false) }
+                        if (state == DeletionState.CONFIRMED) {
+                            loadRecommendations() // Refresh
+                        }
                     }
-                } else if (state == DeletionState.PENDING) {
-                    _uiState.update { it.copy(isDeleting = true) }
+                    DeletionState.PENDING -> {
+                        _uiState.update { it.copy(isDeleting = true, requiresInternalConfirmation = false) }
+                    }
+                    DeletionState.AURA_CONFIRMATION_REQUIRED -> {
+                        _uiState.update { it.copy(isDeleting = false, requiresInternalConfirmation = true) }
+                    }
+                    else -> {}
                 }
             }
         }
     }
 
     fun loadRecommendations() {
+        if (!entitlementRepository.isFeatureAvailable(com.example.data.entitlement.ProFeature.CLEANUP_AUTOMATION)) {
+            _uiState.update { it.copy(isLocked = true, isLoading = false) }
+            return
+        }
+
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isLoading = true, isLocked = false) }
             
             val allItems = repository.mediaItems.value
             val tasteDNA = repository.tasteDNA.value
             val stats = repository.intelligenceStats.value
             
             // Perform heavy calculation in background
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            kotlinx.coroutines.withContext(backgroundDispatcher) {
                 // 1. Generate Keep Scores
+                val allIds = allItems.map { it.id }
+                val skipCounts = repository.getSkipCounts(allIds)
+                val hashFrequencies = repository.getContentHashFrequencies()
+
                 val keepScoreResults = allItems.map { item ->
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats)
+                    val estimatedWatchDuration = (item.progress * item.durationMs) / 1000f
+                    
+                    val frequency = hashFrequencies[item.contentHash] ?: 1
+                    val rarityScore = 1.0f / frequency
+
                     KeepScoreEngine.calculateScore(
                         KeepScoreInput(
                             mediaId = item.id,
@@ -81,12 +106,13 @@ class CleanupReviewViewModel(
                             lastExposedTimestamp = item.lastExposedTimestamp,
                             viewCount = item.viewCount,
                             playCount = item.viewCount,
-                            averageWatchDuration = if (item.viewCount > 0) 15f else 0f,
+                            averageWatchDuration = estimatedWatchDuration,
                             completionPercentage = item.progress,
-                            skipCount = 0,
+                            skipCount = skipCounts[item.id] ?: 0,
                             rating = item.rating,
                             isFavorite = item.isFavorite,
                             tasteAlignmentScore = evidence.exploitationScore,
+                            rarityScore = rarityScore,
                             contentHash = item.contentHash
                         )
                     )
@@ -101,7 +127,11 @@ class CleanupReviewViewModel(
                         viewCount = item.viewCount,
                         mediaType = item.mediaType,
                         contentHash = item.contentHash,
-                        isFavorite = item.isFavorite
+                        isFavorite = item.isFavorite,
+                        width = item.width,
+                        height = item.height,
+                        durationMs = item.durationMs,
+                        dateAdded = item.dateAdded
                     )
                 }
 
@@ -205,6 +235,14 @@ class CleanupReviewViewModel(
         val rec = _uiState.value.recommendations.find { it.mediaId == mediaId } ?: return
         deleteManager.markAsKept(item, rec)
         loadRecommendations()
+    }
+
+    fun confirmInternalDeletion() {
+        deleteManager.confirmInternalDeletion()
+    }
+
+    fun cancelDeletion() {
+        deleteManager.cancelDeletion()
     }
 
     private fun applyFiltersAndSort(state: CleanupReviewUiState): CleanupReviewUiState {

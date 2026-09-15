@@ -13,28 +13,48 @@ import com.example.data.db.RejectedMediaEntity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import android.app.PendingIntent
+import com.squareup.moshi.JsonClass
+import com.example.data.db.UserPreferenceEntity
+import kotlinx.coroutines.launch
+import android.util.Log
 
 enum class DeletionState {
     IDLE,
     PENDING,
+    AURA_CONFIRMATION_REQUIRED,
     CONFIRMED,
     CANCELLED,
     FAILED
 }
 
 class SafeDeleteManager(
-    private val repository: MediaRepository
+    private val repository: MediaRepository,
+    private val managerScope: kotlinx.coroutines.CoroutineScope
 ) {
     private val _deletionState = MutableStateFlow(DeletionState.IDLE)
     val deletionState: StateFlow<DeletionState> = _deletionState.asStateFlow()
 
-    private var pendingItems: List<MediaItem> = emptyList()
+    private var pendingMediaStoreItems: List<MediaItem> = emptyList()
+    private var pendingInternalItems: List<MediaItem> = emptyList()
     private var pendingRecommendations: List<CleanupRecommendation> = emptyList()
+
+    companion object {
+        private const val KEY_PENDING_TRANSACTION = "pending_cleanup_transaction"
+    }
+
+    /**
+     * Delegate for MediaStore deletion requests to allow testing without static mocking.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal var mediaStoreDeleteProvider: (Context, List<Uri>) -> PendingIntent? = { context, uris ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            MediaStore.createDeleteRequest(context.contentResolver, uris)
+        } else null
+    }
 
     /**
      * Initiates the deletion workflow for a set of items.
-     * @return The IntentSenderRequest to be launched by the UI, or null if direct delete was possible.
      */
     fun requestDeletion(
         context: Context,
@@ -44,42 +64,55 @@ class SafeDeleteManager(
     ) {
         if (items.isEmpty()) return
 
-        pendingItems = items
         pendingRecommendations = recommendations
-        _deletionState.value = DeletionState.PENDING
-
-        // Filter for MediaStore compatible URIs to prevent IllegalArgumentException crashes
-        val mediaStoreUris = items.mapNotNull { item ->
+        
+        val mediaStoreItems = mutableListOf<MediaItem>()
+        val internalItems = mutableListOf<MediaItem>()
+        
+        items.forEach { item ->
             try {
                 val uri = Uri.parse(item.uriPath)
-                if (uri.authority == "media") uri else null
-            } catch (e: Exception) {
-                null
+                if (uri.authority == "media") {
+                    mediaStoreItems.add(item)
+                } else {
+                    internalItems.add(item)
+                }
+            } catch (_: Exception) {
+                internalItems.add(item)
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && mediaStoreUris.isNotEmpty()) {
+        pendingMediaStoreItems = mediaStoreItems
+        pendingInternalItems = internalItems
+
+        // Priority 1: Trigger System Deletion for MediaStore items
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && mediaStoreItems.isNotEmpty()) {
+            _deletionState.value = DeletionState.PENDING
+            persistState(DeletionState.PENDING)
             try {
-                val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, mediaStoreUris)
-                val request = IntentSenderRequest.Builder(pendingIntent.intentSender).build()
-                launcher.launch(request)
+                val uris = mediaStoreItems.map { Uri.parse(it.uriPath) }
+                mediaStoreDeleteProvider(context, uris)?.let { pendingIntent ->
+                    val request = IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+                    launcher.launch(request)
+                } ?: run {
+                    _deletionState.value = DeletionState.FAILED
+                    resetPending()
+                    clearPersistedState()
+                }
             } catch (e: Exception) {
-                android.util.Log.e("SafeDeleteManager", "Failed to create delete request", e)
+                Log.e("SafeDeleteManager", "Failed to create delete request", e)
                 _deletionState.value = DeletionState.FAILED
-                pendingItems = emptyList()
-                pendingRecommendations = emptyList()
+                resetPending()
+                clearPersistedState()
             }
-        } else if (mediaStoreUris.isEmpty() && items.isNotEmpty()) {
-            // All selected items are non-MediaStore (e.g. manually imported file:// or custom content://)
-            // For safety and consistency with system dialog, we'll treat this as direct confirmation 
-            // of DB removal, as we can't reliably trigger a system dialog for mixed/custom URIs here.
-            _deletionState.value = DeletionState.CONFIRMED
-            reconcileDatabaseAfterDeletion()
+        } else if (internalItems.isNotEmpty()) {
+            // No MediaStore items, but have internal items -> Request Aura confirmation
+            _deletionState.value = DeletionState.AURA_CONFIRMATION_REQUIRED
+            persistState(DeletionState.AURA_CONFIRMATION_REQUIRED)
         } else {
-            // Fallback for older versions or empty valid URI list
             _deletionState.value = DeletionState.FAILED
-            pendingItems = emptyList()
-            pendingRecommendations = emptyList()
+            resetPending()
+            clearPersistedState()
         }
     }
 
@@ -88,57 +121,187 @@ class SafeDeleteManager(
      */
     fun handleDeletionResult(resultCode: Int) {
         if (resultCode == Activity.RESULT_OK) {
-            _deletionState.value = DeletionState.CONFIRMED
-            reconcileDatabaseAfterDeletion()
+            // Authoritative confirmation for MS items
+            reconcileDatabaseAfterDeletion(pendingMediaStoreItems)
+            pendingMediaStoreItems = emptyList()
+            
+            // Proceed to internal confirmation if needed
+            if (pendingInternalItems.isNotEmpty()) {
+                _deletionState.value = DeletionState.AURA_CONFIRMATION_REQUIRED
+                persistState(DeletionState.AURA_CONFIRMATION_REQUIRED)
+            } else {
+                _deletionState.value = DeletionState.CONFIRMED
+                clearPersistedState()
+            }
         } else {
             _deletionState.value = DeletionState.CANCELLED
-            pendingItems = emptyList()
-            pendingRecommendations = emptyList()
+            resetPending()
+            clearPersistedState()
         }
     }
 
-    private fun reconcileDatabaseAfterDeletion() {
-        val itemsToDelete = pendingItems
-        val recs = pendingRecommendations
-        
-        itemsToDelete.forEach { item ->
-            // 1. Add to Rejected Media to prevent re-import
-            val recommendation = recs.find { it.mediaId == item.id }
-            val rejected = RejectedMediaEntity(
-                id = "del_${item.id}_${System.currentTimeMillis()}",
-                uriPath = item.uriPath,
-                title = item.title,
-                mediaType = item.mediaType,
-                reason = recommendation?.category?.name ?: "User Deleted",
-                compatibilityStatus = item.compatibilityStatus.name,
-                containerFormat = item.containerFormat,
-                videoCodec = item.videoCodec,
-                audioCodec = item.audioCodec,
-                contentHash = item.contentHash,
-                timestampRejected = System.currentTimeMillis()
-            )
-            repository.addRejectedMedia(rejected)
+    /**
+     * Confirms and executes deletion for internal (non-MediaStore) items.
+     */
+    fun confirmInternalDeletion() {
+        if (pendingInternalItems.isNotEmpty()) {
+            reconcileDatabaseAfterDeletion(pendingInternalItems)
+            pendingInternalItems = emptyList()
+        }
+        _deletionState.value = DeletionState.CONFIRMED
+        clearPersistedState()
+        resetPending()
+    }
 
-            // 2. Remove from MediaRepository and DB
-            repository.deleteMediaItem(item.id)
+    /**
+     * Cancels the entire deletion workflow.
+     */
+    fun cancelDeletion() {
+        _deletionState.value = DeletionState.CANCELLED
+        clearPersistedState()
+        resetPending()
+    }
+
+    private fun resetPending() {
+        pendingMediaStoreItems = emptyList()
+        pendingInternalItems = emptyList()
+        pendingRecommendations = emptyList()
+    }
+
+    private fun reconcileDatabaseAfterDeletion(itemsToDelete: List<MediaItem>) {
+        itemsToDelete.forEach { item ->
+            val rec = pendingRecommendations.find { it.mediaId == item.id }
+            reconcileRecoveryItem(item.toRecoveryItem(rec))
+        }
+    }
+
+    /**
+     * Attempts to recover state after process death.
+     */
+    suspend fun recoverPendingDeletions(context: Context) {
+        val db = repository.getDatabase() ?: return
+        val pref = db.userPreferenceDao().getPreference(KEY_PENDING_TRANSACTION) ?: return
+        
+        try {
+            val adapter = repository.getMoshi().adapter(PersistedDeletionTransaction::class.java)
+            val transaction = adapter.fromJson(pref.value) ?: return
             
-            // 3. Clear thumbnail cache
-            com.example.util.MediaThumbnailFetcher.removeThumbnail(item.uriPath)
-            if (item.imageUrl.isNotEmpty()) {
-                com.example.util.MediaThumbnailFetcher.removeThumbnail(item.imageUrl)
+            Log.i("SafeDeleteManager", "Recovering pending deletions from state: ${transaction.state}")
+
+            if (transaction.state == DeletionState.PENDING.name) {
+                // APP DIED DURING SYSTEM DIALOG: Check if items were actually deleted
+                val confirmedDeleted = transaction.mediaStoreItems.filter { item ->
+                    !checkUriExists(context, item.uriPath)
+                }
+                
+                if (confirmedDeleted.isNotEmpty()) {
+                    Log.i("SafeDeleteManager", "Recovery: ${confirmedDeleted.size} items confirmed deleted while offline. Reconciling DB.")
+                    confirmedDeleted.forEach { reconcileRecoveryItem(it) }
+                }
             }
             
-            // 4. Record learning signal
-            repository.recordCleanupSignal(
-                mediaId = item.id,
-                category = recommendation?.category?.name ?: "NONE",
-                score = recommendation?.keepScore ?: 0f,
-                isDelete = true
-            )
+            // Note: Internal items require explicit session-bound confirmation and are not
+            // automatically deleted during recovery to prevent silent data removal.
+            
+        } catch (e: Exception) {
+            Log.e("SafeDeleteManager", "Failed to recover pending deletions", e)
+        } finally {
+            clearPersistedState()
         }
+    }
 
-        pendingItems = emptyList()
-        pendingRecommendations = emptyList()
+    private fun persistState(state: DeletionState) {
+        val msItems = pendingMediaStoreItems.map { it.toRecoveryItem(pendingRecommendations.find { r -> r.mediaId == it.id }) }
+        val intItems = pendingInternalItems.map { it.toRecoveryItem(pendingRecommendations.find { r -> r.mediaId == it.id }) }
+        
+        val transaction = PersistedDeletionTransaction(
+            mediaStoreItems = msItems,
+            internalItems = intItems,
+            state = state.name
+        )
+        
+        try {
+            val adapter = repository.getMoshi().adapter(PersistedDeletionTransaction::class.java)
+            val json = adapter.toJson(transaction)
+            managerScope.launch {
+                repository.getDatabase()?.userPreferenceDao()?.insertPreference(
+                    UserPreferenceEntity(KEY_PENDING_TRANSACTION, json)
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("SafeDeleteManager", "Failed to persist deletion state", e)
+        }
+    }
+
+    private fun clearPersistedState() {
+        managerScope.launch {
+            repository.getDatabase()?.userPreferenceDao()?.deletePreference(KEY_PENDING_TRANSACTION)
+        }
+    }
+
+    private fun MediaItem.toRecoveryItem(rec: CleanupRecommendation?): RecoveryItem {
+        return RecoveryItem(
+            id = id,
+            uriPath = uriPath,
+            imageUrl = imageUrl,
+            title = title,
+            mediaType = mediaType,
+            category = rec?.category?.name ?: "User Deleted",
+            keepScore = rec?.keepScore ?: 0f,
+            compatibilityStatus = compatibilityStatus.name,
+            containerFormat = containerFormat,
+            videoCodec = videoCodec,
+            audioCodec = audioCodec,
+            contentHash = contentHash
+        )
+    }
+
+    private fun reconcileRecoveryItem(item: RecoveryItem) {
+        // 1. Add to Rejected Media to prevent re-import
+        val rejected = RejectedMediaEntity(
+            id = "del_${item.id}_${System.currentTimeMillis()}",
+            uriPath = item.uriPath,
+            title = item.title,
+            mediaType = item.mediaType,
+            reason = item.category,
+            compatibilityStatus = item.compatibilityStatus,
+            containerFormat = item.containerFormat,
+            videoCodec = item.videoCodec,
+            audioCodec = item.audioCodec,
+            contentHash = item.contentHash,
+            timestampRejected = System.currentTimeMillis()
+        )
+        repository.addRejectedMedia(rejected)
+
+        // 2. Remove from MediaRepository and DB
+        repository.deleteMediaItem(item.id)
+        
+        // 3. Clear thumbnail cache
+        com.example.util.MediaThumbnailFetcher.removeThumbnail(item.uriPath)
+        if (item.imageUrl.isNotEmpty()) {
+            com.example.util.MediaThumbnailFetcher.removeThumbnail(item.imageUrl)
+        }
+        
+        // 4. Record learning signal
+        repository.recordCleanupSignal(
+            mediaId = item.id,
+            category = item.category,
+            score = item.keepScore,
+            isDelete = true
+        )
+    }
+
+    private fun checkUriExists(context: Context, uriPath: String): Boolean {
+        // We only reliably check MediaStore existence for recovery
+        if (!uriPath.startsWith("content://media/")) return true 
+        return try {
+            val uri = Uri.parse(uriPath)
+            context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { 
+                it.moveToFirst() 
+            } == true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /**
@@ -158,3 +321,27 @@ class SafeDeleteManager(
         )
     }
 }
+
+@JsonClass(generateAdapter = true)
+data class RecoveryItem(
+    val id: String,
+    val uriPath: String,
+    val imageUrl: String,
+    val title: String,
+    val mediaType: String,
+    val category: String,
+    val keepScore: Float,
+    val compatibilityStatus: String,
+    val containerFormat: String,
+    val videoCodec: String,
+    val audioCodec: String,
+    val contentHash: String?
+)
+
+@JsonClass(generateAdapter = true)
+data class PersistedDeletionTransaction(
+    val mediaStoreItems: List<RecoveryItem>,
+    val internalItems: List<RecoveryItem>,
+    val state: String,
+    val timestamp: Long = System.currentTimeMillis()
+)

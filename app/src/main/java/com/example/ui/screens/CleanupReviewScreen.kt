@@ -49,9 +49,19 @@ fun CleanupReviewScreen(
     viewModel: CleanupReviewViewModel,
     onBack: () -> Unit,
     onMediaDetail: (MediaItem) -> Unit,
-    deleteLauncher: androidx.activity.result.ActivityResultLauncher<androidx.activity.result.IntentSenderRequest>
+    deleteLauncher: androidx.activity.result.ActivityResultLauncher<androidx.activity.result.IntentSenderRequest>,
+    onUnlockPro: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    if (uiState.isLocked) {
+        com.example.ui.components.AuraProLockScreen(
+            featureName = "Smart Cleanup",
+            onBack = onBack,
+            onUnlock = onUnlockPro
+        )
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -119,6 +129,30 @@ fun CleanupReviewScreen(
                     }
                 }
             }
+        }
+
+        if (uiState.requiresInternalConfirmation) {
+            AlertDialog(
+                onDismissRequest = { viewModel.cancelDeletion() },
+                title = { Text("Confirm Cleanup") },
+                text = { Text("Are you sure you want to remove the selected non-system media from your Aura library? This will not delete the source files but they will no longer appear in Aura.") },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.confirmInternalDeletion() },
+                        colors = ButtonDefaults.buttonColors(containerColor = DiscoveryViolet)
+                    ) {
+                        Text("Delete", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.cancelDeletion() }) {
+                        Text("Cancel", color = AuraMidnight)
+                    }
+                },
+                containerColor = AuraCrispWhite,
+                titleContentColor = AuraMidnight,
+                textContentColor = AuraSlate
+            )
         }
     }
 }

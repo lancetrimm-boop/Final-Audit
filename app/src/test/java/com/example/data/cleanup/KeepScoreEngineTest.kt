@@ -19,6 +19,7 @@ class KeepScoreEngineTest {
         rating = 0f,
         isFavorite = false,
         tasteAlignmentScore = 0.5f,
+        rarityScore = 1.0f,
         contentHash = "hash-1"
     )
 
@@ -106,5 +107,60 @@ class KeepScoreEngineTest {
         val result = KeepScoreEngine.calculateScore(input)
         
         assertTrue(result.reasons.contains(CleanupReason.STALE_MEDIA))
+    }
+
+    @Test
+    fun testRarity_InfluencesScore() {
+        val uniqueInput = baseInput.copy(rarityScore = 1.0f)
+        val duplicateInput = baseInput.copy(rarityScore = 0.5f)
+        val excessiveInput = baseInput.copy(rarityScore = 0.1f)
+        
+        val uniqueResult = KeepScoreEngine.calculateScore(uniqueInput)
+        val duplicateResult = KeepScoreEngine.calculateScore(duplicateInput)
+        val excessiveResult = KeepScoreEngine.calculateScore(excessiveInput)
+        
+        assertTrue("Unique item should have higher score than duplicate", uniqueResult.keepScore > duplicateResult.keepScore)
+        assertTrue("Duplicate item should have higher score than item with 10 copies", duplicateResult.keepScore > excessiveResult.keepScore)
+        
+        // Exact impact: Rarity is 10% weight.
+        // Difference between 1.0 and 0.5 rarity is 0.05 score delta.
+        assertEquals(0.05f, uniqueResult.keepScore - duplicateResult.keepScore, 0.01f)
+    }
+
+    @Test
+    fun testUnplayedLowAlignment_IsNotCategorized() {
+        val input = baseInput.copy(
+            viewCount = 0,
+            playCount = 0,
+            exposureCount = 2, // Low exposure, not forgotten
+            tasteAlignmentScore = 0.1f, // Below threshold
+            isFavorite = false
+        )
+        
+        val result = KeepScoreEngine.calculateScore(input)
+        
+        assertTrue(result.reasons.contains(CleanupReason.LOW_TASTE_ALIGNMENT))
+        assertEquals("Unplayed media with only low alignment should not be categorized for cleanup", 
+            CleanupCategory.NONE, result.category)
+    }
+
+    @Test
+    fun testLowAlignmentWithRepeatedSkip_IsCategorized() {
+        val input = baseInput.copy(
+            viewCount = 0,
+            playCount = 0,
+            exposureCount = 2,
+            tasteAlignmentScore = 0.1f, // Below threshold
+            skipCount = 5, // Triggers REPEATED_SKIP
+            averageWatchDuration = 1.0f,
+            isFavorite = false
+        )
+        
+        val result = KeepScoreEngine.calculateScore(input)
+        
+        assertTrue(result.reasons.contains(CleanupReason.LOW_TASTE_ALIGNMENT))
+        assertTrue(result.reasons.contains(CleanupReason.REPEATED_SKIP))
+        assertEquals("Low alignment with repeated skip SHOULD be categorized", 
+            CleanupCategory.NEVER_CONNECTED, result.category)
     }
 }

@@ -17,6 +17,7 @@ data class KeepScoreInput(
     val rating: Float, // 0.0 to 5.0
     val isFavorite: Boolean,
     val tasteAlignmentScore: Float, // 0.0 to 1.0
+    val rarityScore: Float, // 0.0 to 1.0
     val contentHash: String?
 )
 
@@ -60,8 +61,7 @@ object KeepScoreEngine {
         
         // Rarity: 10% (Content unique)
         val rarityWeight = 0.10f
-        val rarityScore = 1.0f // Logic for duplicates would reduce this later
-        val rarityComponent = rarityScore * rarityWeight
+        val rarityComponent = input.rarityScore * rarityWeight
         
         var baseScore = tasteComponent + engagementComponent + preferenceComponent + recencyComponent + rarityComponent
         
@@ -127,7 +127,7 @@ object KeepScoreEngine {
         val category = when {
             input.isFavorite -> CleanupCategory.NONE
             reasons.contains(CleanupReason.HIGH_EXPOSURE_NO_ENGAGEMENT) -> CleanupCategory.FORGOTTEN
-            reasons.contains(CleanupReason.REPEATED_SKIP) || reasons.contains(CleanupReason.LOW_TASTE_ALIGNMENT) -> CleanupCategory.NEVER_CONNECTED
+            reasons.contains(CleanupReason.REPEATED_SKIP) -> CleanupCategory.NEVER_CONNECTED
             input.fileSize > 100 * 1024 * 1024 && finalScore < 0.40f -> {
                 reasons.add(CleanupReason.LARGE_FILE_SIZE)
                 CleanupCategory.SPACE_HOGS

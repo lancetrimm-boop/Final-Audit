@@ -143,7 +143,21 @@ interface MediaDao {
 
     @Query("SELECT * FROM media_items ORDER BY id ASC LIMIT :limit OFFSET :offset")
     suspend fun getMediaBatch(limit: Int, offset: Int): List<MediaEntity>
+
+    @Query("""
+        SELECT contentHash, COUNT(*) as count 
+        FROM media_items 
+        WHERE isDeleted = 0 
+        AND contentHash IS NOT NULL 
+        GROUP BY contentHash
+    """)
+    suspend fun getContentHashFrequencies(): List<ContentHashFrequency>
 }
+
+data class ContentHashFrequency(
+    val contentHash: String,
+    val count: Int
+)
 
 @Dao
 interface SearchHistoryDao {
@@ -246,7 +260,21 @@ interface AISkipDao {
 
     @Query("SELECT COUNT(*) FROM ai_skip_events WHERE eventType = 'WATCHED_DESTINATION'")
     suspend fun getTotalWatchedDestinations(): Int
+
+    @Query("""
+        SELECT mediaId, COUNT(*) as count 
+        FROM ai_skip_events 
+        WHERE eventType IN ('SKIP_FORWARD', 'REPEATED_SKIP') 
+        AND mediaId IN (:ids) 
+        GROUP BY mediaId
+    """)
+    suspend fun getSkipCountsForBatch(ids: List<String>): List<MediaSkipCount>
 }
+
+data class MediaSkipCount(
+    val mediaId: String,
+    val count: Int
+)
 
 @Dao
 interface UserPreferenceDao {

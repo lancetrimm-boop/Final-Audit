@@ -16,14 +16,34 @@ object CleanupRecommendationEngine {
         itemMetadata: Map<String, CleanupItemMetadata>
     ): List<CleanupRecommendation> {
         val recommendations = mutableListOf<CleanupRecommendation>()
+        val keepScoreMap = results.associateBy { it.mediaId }
         
         // 1. Group by content hash to find redundancy
         val hashGroups = itemMetadata.values.filter { it.contentHash != null }.groupBy { it.contentHash!! }
-        val duplicateIds = hashGroups.filter { it.value.size > 1 }.flatMap { group ->
-            // Keep the one with the highest interaction or oldest date? 
-            // For now, mark all as potential redundant candidates.
-            group.value.map { it.mediaId }
-        }.toSet()
+        
+        val itemsToCleanupAsRedundant = mutableSetOf<String>()
+        
+        hashGroups.filter { it.value.size > 1 }.forEach { (_, group) ->
+            // Select exactly one 'Master' item to retain
+            // Tie-breaking order:
+            // 1. Higher Keep Score (Overall intelligence)
+            // 2. Higher resolution/quality (width * height)
+            // 3. Longer duration (durationMs)
+            // 4. Stronger engagement (viewCount)
+            // 5. Deterministic tie-breaker (ID)
+            val sortedGroup = group.sortedWith(
+                compareByDescending<CleanupItemMetadata> { keepScoreMap[it.mediaId]?.keepScore ?: 0f }
+                    .thenByDescending { it.width * it.height }
+                    .thenByDescending { it.durationMs }
+                    .thenByDescending { it.viewCount }
+                    .thenBy { it.mediaId }
+            )
+            
+            val master = sortedGroup.first()
+            val redundancyCandidates = sortedGroup.drop(1)
+            
+            itemsToCleanupAsRedundant.addAll(redundancyCandidates.map { it.mediaId })
+        }
 
         results.forEach { result ->
             val metadata = itemMetadata[result.mediaId] ?: return@forEach
@@ -32,8 +52,8 @@ object CleanupRecommendationEngine {
             var category = result.category
             val reasons = result.reasons.toMutableList()
             
-            // Cross-item logic for redundancy
-            if (duplicateIds.contains(result.mediaId)) {
+            // Cross-item logic for redundancy: Only non-masters are redundant
+            if (itemsToCleanupAsRedundant.contains(result.mediaId)) {
                 category = CleanupCategory.REDUNDANT
                 reasons.add(CleanupReason.DUPLICATE_CONTENT)
             }
@@ -127,5 +147,9 @@ data class CleanupItemMetadata(
     val viewCount: Int,
     val mediaType: String,
     val contentHash: String?,
-    val isFavorite: Boolean
+    val isFavorite: Boolean,
+    val width: Int,
+    val height: Int,
+    val durationMs: Long,
+    val dateAdded: Long
 )

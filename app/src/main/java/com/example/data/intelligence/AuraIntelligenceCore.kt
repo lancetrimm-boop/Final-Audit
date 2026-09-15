@@ -190,13 +190,17 @@ class AuraIntelligenceCore(
                     if (isLiked) score -= 0.5 // Penalty for already liked items to surface new content
                     if (isRecent) score -= 0.8 // Heavy penalty for recently viewed
 
+                    // AURA STAGE 2: Seeded Jitter to break deterministic tie-breaking (item.id)
+                    // and introduce session-level variety among similarly ranked items.
+                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.01
+
                     // Update 9: Relationship Evidence
                     val relBonus = scoreRelationships(item, request.relatedMediaIds, evidenceItems)
 
                     IntelligenceCandidate(
                         item = item,
                         evidence = evidenceItems,
-                        rankScore = score + relBonus,
+                        rankScore = score + relBonus + jitter,
                         primaryRelevanceScore = score.toFloat(),
                         secondaryEvidenceScore = personalScore,
                         provenance = when {
@@ -227,6 +231,9 @@ class AuraIntelligenceCore(
                     
                     val score = baseScore.toDouble() * (1.0 - seenPenalty)
                     
+                    // AURA STAGE 2: Seeded Jitter
+                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.01
+
                     val evidenceItems = mutableListOf<EvidenceItem>()
                     evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine"))
                     
@@ -236,7 +243,7 @@ class AuraIntelligenceCore(
                     IntelligenceCandidate(
                         item = item,
                         evidence = evidenceItems,
-                        rankScore = score + relBonus,
+                        rankScore = score + relBonus + jitter,
                         primaryRelevanceScore = score.toFloat(),
                         secondaryEvidenceScore = 0f,
                         provenance = "Discover Sort"
@@ -284,10 +291,15 @@ class AuraIntelligenceCore(
                 items.map { item ->
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
                     val score = (evidence.uncertaintyScore * 5.0) + (evidence.noveltyScore * 5.0)
+                    
+                    // AURA STAGE 2: Seeded Jitter to break deterministic tie-breaking among unplayed ties.
+                    // Range [0, 0.1] is ~1% of max possible score (10.0), safe for variety.
+                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.1
+
                     IntelligenceCandidate(
                         item = item,
                         evidence = listOf(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.uncertaintyScore, 0.7f, EvidenceStatus.INFERRED, "Uncertainty")),
-                        rankScore = score,
+                        rankScore = score + jitter,
                         primaryRelevanceScore = score.toFloat(),
                         secondaryEvidenceScore = 0f
                     )
@@ -466,10 +478,13 @@ class AuraIntelligenceCore(
             
             val matchPercent = (score * 100).toInt().coerceIn(10, 99)
 
+            // AURA STAGE 2: Seeded Jitter
+            val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.01
+
             IntelligenceCandidate(
                 item = item.copy(selectionReason = "$matchPercent% Match"),
                 evidence = evidenceItems,
-                rankScore = score.toDouble() + relBonus,
+                rankScore = score.toDouble() + relBonus + jitter,
                 primaryRelevanceScore = score,
                 secondaryEvidenceScore = 0f,
                 provenance = "Discover:${request.sortOption ?: "General"}"

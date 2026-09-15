@@ -218,7 +218,9 @@ fun AuraMainContent(repository: MediaRepository) {
     val cleanupViewModel: com.example.ui.screens.CleanupIntelligenceViewModel = viewModel(
         factory = object : androidx.lifecycle.ViewModelProvider.Factory {
             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                return com.example.ui.screens.CleanupIntelligenceViewModel(repository) as T
+                val entitlementRepo = repository.entitlementRepository
+                    ?: throw IllegalStateException("EntitlementRepository not initialized")
+                return com.example.ui.screens.CleanupIntelligenceViewModel(repository, entitlementRepo) as T
             }
         }
     )
@@ -226,7 +228,9 @@ fun AuraMainContent(repository: MediaRepository) {
     val cleanupReviewViewModel: com.example.ui.screens.CleanupReviewViewModel = viewModel(
         factory = object : androidx.lifecycle.ViewModelProvider.Factory {
             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                return com.example.ui.screens.CleanupReviewViewModel(repository) as T
+                val entitlementRepo = repository.entitlementRepository
+                    ?: throw IllegalStateException("EntitlementRepository not initialized")
+                return com.example.ui.screens.CleanupReviewViewModel(repository, entitlementRepo) as T
             }
         }
     )
@@ -345,6 +349,12 @@ fun AuraMainContent(repository: MediaRepository) {
     var showExitDialog by remember { mutableStateOf(false) }
     var showAuraMomentsSelection by remember { mutableStateOf(false) }
     var activeMomentsMode by remember { mutableStateOf<com.example.data.MomentsMode?>(null) }
+
+    val onUnlockPro: () -> Unit = {
+        (context as? Activity)?.let { activity ->
+            repository.billingManager?.launchPurchaseFlow(activity)
+        }
+    }
 
     if (showExitDialog) {
         AlertDialog(
@@ -762,7 +772,8 @@ fun AuraMainContent(repository: MediaRepository) {
                                 onMediaDetail = { item ->
                                     // Navigate to detail
                                 },
-                                deleteLauncher = deleteRequestLauncher
+                                deleteLauncher = deleteRequestLauncher,
+                                onUnlockPro = onUnlockPro
                             )
                         }
                         NavDestination.CLEANUP_DASHBOARD.route -> {
@@ -770,7 +781,8 @@ fun AuraMainContent(repository: MediaRepository) {
                                 viewModel = cleanupViewModel,
                                 onBack = {
                                     currentRoute = NavDestination.PROFILE.route
-                                }
+                                },
+                                onUnlockPro = onUnlockPro
                             )
                         }
                     }

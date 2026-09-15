@@ -41,12 +41,8 @@ fun AuraIntelligenceScreen(
     onNavigateToFinding: (String) -> Unit,
     onNavigateToCleanupDebug: () -> Unit
 ) {
-    val visibleSections = remember {
-        if (BuildConfig.ENABLE_DEVELOPER_TOOLS) {
-            IntelligenceSection.entries.toList()
-        } else {
-            IntelligenceSection.entries.filter { !it.isDeveloperOnly }
-        }
+    val visibleSections = remember { 
+        IntelligenceSection.entries.filter { !it.isDeveloperOnly || BuildConfig.ENABLE_DEVELOPER_TOOLS } 
     }
 
     var selectedSection by remember { mutableStateOf(IntelligenceSection.OVERVIEW) }

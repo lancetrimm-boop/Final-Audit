@@ -233,7 +233,7 @@ class MediaRepository(
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         Log.e("MediaRepository", "Fatal coroutine error in background scope", throwable)
     }
-    private val scope = CoroutineScope(dispatcher + SupervisorJob() + exceptionHandler)
+    internal val scope = CoroutineScope(dispatcher + SupervisorJob() + exceptionHandler)
     private var database: AuraDatabase? = null
     fun getDatabase(): AuraDatabase? = database
 
@@ -322,7 +322,7 @@ class MediaRepository(
     val consentState: StateFlow<ConsentState> = _consentState.asStateFlow()
 
     val momentDispatcher = AuraMomentDispatcher(this)
-    val safeDeleteManager = com.example.data.cleanup.SafeDeleteManager(this)
+    val safeDeleteManager = com.example.data.cleanup.SafeDeleteManager(this, scope)
     var visualContextEngine = com.example.data.visual.VisualContextEngine(this)
     private var applicationContext: Context? = null
 
@@ -1196,6 +1196,7 @@ class MediaRepository(
                     // Trigger non-blocking maintenance tasks
                     launch { reconcileExistingMedia(context) }
                     launch { scanLocalMedia(context) }
+                    launch { safeDeleteManager.recoverPendingDeletions(context) }
                     
                     // Start data collectors from database
                     launch { collectDataFlows(db) }
@@ -3461,6 +3462,32 @@ class MediaRepository(
 
     suspend fun getLikeCount(id: String): Int {
         return database?.microMomentDao()?.getMomentCountForMedia(id) ?: 0
+    }
+
+    /**
+     * Retrieves skip counts for a batch of media items.
+     */
+    suspend fun getSkipCounts(ids: List<String>): Map<String, Int> {
+        val db = database ?: return emptyMap()
+        return try {
+            db.aiSkipDao().getSkipCountsForBatch(ids).associate { it.mediaId to it.count }
+        } catch (e: Exception) {
+            Log.e("MediaRepository", "Failed to fetch skip counts", e)
+            emptyMap()
+        }
+    }
+
+    /**
+     * Retrieves the frequency of each content hash in the library.
+     */
+    suspend fun getContentHashFrequencies(): Map<String, Int> {
+        val db = database ?: return emptyMap()
+        return try {
+            db.mediaDao().getContentHashFrequencies().associate { it.contentHash to it.count }
+        } catch (e: Exception) {
+            Log.e("MediaRepository", "Failed to fetch hash frequencies", e)
+            emptyMap()
+        }
     }
 
     @androidx.annotation.VisibleForTesting
