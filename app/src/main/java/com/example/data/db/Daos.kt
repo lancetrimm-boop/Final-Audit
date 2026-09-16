@@ -212,7 +212,15 @@ interface MicroMomentDao {
 
     @Query("SELECT COUNT(*) FROM micro_moments WHERE mediaId = :mediaId")
     suspend fun getMomentCountForMedia(mediaId: String): Int
+
+    @Query("SELECT mediaId, COUNT(*) as count FROM micro_moments WHERE mediaId IN (:ids) GROUP BY mediaId")
+    suspend fun getLikeCountsForBatch(ids: List<String>): List<MediaLikeCount>
 }
+
+data class MediaLikeCount(
+    val mediaId: String,
+    val count: Int
+)
 
 @Dao
 interface ClipInteractionDao {

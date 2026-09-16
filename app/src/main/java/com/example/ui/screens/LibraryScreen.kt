@@ -1079,18 +1079,14 @@ private fun CompactControlsRow(
                     IntelligentSortOption.PERSONALIZED -> "Personalized"
                     IntelligentSortOption.DISCOVER -> "Discover"
                     IntelligentSortOption.REDISCOVER -> "Rediscover"
-                    IntelligentSortOption.HIDDEN_GEMS -> "Hidden Gems"
                     IntelligentSortOption.FAVORITES -> "Favorites"
-                    IntelligentSortOption.EXPLORE -> "Explore"
-                    IntelligentSortOption.LEAST_INTERACTED -> "Review"
-                    IntelligentSortOption.RANKING_REFINEMENT -> "Calibrate"
-                    IntelligentSortOption.SURPRISE_ME -> "Random"
+                    IntelligentSortOption.SURPRISE_ME -> "Surprise Me"
                 },
                 isSelected = true,
                 options = IntelligentSortOption.entries,
                 onOptionSelected = onIntelligentSortChange,
                 onPillClick = { /* Toggle menu */ },
-                getDisplayName = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } },
+                getDisplayName = { it.displayName },
                 modifier = Modifier.weight(1f)
             )
         }

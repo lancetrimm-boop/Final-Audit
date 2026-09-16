@@ -1450,11 +1450,15 @@ class MediaRepository(
                             }
                             "selected_intelligent_sort" -> {
                                 val migratedName = when (pref.value) {
-                                    "EXPLORE", "LEAST_INTERACTED" -> "DISCOVER"
+                                    "EXPLORE", "LEAST_INTERACTED", "HIDDEN_GEMS", "RANKING_REFINEMENT" -> "DISCOVER"
                                     "BEST_MATCH" -> "PERSONALIZED"
                                     else -> pref.value
                                 }
-                                try { _selectedIntelligentSort.value = IntelligentSortOption.valueOf(migratedName) } catch (e: Exception) {}
+                                try { 
+                                    _selectedIntelligentSort.value = IntelligentSortOption.valueOf(migratedName) 
+                                } catch (e: Exception) {
+                                    _selectedIntelligentSort.value = IntelligentSortOption.PERSONALIZED
+                                }
                             }
                         }
                     }
@@ -3465,6 +3469,19 @@ class MediaRepository(
     }
 
     /**
+     * Retrieves actual double-tap like counts for a batch of media items.
+     */
+    suspend fun getActualLikeCounts(ids: List<String>): Map<String, Int> {
+        val db = database ?: return emptyMap()
+        return try {
+            db.microMomentDao().getLikeCountsForBatch(ids).associate { it.mediaId to it.count }
+        } catch (e: Exception) {
+            Log.e("MediaRepository", "Failed to fetch like counts", e)
+            emptyMap()
+        }
+    }
+
+    /**
      * Retrieves skip counts for a batch of media items.
      */
     suspend fun getSkipCounts(ids: List<String>): Map<String, Int> {
@@ -4631,10 +4648,6 @@ enum class IntelligentSortOption(val displayName: String, val description: Strin
     PERSONALIZED("Personalized", "AI thinks these are your best choices."),
     DISCOVER("Discover", "New content you haven't explored yet."),
     REDISCOVER("Rediscover", "Enjoy your favorites and past gems again."),
-    HIDDEN_GEMS("Hidden Gems", "High quality items you might have missed."),
     FAVORITES("Favorites", "Everything you've liked and rated highly."),
-    EXPLORE("Explore", "Broaden your taste with something new."),
-    LEAST_INTERACTED("Least Interacted", "Surface items that need your rating."),
-    RANKING_REFINEMENT("Refinement", "Surface items to calibrate your Taste DNA."),
     SURPRISE_ME("Surprise Me", "A fresh random selection from your library.")
 }

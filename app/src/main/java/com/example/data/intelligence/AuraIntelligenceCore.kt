@@ -149,7 +149,7 @@ class AuraIntelligenceCore(
         return results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
     }
 
-    private fun handleSort(request: IntelligenceRequest): List<IntelligenceCandidate> {
+    private suspend fun handleSort(request: IntelligenceRequest): List<IntelligenceCandidate> {
         val allItems = repository.mediaItems.value
         val now = System.currentTimeMillis()
         val tasteDNA = request.tasteDNA ?: repository.tasteDNA.value
@@ -225,14 +225,17 @@ class AuraIntelligenceCore(
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
                     val baseScore = ExplorationEngine.calculatePolicyScore(evidence, strategy)
                     
-                    // AURA REPAIR: Soft penalties
+                    // AURA REPAIR: Soft penalties for seen content
                     val seenCount = item.viewCount + (item.exposureCount / 5)
                     val seenPenalty = (seenCount * 0.1).coerceAtMost(0.9)
                     
-                    val score = baseScore.toDouble() * (1.0 - seenPenalty)
+                    // Incorporate Uncertainty/Novelty boost (Consolidated from EXPLORE)
+                    val explorationBoost = (evidence.uncertaintyScore * 0.5) + (evidence.noveltyScore * 0.5)
                     
-                    // AURA STAGE 2: Seeded Jitter
-                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.01
+                    val score = (baseScore.toDouble() * (1.0 - seenPenalty)) + (explorationBoost * 2.0)
+                    
+                    // AURA STAGE 2: High variety jitter for Discover
+                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.1
 
                     val evidenceItems = mutableListOf<EvidenceItem>()
                     evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine"))
@@ -272,94 +275,32 @@ class AuraIntelligenceCore(
                     )
                 }
             }
-            "LEAST_INTERACTED" -> {
-                val winsMap = repository.getPairwiseWins()
-                val lossesMap = repository.getPairwiseLosses()
-                items.map { item ->
-                    val comparisonCount = (winsMap[item.id] ?: 0) + (lossesMap[item.id] ?: 0)
-                    val score = 100.0 / (item.exposureCount + comparisonCount + 1.0)
-                    IntelligenceCandidate(
-                        item = item,
-                        evidence = listOf(EvidenceItem(EvidenceType.EXPLORATION_VALUE, score.toFloat(), 1.0f, EvidenceStatus.KNOWN, "LeastInteracted")),
-                        rankScore = score,
-                        primaryRelevanceScore = score.toFloat(),
-                        secondaryEvidenceScore = 0f
-                    )
-                }
-            }
-            "EXPLORE" -> {
-                items.map { item ->
-                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
-                    val score = (evidence.uncertaintyScore * 5.0) + (evidence.noveltyScore * 5.0)
+            "FAVORITES" -> {
+                val favItems = items.filter { item -> item.isFavorite || item.rating >= 4.0f }
+                val likeCounts = repository.getActualLikeCounts(favItems.map { it.id })
+
+                favItems.map { item ->
+                    val likes = likeCounts[item.id] ?: 0
+                    val durationSec = item.durationMs / 1000.0
+                    // Like Density: actualLikes / (durationSec + 10.0)
+                    val likeDensity = likes.toDouble() / (durationSec + 10.0)
                     
-                    // AURA STAGE 2: Seeded Jitter to break deterministic tie-breaking among unplayed ties.
-                    // Range [0, 0.1] is ~1% of max possible score (10.0), safe for variety.
-                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.1
+                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
+                    
+                    // Ranking: Primarily Like Density + Favorite Boost + DNA Alignment
+                    val score = (likeDensity * 100.0) + (if (item.isFavorite) 50.0 else 0.0) + (evidence.exploitationScore * 10.0)
+                    
+                    val evidenceItems = mutableListOf<EvidenceItem>()
+                    evidenceItems.add(EvidenceItem(EvidenceType.PAIRWISE_PREFERENCE, likes.toFloat(), 1.0f, EvidenceStatus.KNOWN, "ActualLikes"))
+                    evidenceItems.add(EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA"))
 
                     IntelligenceCandidate(
                         item = item,
-                        evidence = listOf(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.uncertaintyScore, 0.7f, EvidenceStatus.INFERRED, "Uncertainty")),
-                        rankScore = score + jitter,
-                        primaryRelevanceScore = score.toFloat(),
-                        secondaryEvidenceScore = 0f
-                    )
-                }
-            }
-            "HIDDEN_GEMS" -> {
-                val strategy = DiscoveryPolicyManager.resolveStrategy(
-                    policy = request.policy ?: DiscoveryPolicy(),
-                    intent = request.intent ?: UserIntent(),
-                    objective = RecommendationObjective.LIBRARY_INTELLIGENT_DISCOVERY,
-                    systemState = ConfidenceEngine.calculateDiscoveryState(allItems, stats),
-                    tasteDNA = tasteDNA,
-                    profile = request.profile ?: repository.preferenceProfile.value
-                )
-                
-                items.filter { item ->
-                    item.exposureCount < 5 && item.viewCount < 2 && item.rating == 0f
-                }.map { item ->
-                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
-                    val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
-                    
-                    IntelligenceCandidate(
-                        item = item,
-                        evidence = listOf(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine")),
-                        rankScore = score.toDouble(),
-                        primaryRelevanceScore = score,
-                        secondaryEvidenceScore = 0f
-                    )
-                }
-            }
-            "FAVORITES" -> {
-                items.filter { item ->
-                    item.isFavorite || item.rating >= 4.0f
-                }.map { item ->
-                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
-                    
-                    // AURA REPAIR: Explicit favorites must always be highly ranked, 
-                    // regardless of DNA alignment. User intent is authoritative.
-                    val favoriteBoost = if (item.isFavorite) 50.0 else 0.0
-                    val score = favoriteBoost + (evidence.exploitationScore * 10f) + (item.dateAdded.toDouble() / 1e12).toFloat()
-                    
-                    IntelligenceCandidate(
-                        item = item,
-                        evidence = listOf(EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA")),
+                        evidence = evidenceItems,
                         rankScore = score,
-                        primaryRelevanceScore = evidence.exploitationScore,
-                        secondaryEvidenceScore = item.dateAdded.toFloat()
-                    )
-                }
-            }
-            "RANKING_REFINEMENT" -> {
-                items.map { item ->
-                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
-                    val score = (evidence.uncertaintyScore * 10.0) + (evidence.explorationScore * 5.0)
-                    IntelligenceCandidate(
-                        item = item,
-                        evidence = listOf(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.uncertaintyScore, 0.8f, EvidenceStatus.INFERRED, "RankingRefinement")),
-                        rankScore = score,
-                        primaryRelevanceScore = evidence.explorationScore,
-                        secondaryEvidenceScore = evidence.uncertaintyScore
+                        primaryRelevanceScore = likeDensity.toFloat(),
+                        secondaryEvidenceScore = evidence.exploitationScore,
+                        provenance = "Your Favorite"
                     )
                 }
             }

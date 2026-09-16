@@ -155,7 +155,7 @@ class LibraryDiscoveryTest {
             filterType = "ALL",
             sortCategory = SortCategory.INTELLIGENT,
             standardSort = StandardSortOption.NEWEST_FIRST,
-            intelligentSort = IntelligentSortOption.HIDDEN_GEMS,
+            intelligentSort = IntelligentSortOption.DISCOVER,
             inputItems = listOf(gem, exposed)
         )
         
