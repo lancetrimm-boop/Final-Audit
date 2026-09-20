@@ -104,6 +104,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -182,7 +183,9 @@ fun MediaDetailScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var isControlsVisible by remember { mutableStateOf(true) }
-    var isPlaying by remember { mutableStateOf(false) }
+    var isPlaying by rememberSaveable { mutableStateOf(false) }
+    var wasPlayingBeforeRotation by rememberSaveable { mutableStateOf(false) }
+    var isFirstLaunch by rememberSaveable { mutableStateOf(true) }
     var currentPositionMs by remember { mutableFloatStateOf(0f) }
     var durationMs by remember { mutableFloatStateOf(1000f) }
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
@@ -191,7 +194,7 @@ fun MediaDetailScreen(
 
     // Use internal tracking for the current item to ensure it stays in sync with ExoPlayer's playlist
     // Task 3: Keyed by playlistState to ensure index resets when a new playlist (like See Similar) is established.
-    var currentItemIndex by remember(playlistState) { 
+    var currentItemIndex by rememberSaveable(playlistState?.authoritativeMediaId) { 
         mutableIntStateOf(playlistState?.currentIndex ?: 0) 
     }
     
@@ -344,9 +347,13 @@ fun MediaDetailScreen(
                     
                     // AURA PHASE 2: Reset position when moving to a new item in the playlist
                     if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
-                        reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK ||
-                        reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                        reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
                         repository.updatePlaybackPosition(0L)
+                    } else if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                        // Guard: Only reset if we transitioned to a DIFFERENT item
+                        if (transitionedId != activeItem.id) {
+                            repository.updatePlaybackPosition(0L)
+                        }
                     }
                     
                     Log.d("PlaylistTrace", "Player transitioned to original index: $originalIndex, reason: $reason")
@@ -392,6 +399,7 @@ fun MediaDetailScreen(
                 Lifecycle.Event.ON_PAUSE -> {
                     // Save position and pause immediately on background
                     if (isVideo) {
+                        wasPlayingBeforeRotation = exoPlayer.playWhenReady
                         repository.updatePlaybackPosition(exoPlayer.currentPosition)
                         repository.setResumingFromBackground(true)
                         exoPlayer.pause()
@@ -489,14 +497,19 @@ fun MediaDetailScreen(
                 }
 
                 // AURA PHASE 2: Check if we are resuming to determine initial seek and playWhenReady
-                val startPos = if (repository.isResumingFromBackground) repository.lastPlaybackPositionMs else 0L
+                val isResuming = repository.isResumingFromBackground || !isFirstLaunch
+                val startPos = if (isResuming) repository.lastPlaybackPositionMs else 0L
                 val targetVideoIndex = videoOnlyItems.indexOfFirst { it.id == activeItem.id }.coerceAtLeast(0)
                 
                 exoPlayer.setMediaItems(media3Items, targetVideoIndex, startPos)
                 exoPlayer.prepare()
                 
-                // Requirements: Do NOT autoplay on resume
-                exoPlayer.playWhenReady = !repository.isResumingFromBackground
+                // Requirements: Do NOT autoplay on background resume, but preserve state on rotation
+                exoPlayer.playWhenReady = if (isFirstLaunch) true else wasPlayingBeforeRotation
+                
+                // Reset flags once handled
+                wasPlayingBeforeRotation = false
+                isFirstLaunch = false
             } else {
                 // 2. Just synchronize index if playlist is already correctly loaded
                 val targetVideoIndex = videoOnlyItems.indexOfFirst { it.id == activeItem.id }

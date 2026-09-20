@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -347,7 +348,7 @@ fun AuraMainContent(repository: MediaRepository) {
         }
     }
 
-    var currentRoute by remember { mutableStateOf(NavDestination.LIBRARY.route) }
+    var currentRoute by rememberSaveable { mutableStateOf(NavDestination.LIBRARY.route) }
     var currentImprovementId by remember { mutableStateOf<String?>(null) }
     var currentFindingId by remember { mutableStateOf<String?>(null) }
     var showImprovementDetail by remember { mutableStateOf(false) }
