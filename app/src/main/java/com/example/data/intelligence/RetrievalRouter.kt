@@ -105,7 +105,11 @@ class RetrievalRouter(
                                 .mapIndexed { index, item -> item.copy(rank = index + 1) }
                         }
                         vector != null -> provider.retrieveVisualCandidates(vector, request.limit * 2, 0.15f)
-                        query != null && query.isNotBlank() -> provider.retrieveVisualCandidates(query, request.limit * 2, 0.15f)
+                        // AURA REPAIR: Only invoke text-to-visual if the query is a simple text request 
+                        // and we have no visual vectors (prevent invalid type relay for multimodal)
+                        query != null && query.isNotBlank() && request.queryVectors == null -> {
+                            provider.retrieveVisualCandidates(query, request.limit * 2, 0.15f)
+                        }
                         else -> emptyList()
                     }
                     com.example.data.intelligence.DecisionTraceCollector.logEvent(

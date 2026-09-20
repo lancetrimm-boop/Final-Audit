@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -212,6 +214,11 @@ fun LibraryContent(
     // Multi-select state
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
+
+    // AURA REPAIR: Bug A - UI-owned search input state to prevent typing corruption
+    var searchFieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(state.searchRequest.query ?: ""))
+    }
 
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = libraryScrollIndex,
@@ -420,10 +427,11 @@ fun LibraryContent(
                 )
             } else if (isSearchActive) {
                 SearchHeader(
-                    searchRequest = state.searchRequest,
                     activeReferences = state.activeVisualReferences,
+                    textFieldValue = searchFieldValue,
                     onQueryChange = { 
-                        onSearchQueryChange(it)
+                        searchFieldValue = it
+                        onSearchQueryChange(it.text)
                     },
                     onImageSearchClick = {
                         visualSearchLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -433,6 +441,7 @@ fun LibraryContent(
                     },
                     onExit = { 
                         isSearchActive = false
+                        searchFieldValue = TextFieldValue("")
                         onClearSearch()
                     }
                 )
@@ -582,6 +591,7 @@ fun LibraryContent(
                             isStillProcessing = state.searchError == "STILL_PROCESSING",
                             onClearSearch = {
                                 isSearchActive = false
+                                searchFieldValue = TextFieldValue("")
                                 onClearSearch()
                             }
                         )
@@ -889,9 +899,9 @@ private fun SelectionHeader(
 
 @Composable
 private fun SearchHeader(
-    searchRequest: SearchRequest,
     activeReferences: List<MediaItem>,
-    onQueryChange: (String) -> Unit,
+    textFieldValue: TextFieldValue,
+    onQueryChange: (TextFieldValue) -> Unit,
     onImageSearchClick: () -> Unit,
     onRemoveReference: (Int) -> Unit,
     onExit: () -> Unit
@@ -979,15 +989,8 @@ private fun SearchHeader(
                 }
             }
 
-            val query = when (searchRequest) {
-                is SearchRequest.Text -> searchRequest.query ?: ""
-                is SearchRequest.Compound -> searchRequest.query ?: ""
-                is SearchRequest.MultiVisual -> searchRequest.query ?: ""
-                else -> ""
-            }
-            
             TextField(
-                value = query,
+                value = textFieldValue,
                 onValueChange = onQueryChange,
                 modifier = Modifier.weight(1f),
                 placeholder = { 

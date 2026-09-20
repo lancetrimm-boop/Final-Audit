@@ -589,7 +589,15 @@ class AuraIntelligenceCore(
 
         // AURA SEARCH REPAIR 3.4: Use principled precision threshold from config
         val config = HybridSearchConfig()
-        val precisionThreshold = config.minSemanticSimilarity
+        
+        // AURA REPAIR: Distinguish threshold by query modality (Bug B Fix)
+        val isTextSearch = request.query != null && request.query.isNotBlank()
+        val precisionThreshold = if (isTextSearch && request.queryVectors == null && request.visualVector != null) {
+            // Text-only mode (even if CLIP vector resolved, it's text-derived)
+            config.minTextSemanticSimilarity
+        } else {
+            config.minSemanticSimilarity
+        }
 
         DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.SCORING_COMPLETED, "Threshold: $precisionThreshold")
 
@@ -597,13 +605,19 @@ class AuraIntelligenceCore(
             val item = collector.timeDatabase { repository.getMediaItemById(fusedCandidate.mediaId) } ?: return@mapNotNull null
             if (!isItemVisibleInLibrary(item)) return@mapNotNull null
             
-            // Precision Gate: Items must exceed precision threshold (0.35f) in at least one neural channel 
-            // OR be authoritative lexical matches (exact filename).
+            val keywordScore = fusedCandidate.channelScores[SearchChannel.KEYWORD] ?: 0f
+            
+            // Precision Gate: Items must exceed precision threshold in at least one neural channel 
+            // OR be authoritative lexical matches (exact filename) 
+            // OR have strong substring keyword matches (Bug B Fix).
             val maxNeuralSimilarity = fusedCandidate.channelScores.filter { (channel, _) ->
                 channel == SearchChannel.SEMANTIC_CONTENT || channel == SearchChannel.SEMANTIC_VISUAL
             }.values.maxOrNull() ?: 0f
 
-            if (maxNeuralSimilarity < precisionThreshold && !fusedCandidate.isAuthoritative) {
+            val passesNeuralGate = maxNeuralSimilarity >= precisionThreshold
+            val passesLexicalGate = fusedCandidate.isAuthoritative || (isTextSearch && keywordScore >= 70f)
+
+            if (!passesNeuralGate && !passesLexicalGate) {
                 return@mapNotNull null
             }
 

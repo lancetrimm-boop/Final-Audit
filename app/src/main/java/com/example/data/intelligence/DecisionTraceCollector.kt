@@ -1,5 +1,6 @@
 package com.example.data.intelligence
 
+import android.util.Log
 import com.example.ui.models.DecisionTrace
 import com.example.ui.models.TraceEvent
 import com.example.ui.models.TraceEventType
@@ -16,13 +17,19 @@ object DecisionTraceCollector {
 
     fun startTrace(requestId: String, surface: String) {
         if (!com.example.BuildConfig.ENABLE_DEVELOPER_TOOLS) return
-        traces[requestId] = mutableListOf(TraceEvent(type = TraceEventType.REQUEST_RECEIVED, detail = "Surface: $surface"))
+        val event = TraceEvent(type = TraceEventType.REQUEST_RECEIVED, detail = "Surface: $surface")
+        traces[requestId] = mutableListOf(event)
         traceMetadata[requestId] = surface
+        Log.i("AURA_INTEL_TRACE", "[$requestId] ${event.type.name}: ${event.detail}")
     }
 
     fun logEvent(requestId: String, type: TraceEventType, detail: String = "", metadata: Map<String, String> = emptyMap()) {
         if (!com.example.BuildConfig.ENABLE_DEVELOPER_TOOLS) return
-        traces[requestId]?.add(TraceEvent(type = type, detail = detail, metadata = metadata))
+        val event = TraceEvent(type = type, detail = detail, metadata = metadata)
+        traces[requestId]?.add(event)
+        
+        val metaStr = if (metadata.isNotEmpty()) " | metadata=$metadata" else ""
+        Log.i("AURA_INTEL_TRACE", "[$requestId] ${event.type.name}: ${event.detail}$metaStr")
     }
 
     fun getTrace(requestId: String): DecisionTrace? {

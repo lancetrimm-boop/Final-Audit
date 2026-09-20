@@ -184,6 +184,7 @@ data class HybridSearchConfig(
     ),
     val topK: Int = 40,
     val minSemanticSimilarity: Float = 0.35f,
+    val minTextSemanticSimilarity: Float = 0.18f,
     val minNeuralRetrievalSimilarity: Float = 0.15f
 ) {
     init {
