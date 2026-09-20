@@ -76,6 +76,7 @@ import com.example.data.CompareMediaTypeFilter
 import com.example.data.CompareStrategy
 import com.example.data.CompareSortOption
 import com.example.ui.models.LibraryItemUi
+import com.example.ui.models.toLibraryItemUi
 import java.util.UUID
 import kotlin.random.Random
 
@@ -325,6 +326,27 @@ class MediaRepository(
     val safeDeleteManager = com.example.data.cleanup.SafeDeleteManager(this, scope)
     var visualContextEngine = com.example.data.visual.VisualContextEngine(this)
     private var applicationContext: Context? = null
+
+    private val _latestPerformance = MutableStateFlow<com.example.data.intelligence.OperationPerformance?>(null)
+    val latestPerformance: StateFlow<com.example.data.intelligence.OperationPerformance?> = _latestPerformance.asStateFlow()
+
+    private val _latestLibraryProvenance = MutableStateFlow<Map<String, com.example.ui.models.DecisionProvenance>>(emptyMap())
+    val latestLibraryProvenance: StateFlow<Map<String, com.example.ui.models.DecisionProvenance>> = _latestLibraryProvenance.asStateFlow()
+
+    private val _latestDiscoverProvenance = MutableStateFlow<Map<String, com.example.ui.models.DecisionProvenance>>(emptyMap())
+    val latestDiscoverProvenance: StateFlow<Map<String, com.example.ui.models.DecisionProvenance>> = _latestDiscoverProvenance.asStateFlow()
+
+    fun reportPerformance(perf: com.example.data.intelligence.OperationPerformance) {
+        _latestPerformance.value = perf
+    }
+
+    fun reportLibraryProvenance(provenance: Map<String, com.example.ui.models.DecisionProvenance>) {
+        _latestLibraryProvenance.value = provenance
+    }
+
+    fun reportDiscoverProvenance(provenance: Map<String, com.example.ui.models.DecisionProvenance>) {
+        _latestDiscoverProvenance.value = provenance
+    }
 
     private val _databaseState = MutableStateFlow(DatabaseState.NOT_INITIALIZED)
     val databaseState: StateFlow<DatabaseState> = _databaseState.asStateFlow()
@@ -962,6 +984,51 @@ class MediaRepository(
         .flowOn(dispatcher)
         .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Phase 3: Consumer Mirror Presentation Streams
+    val latestLibraryPresentation: StateFlow<com.example.ui.models.LibraryPresentationState> = combine(
+        listOf(
+            mediaItems,
+            libraryFilterFlow,
+            activeSortCategory,
+            selectedStandardSort,
+            selectedIntelligentSort,
+            librarySearchRequest,
+            searchErrorMessage,
+            latestLibraryProvenance
+        )
+    ) { array ->
+        com.example.ui.models.LibraryPresentationState(
+            mediaItems = array[0] as List<MediaItem>,
+            selectedFilter = array[1] as String,
+            activeCategory = array[2] as SortCategory,
+            standardSort = array[3] as StandardSortOption,
+            intelligentSort = array[4] as IntelligentSortOption,
+            searchRequest = array[5] as com.example.data.semantic.SearchRequest,
+            searchError = array[6] as String?,
+            activeVisualReferences = activeVisualReferences.value,
+            aiState = aiState.value,
+            dbState = databaseState.value,
+            importProgress = importProgress.value,
+            scanProgress = scanProgress.value,
+            provenanceMap = array[7] as Map<String, com.example.ui.models.DecisionProvenance>
+        )
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), com.example.ui.models.LibraryPresentationState(emptyList()))
+
+    val latestDiscoverPresentation: StateFlow<com.example.ui.models.DiscoverPresentationState> = combine(
+        tasteDNA,
+        preferenceProfile,
+        discoveryPolicy,
+        latestDiscoverProvenance
+    ) { dna, profile, policy, provenance ->
+        com.example.ui.models.DiscoverPresentationState(
+            obsessions = emptyList(), // Success snapshot handled in DiscoverViewModel for now
+            tasteDNA = dna,
+            preferenceProfile = profile,
+            discoveryPolicy = policy,
+            provenanceMap = provenance
+        )
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), com.example.ui.models.DiscoverPresentationState())
+
     /**
      * REACTIVE INTELLIGENT FAVORITES (Update 9 Consolidation)
      * Provides a grouped and ranked view of favorites that updates instantly on interaction.
@@ -1014,22 +1081,6 @@ class MediaRepository(
     .flowOn(dispatcher)
     .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private fun MediaItem.toLibraryItemUi(): LibraryItemUi {
-        return LibraryItemUi(
-            id = id,
-            title = title,
-            mediaType = mediaType,
-            imageUrl = imageUrl,
-            uriPath = uriPath,
-            duration = duration,
-            selectionReason = selectionReason
-        )
-    }
-
-    /**
-     * Sets the active playlist using the current pre-sorted library items.
-     * AURA PHASE 1: Accepts the explicit list from the UI to ensure sync.
-     */
     fun setLibraryPlaylist(items: List<MediaItem>, initialIndex: Int) {
         setPlaylist(items, initialIndex, "Library")
     }
@@ -1257,8 +1308,12 @@ class MediaRepository(
             Log.d("AURA_AI_INIT", "Starting AI background initialization...")
 
             aiInitJob = scope.launch(Dispatchers.IO) {
+                Log.d("AURA_AI_INIT", "AI background coroutine active.")
                 try {
-                    val db = database ?: return@launch
+                    val db = database ?: run {
+                        Log.e("AURA_AI_INIT", "Database is NULL, aborting AI init.")
+                        return@launch
+                    }
                     
                     // 1. MiniLM ONNX activation
                     _aiState.value = AIState.LOADING_MODELS
@@ -1294,7 +1349,25 @@ class MediaRepository(
                         Log.e("AURA_AI_INIT", "Semantic index reconstruction failed", e)
                     }
 
-                    // 2. MobileCLIP activation
+                    // 2. Core Intelligence Activation (Early Path)
+                    // Move this before MobileCLIP to ensure Gate readiness even if multimodal fails
+                    try {
+                        val lexicalRetriever = ProductionLexicalRetriever()
+                        intelligenceCore = com.example.data.intelligence.AuraIntelligenceCore(
+                            repository = this@MediaRepository,
+                            retrievalRouter = com.example.data.intelligence.RetrievalRouter(
+                                lexicalRetriever = lexicalRetriever,
+                                semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
+                                visualProvider = null
+                            )
+                        )
+                        hybridSearchEngine = DefaultHybridSearchEngine(intelligenceCore!!)
+                        Log.i("AURA_AI_INIT", "Aura Intelligence Core activated (Early Path).")
+                    } catch (e: Exception) {
+                        Log.e("AURA_AI_INIT", "Early Core activation failed", e)
+                    }
+
+                    // 3. MobileCLIP activation (Multimodal Upgrade)
                     try {
                         val mobileClipPath = com.example.util.ModelAssetLoader.getLocalPath(context, "models/mobileclip_s0_image.onnx")
                         val mobileClipEngine = OnnxRuntimeMobileCLIPInferenceEngine(modelPath = mobileClipPath)
@@ -1330,21 +1403,12 @@ class MediaRepository(
                             semanticCandidateRetriever
                         )
                         
-                        // Final Unified Core (Stage 2: Multimodal Router)
-                        val lexicalRetriever = ProductionLexicalRetriever()
-                        intelligenceCore = com.example.data.intelligence.AuraIntelligenceCore(
-                            repository = this@MediaRepository,
-                            retrievalRouter = com.example.data.intelligence.RetrievalRouter(
-                                lexicalRetriever = lexicalRetriever,
-                                semanticProvider = semanticSearchService as? com.example.data.intelligence.SemanticRetrievalProvider,
-                                visualProvider = mobileClipVisualRetriever as? com.example.data.intelligence.VisualRetrievalProvider
-                            )
-                        )
-                        hybridSearchEngine = DefaultHybridSearchEngine(intelligenceCore!!)
-                        Log.i("AURA_AI_INIT", "Unified Intelligence Core activated.")
+                        // Upgrade Core to Multimodal
+                        intelligenceCore?.retrievalRouter?.visualProvider = mobileClipVisualRetriever as? com.example.data.intelligence.VisualRetrievalProvider
+                        Log.i("AURA_AI_INIT", "Unified Intelligence Core upgraded to MULTIMODAL.")
 
                     } catch (e: Exception) {
-                        Log.e("AURA_AI_INIT", "MobileCLIP activation failed", e)
+                        Log.e("AURA_AI_INIT", "MobileCLIP activation failed (Visual Search Disabled)", e)
                     }
 
                     _aiState.value = AIState.READY
@@ -4150,7 +4214,9 @@ stats ->
             // DELEGATE TO CORE (Update 9 Consolidation)
             val core = intelligenceCore
             if (core != null) {
+                val requestId = "lib_sort_${System.currentTimeMillis()}"
                 val request = com.example.data.intelligence.IntelligenceRequest(
+                    requestId = requestId,
                     mode = com.example.data.intelligence.IntelligenceMode.SORT,
                     sortOption = intelligentSort.name,
                     filterType = filterType,
@@ -4164,6 +4230,18 @@ stats ->
                 )
                 val response = core.processRequest(request)
                 if (response.isSuccess) {
+                    val trace = com.example.data.intelligence.DecisionTraceCollector.getTrace(requestId)
+                    val provenanceMap = response.candidates.associate { candidate ->
+                        candidate.item.id to com.example.ui.models.DecisionProvenance(
+                            rankScore = candidate.rankScore,
+                            primaryRelevance = candidate.primaryRelevanceScore,
+                            secondaryEvidence = candidate.secondaryEvidenceScore,
+                            provenanceSummary = candidate.provenance,
+                            evidence = candidate.evidence,
+                            trace = trace
+                        )
+                    }
+                    reportLibraryProvenance(provenanceMap)
                     return response.candidates.map { it.item }
                 }
             }

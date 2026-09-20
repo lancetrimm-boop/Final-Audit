@@ -135,9 +135,10 @@ fun AuraBottomNavigation(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = destination.title,
-                                    fontSize = 9.sp,
+                                    fontSize = 8.sp,
                                     fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold, // Bolder
-                                    color = if (isSelected) AuraMidnight else AuraSlate // Darker unselected text
+                                    color = if (isSelected) DiscoveryViolet else AuraSlate, // Darker unselected text
+                                    maxLines = 1
                                 )
                             }
                             

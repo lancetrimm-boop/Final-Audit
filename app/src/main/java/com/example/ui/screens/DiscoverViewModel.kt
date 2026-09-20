@@ -224,6 +224,7 @@ class DiscoverViewModel(
                 val batch = sessionManager.realizeBatch(
                     repository, obsession, items, dna, profile, policy, stats, creators
                 )
+                repository.reportDiscoverProvenance(batch.provenanceMap)
                 _detailState.value = ObsessionDetailState.Active(obsession, batch, false)
             } catch (e: Exception) {
                 _detailState.value = ObsessionDetailState.Idle
@@ -269,6 +270,7 @@ class DiscoverViewModel(
                     repository, currentState.obsession, items, dna, profile, policy, stats, creators,
                     existingItems = currentState.batch.items
                 )
+                repository.reportDiscoverProvenance(expandedBatch.provenanceMap)
                 _detailState.value = currentState.copy(batch = expandedBatch, isLoading = false)
             } catch (e: Exception) {
                 _detailState.value = currentState.copy(isLoading = false)

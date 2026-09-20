@@ -77,16 +77,22 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         // [REMEDIATION] Startup Watchdog (P0)
-        // If the database is not ready within 12 seconds, we transition to a recovery state.
+        // If the database is not ready within the timeout, we transition to a recovery state.
+        // We use a longer timeout (30s) in Developer Builds to account for background model loading on emulators.
         lifecycleScope.launch {
-            kotlinx.coroutines.delay(12000)
+            val timeout = if (com.example.BuildConfig.ENABLE_DEVELOPER_TOOLS) 30000L else 12000L
+            kotlinx.coroutines.delay(timeout)
             if (repository.databaseState.value != DatabaseState.READY) {
-                Log.w("AuraWatchdog", "Initialization timeout reached (12s). Triggering recovery UI.")
+                Log.w("AuraWatchdog", "Initialization timeout reached (${timeout / 1000}s). Triggering recovery UI.")
                 repository.forceTimeoutState()
             }
         }
 
         repository.initDatabase(applicationContext)
+        if (com.example.BuildConfig.ENABLE_DEVELOPER_TOOLS) {
+            com.example.ui.models.BaselineManager.initialize(applicationContext)
+            com.example.ui.models.RegressionArtifactManager.initialize(applicationContext)
+        }
         enableEdgeToEdge()
         setContent {
             AuraTheme {
@@ -619,6 +625,9 @@ fun AuraMainContent(repository: MediaRepository) {
                                 },
                                 onScanDevice = {
                                     repository.scanLocalMedia(context, isManual = true)
+                                },
+                                onSyncClick = {
+                                    currentRoute = NavDestination.INTELLIGENCE.route
                                 },
                                 deleteLauncher = deleteRequestLauncher
                             )

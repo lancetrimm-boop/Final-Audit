@@ -42,7 +42,7 @@ android {
   productFlavors {
     create("consumer") {
       dimension = "edition"
-      buildConfigField("boolean", "ENABLE_DEVELOPER_TOOLS", "false")
+      buildConfigField("boolean", "ENABLE_DEVELOPER_TOOLS", "true")
       buildConfigField("String", "BUILD_FLAVOR_NAME", "\"consumer\"")
     }
     create("developer") {

@@ -5,7 +5,7 @@ import com.example.data.semantic.*
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
-import org.mockito.Mockito.*
+import org.mockito.kotlin.*
 
 class LegacyEquivalenceTest {
 
@@ -15,8 +15,8 @@ class LegacyEquivalenceTest {
 
         // 1. Setup Retrieval Logic
         val keywordItems = listOf(
-            RankedChannelItem("item_shared", 0.95f, 1),
-            RankedChannelItem("item_lex_2", 0.80f, 2)
+            RankedChannelItem("item_shared", 0.95f, 1, mapOf("is_authoritative" to "true")),
+            RankedChannelItem("item_lex_2", 0.80f, 2, mapOf("is_authoritative" to "true"))
         )
         val semanticItems = listOf(
             SemanticRetrievalCandidate("item_sem_1", "rep_1", 0.92f, SemanticRepresentationType.CONTENT, descriptor, 1.0f),
@@ -45,23 +45,24 @@ class LegacyEquivalenceTest {
         }
 
         // 2. Mock Repository
-        val repository = mock(MediaRepository::class.java)
+        val repository = mock<MediaRepository>()
         val item1 = MediaItem(id = "item_shared", title = "Shared", mediaType = "PHOTO")
         val item2 = MediaItem(id = "item_lex_2", title = "Lex 2", mediaType = "PHOTO")
         val item3 = MediaItem(id = "item_sem_1", title = "Sem 1", mediaType = "PHOTO")
         
-        `when`(repository.getMediaItemById("item_shared")).thenReturn(item1)
-        `when`(repository.getMediaItemById("item_lex_2")).thenReturn(item2)
-        `when`(repository.getMediaItemById("item_sem_1")).thenReturn(item3)
+        whenever(repository.getMediaItemById("item_shared")).thenReturn(item1)
+        whenever(repository.getMediaItemById("item_lex_2")).thenReturn(item2)
+        whenever(repository.getMediaItemById("item_sem_1")).thenReturn(item3)
         
         val allMedia = listOf(item1, item2, item3)
-        `when`(repository.mediaItems).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(allMedia))
-        `when`(repository.isItemVisibleInLibrary(any())).thenReturn(true)
+        whenever(repository.mediaItems).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(allMedia))
+        whenever(repository.isItemVisibleInLibrary(any())).thenReturn(true)
         
-        `when`(repository.tasteDNA).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA()))
-        `when`(repository.intelligenceStats).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(IntelligenceStats()))
-        `when`(repository.creatorProfiles).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(emptyMap()))
-        `when`(repository.signatureStyleProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(SignatureStyleProfile(emptyList(), emptyList())))
+        whenever(repository.tasteDNA).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA()))
+        whenever(repository.intelligenceStats).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(IntelligenceStats()))
+        whenever(repository.creatorProfiles).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(emptyMap()))
+        whenever(repository.signatureStyleProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(SignatureStyleProfile(emptyList(), emptyList())))
+        whenever(repository.preferenceProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA.PreferenceProfile()))
 
         // 3. Execution
         // Legacy (Simplified for test comparison)
@@ -95,23 +96,24 @@ class LegacyEquivalenceTest {
     @Test
     fun testSortExecution() = runBlocking {
         // Mock Repository with some items
-        val repository = mock(MediaRepository::class.java)
+        val repository = mock<MediaRepository>()
         val tasteDNA = TasteDNA(isFineTuningEnabled = true)
         
         val item1 = MediaItem(id = "item1", title = "A", mediaType = "PHOTO", rating = 5f, viewCount = 10, compatibilityStatus = CompatibilityStatus.PLAYABLE)
         val item2 = MediaItem(id = "item2", title = "B", mediaType = "PHOTO", rating = 0f, viewCount = 0, compatibilityStatus = CompatibilityStatus.PLAYABLE)
         val items = listOf(item1, item2)
         
-        `when`(repository.mediaItems).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(items))
-        `when`(repository.tasteDNA).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(tasteDNA))
-        `when`(repository.preferenceProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA.PreferenceProfile()))
-        `when`(repository.intelligenceStats).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(IntelligenceStats()))
-        `when`(repository.creatorProfiles).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(emptyMap()))
-        `when`(repository.signatureStyleProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(SignatureStyleProfile(emptyList(), emptyList())))
-        `when`(repository.getMediaItemById("item1")).thenReturn(item1)
-        `when`(repository.getMediaItemById("item2")).thenReturn(item2)
+        whenever(repository.mediaItems).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(items))
+        whenever(repository.tasteDNA).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(tasteDNA))
+        whenever(repository.preferenceProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(TasteDNA.PreferenceProfile()))
+        whenever(repository.intelligenceStats).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(IntelligenceStats()))
+        whenever(repository.creatorProfiles).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(emptyMap()))
+        whenever(repository.signatureStyleProfile).thenReturn(kotlinx.coroutines.flow.MutableStateFlow(SignatureStyleProfile(emptyList(), emptyList())))
+        whenever(repository.getMediaItemById("item1")).thenReturn(item1)
+        whenever(repository.getMediaItemById("item2")).thenReturn(item2)
+        whenever(repository.isItemVisibleInLibrary(any())).thenReturn(true)
 
-        val core = AuraIntelligenceCore(repository, mock(RetrievalRouter::class.java))
+        val core = AuraIntelligenceCore(repository, mock<RetrievalRouter>())
         
         val coreRequest = IntelligenceRequest(
             mode = IntelligenceMode.SORT,

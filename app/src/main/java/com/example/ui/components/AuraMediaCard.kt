@@ -118,7 +118,8 @@ fun AuraMediaTile(
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
     isSelectionMode: Boolean = false,
-    locationTag: String = "grid"
+    locationTag: String = "grid",
+    rankScore: Double? = null
 ) {
     val haptic = LocalHapticFeedback.current
     var showDoubleTapHeart by remember { mutableStateOf(false) }
@@ -171,6 +172,25 @@ fun AuraMediaTile(
             modifier = Modifier.fillMaxSize(),
             locationTag = locationTag
         )
+
+        // Phase 4: Developer Diagnostic Badge
+        if (com.example.BuildConfig.ENABLE_DEVELOPER_TOOLS && rankScore != null) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp),
+                color = Color.Black.copy(alpha = 0.7f),
+                shape = RoundedCornerShape(4.dp)
+            ) {
+                Text(
+                    text = "%.2f".format(rankScore),
+                    color = Color.Green,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                )
+            }
+        }
 
         // Video Duration Badge (Functional Context)
         val isVideo = item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("Movie", ignoreCase = true)

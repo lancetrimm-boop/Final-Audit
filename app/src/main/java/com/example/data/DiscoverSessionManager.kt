@@ -74,8 +74,10 @@ class DiscoverSessionManager {
         val isFirstBatch = existingItems.isEmpty()
         val baseItems = if (isFirstBatch) obsession.previewItems else existingItems
 
+        val requestId = "discover_batch_${System.currentTimeMillis()}"
         val candidateBatch = if (core != null) {
             val request = com.example.data.intelligence.IntelligenceRequest(
+                requestId = requestId,
                 mode = com.example.data.intelligence.IntelligenceMode.DISCOVER,
                 contextualIntent = com.example.data.intelligence.ContextualIntent.DISCOVER_CATEGORY,
                 limit = 50, // Request larger pool for session filtering
@@ -99,12 +101,24 @@ class DiscoverSessionManager {
 
         val combinedItems = baseItems + items
         
-        // Generate explanations for the new items in the batch
+        // Generate explanations and provenance for the new items in the batch
         val batchExplanations = mutableMapOf<String, RecommendationExplanation>()
+        val provenanceMap = mutableMapOf<String, com.example.ui.models.DecisionProvenance>()
         
+        val trace = com.example.data.intelligence.DecisionTraceCollector.getTrace(requestId)
+
         candidateBatch.forEach { candidate ->
             val exp = RecommendationExplanationGenerator.generate(candidate, tasteDNA)
             if (exp != null) batchExplanations[candidate.item.id] = exp
+            
+            provenanceMap[candidate.item.id] = com.example.ui.models.DecisionProvenance(
+                rankScore = candidate.rankScore,
+                primaryRelevance = candidate.primaryRelevanceScore,
+                secondaryEvidence = candidate.secondaryEvidenceScore,
+                provenanceSummary = candidate.provenance,
+                evidence = candidate.evidence,
+                trace = trace
+            )
         }
 
         ObsessionContentBatch(
@@ -112,7 +126,8 @@ class DiscoverSessionManager {
             items = combinedItems,
             canExpand = items.size >= 12,
             batchIndex = if (isFirstBatch) 0 else combinedItems.size / 12,
-            explanations = batchExplanations
+            explanations = batchExplanations,
+            provenanceMap = provenanceMap
         )
     }
 
@@ -150,6 +165,7 @@ data class ObsessionContentBatch(
     val items: List<MediaItem>,
     val canExpand: Boolean,
     val batchIndex: Int = 0,
-    val explanations: Map<String, RecommendationExplanation> = emptyMap()
+    val explanations: Map<String, RecommendationExplanation> = emptyMap(),
+    val provenanceMap: Map<String, com.example.ui.models.DecisionProvenance> = emptyMap()
 )
 

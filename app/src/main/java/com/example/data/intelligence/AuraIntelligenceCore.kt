@@ -13,55 +13,132 @@ import kotlin.math.abs
  */
 class AuraIntelligenceCore(
     private val repository: MediaRepository,
-    private val retrievalRouter: RetrievalRouter,
+    internal val retrievalRouter: RetrievalRouter,
     private val reranker: MultimodalReranker = VideoIntelligenceReranker()
 ) {
+    private class PerformanceCollector {
+        var databaseMs: Long = 0
+        var inferenceMs: Long = 0
+        
+        inline fun <T> timeDatabase(block: () -> T): T {
+            val start = System.currentTimeMillis()
+            return try { block() } finally { databaseMs += System.currentTimeMillis() - start }
+        }
+
+        inline fun <T> timeInference(block: () -> T): T {
+            val start = System.currentTimeMillis()
+            return try { block() } finally { inferenceMs += System.currentTimeMillis() - start }
+        }
+    }
+
     /**
      * Processes a generalized intelligence request.
      */
     suspend fun processRequest(request: IntelligenceRequest): IntelligenceResponse = withContext(Dispatchers.Default) {
+        DecisionTraceCollector.startTrace(request.requestId, request.mode.name)
+        
         // 0. Cache Lookup
-        IntelligenceCache.getResponse(request)?.let { return@withContext it }
+        if (!request.skipPersistence) {
+            IntelligenceCache.getResponse(request)?.let { 
+                DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.FUSION_COMPLETED, "Cache Hit")
+                repository.reportPerformance(OperationPerformance(
+                    operationName = "${request.mode}:${request.sortOption ?: "Generic"}",
+                    totalDurationMs = 0, // Instant
+                    cacheHit = true
+                ))
+                return@withContext it 
+            }
+        }
 
+        val collector = PerformanceCollector()
         val startTime = System.currentTimeMillis()
+        var intelligenceStartTime = 0L
+        var intelligenceDuration = -1L
         
         try {
+            intelligenceStartTime = System.currentTimeMillis()
             val candidates = when(request.mode) {
-                IntelligenceMode.SEARCH -> handleSearch(request)
-                IntelligenceMode.SORT -> handleSort(request)
-                IntelligenceMode.SIMILAR -> handleSimilar(request)
-                IntelligenceMode.DISCOVER -> handleDiscover(request)
+                IntelligenceMode.SEARCH -> handleSearch(request, collector)
+                IntelligenceMode.SORT -> handleSort(request, collector)
+                IntelligenceMode.SIMILAR -> handleSimilar(request, collector)
+                IntelligenceMode.DISCOVER -> handleDiscover(request, collector)
             }
-
-            val sealedResults = seal(candidates)
-
-            val latency = System.currentTimeMillis() - startTime
             
+            val totalLatency = System.currentTimeMillis() - startTime
+            intelligenceDuration = System.currentTimeMillis() - intelligenceStartTime
+
+            val rankingStartTime = System.currentTimeMillis()
+            val sealedResults = seal(candidates, request.requestId)
+            val topId = sealedResults.firstOrNull()?.item?.id
+            DecisionTraceCollector.logEvent(
+                request.requestId, 
+                com.example.ui.models.TraceEventType.RANK_ASSIGNED, 
+                detail = "Rank 1: ${topId?.take(8) ?: "none"}",
+                metadata = mapOf(
+                    "count" to sealedResults.size.toString(),
+                    "itemId_hash" to (topId?.hashCode()?.toString() ?: "none"),
+                    "rank" to "1"
+                )
+            )
+            val rankingDuration = System.currentTimeMillis() - rankingStartTime
+
             val response = IntelligenceResponse(
                 requestId = request.requestId,
                 mode = request.mode,
                 candidates = sealedResults,
                 visibilitySealed = true, // Mark as sealed
-                latencyMs = latency
+                latencyMs = totalLatency
             )
 
-            // 1. Cache Write
-            IntelligenceCache.putResponse(request, response)
+            DecisionTraceCollector.logEvent(
+                request.requestId, 
+                com.example.ui.models.TraceEventType.PRESENTATION_MAPPED, 
+                detail = "Response ready: ${sealedResults.size} items",
+                metadata = mapOf("count" to sealedResults.size.toString())
+            )
+
+            if (!request.skipPersistence) {
+                // 1. Cache Write
+                IntelligenceCache.putResponse(request, response)
+                
+                // 2. Report Performance
+                repository.reportPerformance(OperationPerformance(
+                    operationName = "${request.mode}:${request.sortOption ?: "Generic"}",
+                    totalDurationMs = totalLatency,
+                    intelligenceDurationMs = intelligenceDuration,
+                    rankingDurationMs = rankingDuration,
+                    databaseDurationMs = collector.databaseMs,
+                    inferenceDurationMs = collector.inferenceMs,
+                    candidateCount = candidates.size,
+                    resultCount = sealedResults.size,
+                    cacheHit = false
+                ))
+            }
             
             response
         } catch (e: Exception) {
+            val totalLatency = System.currentTimeMillis() - startTime
+            if (!request.skipPersistence) {
+                repository.reportPerformance(OperationPerformance(
+                    operationName = "${request.mode}:${request.sortOption ?: "Generic"} [FAILED]",
+                    totalDurationMs = totalLatency,
+                    intelligenceDurationMs = intelligenceDuration,
+                    databaseDurationMs = collector.databaseMs,
+                    inferenceDurationMs = collector.inferenceMs
+                ))
+            }
             IntelligenceResponse(
                 requestId = request.requestId,
                 mode = request.mode,
                 candidates = emptyList(),
-                latencyMs = System.currentTimeMillis() - startTime,
+                latencyMs = totalLatency,
                 isSuccess = false,
                 errorMessage = e.message
             )
         }
     }
 
-    private suspend fun handleSearch(request: IntelligenceRequest): List<IntelligenceCandidate> {
+    private suspend fun handleSearch(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
         // AURA SEARCH REPAIR 3.3: Resolve CLIP text vector for both retrieval AND post-retrieval reranking.
         // This ensures text-based conceptual searches (e.g. "car") can undergo deep frame analysis
         // without redundant inference.
@@ -69,20 +146,41 @@ class AuraIntelligenceCore(
         if (request.visualVector == null && request.query != null && request.query.isNotBlank()) {
             val textProvider = repository.mobileClipTextProvider
             if (textProvider != null && textProvider.isReady()) {
-                val result = textProvider.generateEmbedding(
-                    mediaId = "query_search_${request.requestId}",
-                    input = SemanticInput.Text(request.query, SemanticRepresentationType.VISUAL),
-                    sourceDataHash = "query_${request.query.hashCode()}"
-                )
+                val result = collector.timeInference {
+                    textProvider.generateEmbedding(
+                        mediaId = "query_search_${request.requestId}",
+                        input = SemanticInput.Text(request.query, SemanticRepresentationType.VISUAL),
+                        sourceDataHash = "query_${request.query.hashCode()}"
+                    )
+                }
                 if (result is EmbeddingResult.Success) {
                     searchRequest = request.copy(visualVector = result.representation.vector)
+                    DecisionTraceCollector.logEvent(
+                        request.requestId, 
+                        com.example.ui.models.TraceEventType.SCORING_COMPLETED, 
+                        detail = "Query embedding generated",
+                        metadata = mapOf("channel" to "QUERY_INFERENCE")
+                    )
                 }
             }
         }
 
-        val channelResults = retrievalRouter.retrieve(searchRequest)
+        val channelResults = collector.timeDatabase { retrievalRouter.retrieve(searchRequest) }
+        val channelNames = channelResults.keys.sortedBy { it.name }.joinToString()
+        DecisionTraceCollector.logEvent(
+            request.requestId, 
+            com.example.ui.models.TraceEventType.CANDIDATES_RETRIEVED, 
+            detail = "Channels: $channelNames",
+            metadata = mapOf("count" to channelResults.values.sumOf { it.size }.toString())
+        )
         val fusionConfig = HybridSearchConfig(topK = searchRequest.limit * 2)
         val fused = RetrievalFusion.fuse(channelResults, fusionConfig)
+        DecisionTraceCollector.logEvent(
+            request.requestId, 
+            com.example.ui.models.TraceEventType.FUSION_COMPLETED, 
+            detail = "Fused to ${fused.size} candidates",
+            metadata = mapOf("count" to fused.size.toString())
+        )
         
         // Post-retrieval Reranking (Stage 8 Video Intelligence Integration)
         val queryVector = searchRequest.visualVector
@@ -97,7 +195,9 @@ class AuraIntelligenceCore(
         }
 
         val mediaIds = topForRerank.map { it.mediaId }
-        val frames = repository.semanticRepresentationRepository?.getFramesForBatch(mediaIds) ?: emptyList()
+        val frames = collector.timeDatabase {
+            repository.semanticRepresentationRepository?.getFramesForBatch(mediaIds) ?: emptyList()
+        }
         
         // AURA REPAIR: Also include main visual representations as "frames" for reranking
         // This ensures the reranker can perform Soft Intersection on photos and video aggregate vectors too.
@@ -125,11 +225,22 @@ class AuraIntelligenceCore(
 
         val evidenceMap = allVisualEvidence.groupBy { it.mediaId }
 
+        DecisionTraceCollector.logEvent(
+            request.requestId, 
+            com.example.ui.models.TraceEventType.RERANKING_STARTED, 
+            detail = "Reranking ${topForRerank.size} candidates",
+            metadata = mapOf("count" to topForRerank.size.toString())
+        )
         val reranked = reranker.rerank(
             candidates = topForRerank,
             queryVector = queryVector,
             queryVectors = searchRequest.queryVectors, // Support multi-reference if present
             frameVectors = evidenceMap
+        )
+        DecisionTraceCollector.logEvent(
+            request.requestId, 
+            com.example.ui.models.TraceEventType.RERANKING_COMPLETED,
+            metadata = mapOf("count" to reranked.size.toString())
         )
         
         val rerankedFused = reranked.map { rc ->
@@ -142,27 +253,47 @@ class AuraIntelligenceCore(
             )
         }
 
-        val results = scoreAndRank(rerankedFused, searchRequest)
+        val results = scoreAndRank(rerankedFused, searchRequest, collector)
         
         // Update 7: Style Annotation
         val styleProfile = repository.signatureStyleProfile.value
         return results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
     }
 
-    private suspend fun handleSort(request: IntelligenceRequest): List<IntelligenceCandidate> {
-        val allItems = repository.mediaItems.value
+    private suspend fun handleSort(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
+        val allItems = request.poolOverride ?: repository.mediaItems.value
         val now = System.currentTimeMillis()
         val tasteDNA = request.tasteDNA ?: repository.tasteDNA.value
         val stats = request.stats ?: repository.intelligenceStats.value
         val creators = request.creatorProfiles ?: repository.creatorProfiles.value
         
         val items = allItems.filter { 
-            matchesFilterType(it, request.filterType) && isItemVisibleInLibrary(it) 
+            val eligible = matchesFilterType(it, request.filterType) && isItemVisibleInLibrary(it) 
+            if (!eligible) {
+                // Limit logging to avoid memory pressure on traces
+                if (allItems.indexOf(it) < 50) {
+                    DecisionTraceCollector.logEvent(
+                        request.requestId, 
+                        com.example.ui.models.TraceEventType.ELIGIBILITY_CHECK, 
+                        detail = "Dropped: ${it.id.take(8)}",
+                        metadata = mapOf("itemId_hash" to it.id.hashCode().toString(), "eligible" to "false")
+                    )
+                }
+            }
+            eligible
         }
+        
+        // Log aggregate eligibility
+        DecisionTraceCollector.logEvent(
+            request.requestId,
+            com.example.ui.models.TraceEventType.POOL_FILTERED,
+            detail = "${allItems.size} -> ${items.size} eligible",
+            metadata = mapOf("count" to items.size.toString(), "originalCount" to allItems.size.toString())
+        )
 
         val scored = when (request.sortOption) {
             "PERSONALIZED" -> {
-                val systemState = ConfidenceEngine.calculateDiscoveryState(allItems, stats)
+                val systemState = collector.timeInference { ConfidenceEngine.calculateDiscoveryState(allItems, stats) }
                 val strategy = DiscoveryPolicyManager.resolveStrategy(
                     policy = request.policy ?: DiscoveryPolicy(),
                     intent = request.intent ?: UserIntent(),
@@ -173,14 +304,28 @@ class AuraIntelligenceCore(
                 )
 
                 val recentThreshold = 3600000L // 1 hour
-                items.map { item ->
-                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
+                items.mapIndexed { index, item ->
+                    val evidence = collector.timeInference { ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now) }
                     val baseScore = ExplorationEngine.calculatePolicyScore(evidence, strategy)
                     
                     val personalScore = scorePersonalization(item, tasteDNA)
                     val evidenceItems = mutableListOf<EvidenceItem>()
                     evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "ExplorationEngine"))
                     evidenceItems.add(EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, personalScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA"))
+                    
+                    // Limit individual scoring logs to top items or first 20 to avoid trace bloat
+                    if (index < 20) {
+                        DecisionTraceCollector.logEvent(
+                            request.requestId, 
+                            com.example.ui.models.TraceEventType.SCORING_COMPLETED, 
+                            detail = "Item: ${item.id.take(8)}, Base: $baseScore",
+                            metadata = mapOf(
+                                "itemId_hash" to item.id.hashCode().toString(),
+                                "score" to baseScore.toString(),
+                                "personalScore" to personalScore.toString()
+                            )
+                        )
+                    }
                     
                     // AURA REPAIR: Soft penalties instead of hard filters
                     val isLiked = item.isFavorite || item.rating >= 4.0f
@@ -216,13 +361,13 @@ class AuraIntelligenceCore(
                     policy = request.policy ?: DiscoveryPolicy(),
                     intent = request.intent ?: UserIntent(),
                     objective = RecommendationObjective.GENERAL_DISCOVERY,
-                    systemState = ConfidenceEngine.calculateDiscoveryState(allItems, stats),
+                    systemState = collector.timeInference { ConfidenceEngine.calculateDiscoveryState(allItems, stats) },
                     tasteDNA = tasteDNA,
                     profile = request.profile ?: repository.preferenceProfile.value
                 ).copy(exploitationWeight = 0.2f, explorationWeight = 0.8f)
 
                 items.map { item ->
-                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
+                    val evidence = collector.timeInference { ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now) }
                     val baseScore = ExplorationEngine.calculatePolicyScore(evidence, strategy)
                     
                     // AURA REPAIR: Soft penalties for seen content
@@ -277,15 +422,15 @@ class AuraIntelligenceCore(
             }
             "FAVORITES" -> {
                 val favItems = items.filter { item -> item.isFavorite || item.rating >= 4.0f }
-                val likeCounts = repository.getActualLikeCounts(favItems.map { it.id })
+                val likeCounts = collector.timeDatabase { repository.getActualLikeCounts(favItems.map { it.id }) }
 
                 favItems.map { item ->
                     val likes = likeCounts[item.id] ?: 0
                     val durationSec = item.durationMs / 1000.0
-                    // Like Density: actualLikes / (durationSec + 10.0)
+                    // Like Density: actualLikes / (durationSec + 10s smoothing)
                     val likeDensity = likes.toDouble() / (durationSec + 10.0)
                     
-                    val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now)
+                    val evidence = collector.timeInference { ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now) }
                     
                     // Ranking: Primarily Like Density + Favorite Boost + DNA Alignment
                     val score = (likeDensity * 100.0) + (if (item.isFavorite) 50.0 else 0.0) + (evidence.exploitationScore * 10.0)
@@ -329,7 +474,7 @@ class AuraIntelligenceCore(
         ).take(request.limit)
     }
 
-    private suspend fun handleSimilar(request: IntelligenceRequest): List<IntelligenceCandidate> {
+    private suspend fun handleSimilar(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
         val refId = request.referenceItemId ?: return emptyList()
         val refItem = repository.getMediaItemById(refId)
         
@@ -338,7 +483,7 @@ class AuraIntelligenceCore(
         val semanticRepo = repository.semanticRepresentationRepository
         
         val visualVector = request.visualVector ?: if (provider != null && semanticRepo != null) {
-             semanticRepo.getSpecificRepresentation(refId, SemanticRepresentationType.VISUAL, provider.descriptor)?.vector
+             collector.timeDatabase { semanticRepo.getSpecificRepresentation(refId, SemanticRepresentationType.VISUAL, provider.descriptor)?.vector }
         } else null
 
         // AURA REPAIR: Identify processing delay for specific reference search
@@ -350,7 +495,7 @@ class AuraIntelligenceCore(
         
         // 2. Execute retrieval via Router (Unified Path)
         val similarRequest = request.copy(visualVector = visualVector, query = query)
-        val channelResults = retrievalRouter.retrieve(similarRequest)
+        val channelResults = collector.timeDatabase { retrievalRouter.retrieve(similarRequest) }
         
         // 3. Fusion and Ranking
         val fused = RetrievalFusion.fuse(channelResults, HybridSearchConfig(topK = request.limit * 2))
@@ -358,15 +503,15 @@ class AuraIntelligenceCore(
         // Exclude the reference item itself
         val filteredFused = fused.filter { it.mediaId != refId }
         
-        val results = scoreAndRank(filteredFused, request)
+        val results = scoreAndRank(filteredFused, request, collector)
         
         // Update 7: Style Annotation
         val styleProfile = repository.signatureStyleProfile.value
         return results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
     }
 
-    private fun handleDiscover(request: IntelligenceRequest): List<IntelligenceCandidate> {
-        val allItems = repository.mediaItems.value
+    private fun handleDiscover(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
+        val allItems = request.poolOverride ?: repository.mediaItems.value
         val itemsOnly = allItems.filter { 
             it.itemCount == null && 
             AuraMediaCompatibilityEngine.isEligibleForImport(it.compatibilityStatus) &&
@@ -409,7 +554,7 @@ class AuraIntelligenceCore(
         )
 
         return filteredItems.map { item ->
-            val evidence = ExplorationEngine.calculateEvidence(item, dna, stats, creators, now)
+            val evidence = collector.timeInference { ExplorationEngine.calculateEvidence(item, dna, stats, creators, now) }
             val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
             
             val evidenceItems = mutableListOf<EvidenceItem>()
@@ -435,7 +580,8 @@ class AuraIntelligenceCore(
 
     private fun scoreAndRank(
         fused: List<RetrievalFusion.FusedCandidate>, 
-        request: IntelligenceRequest
+        request: IntelligenceRequest,
+        collector: PerformanceCollector
     ): List<IntelligenceCandidate> {
         val tasteDNA = request.tasteDNA ?: repository.tasteDNA.value
         val stats = request.stats ?: repository.intelligenceStats.value
@@ -445,8 +591,10 @@ class AuraIntelligenceCore(
         val config = HybridSearchConfig()
         val precisionThreshold = config.minSemanticSimilarity
 
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.SCORING_COMPLETED, "Threshold: $precisionThreshold")
+
         return fused.mapNotNull { fusedCandidate ->
-            val item = repository.getMediaItemById(fusedCandidate.mediaId) ?: return@mapNotNull null
+            val item = collector.timeDatabase { repository.getMediaItemById(fusedCandidate.mediaId) } ?: return@mapNotNull null
             if (!isItemVisibleInLibrary(item)) return@mapNotNull null
             
             // Precision Gate: Items must exceed precision threshold (0.35f) in at least one neural channel 
@@ -537,9 +685,21 @@ class AuraIntelligenceCore(
         )
     }
 
-    private fun seal(candidates: List<IntelligenceCandidate>): List<IntelligenceCandidate> {
+    private fun seal(candidates: List<IntelligenceCandidate>, requestId: String): List<IntelligenceCandidate> {
         // Final Visibility Gate (Constraint: Defense-in-Depth)
-        return candidates.filter { isItemVisibleInLibrary(it.item) }
+        val sealed = candidates.filter { 
+            val visible = isItemVisibleInLibrary(it.item)
+            if (!visible) {
+                DecisionTraceCollector.logEvent(
+                    requestId, 
+                    com.example.ui.models.TraceEventType.ELIGIBILITY_CHECK, 
+                    detail = "Dropped at Seal: ${it.item.id}",
+                    metadata = mapOf("itemId" to it.item.id, "eligible" to "false", "stage" to "seal")
+                )
+            }
+            visible
+        }
+        return sealed
     }
 
     private fun scoreRelationships(

@@ -11,9 +11,9 @@ import kotlinx.coroutines.coroutineScope
  * Decouples query modality from specific retrieval implementations.
  */
 class RetrievalRouter(
-    private val lexicalRetriever: LexicalCandidateRetriever,
-    private val semanticProvider: SemanticRetrievalProvider?,
-    private val visualProvider: VisualRetrievalProvider?
+    val lexicalRetriever: LexicalCandidateRetriever,
+    val semanticProvider: SemanticRetrievalProvider?,
+    var visualProvider: VisualRetrievalProvider?
 ) {
     /**
      * Executes parallel retrieval across all available and appropriate channels.
@@ -21,12 +21,32 @@ class RetrievalRouter(
     suspend fun retrieve(request: IntelligenceRequest): Map<SearchChannel, List<RankedChannelItem>> = coroutineScope {
         val channelResults = mutableMapOf<SearchChannel, List<RankedChannelItem>>()
         
+        val modalityMetadata = mutableMapOf<String, String>()
+        modalityMetadata["mode"] = request.mode.name
+        request.query?.let { modalityMetadata["query_hash"] = it.hashCode().toString() }
+        if (request.visualVector != null) modalityMetadata["visual_modality"] = "vector"
+        if (request.queryVectors != null) modalityMetadata["visual_modality"] = "multi_vector"
+
+        com.example.data.intelligence.DecisionTraceCollector.logEvent(
+            request.requestId, 
+            com.example.ui.models.TraceEventType.CHANNEL_RETRIEVAL_START,
+            detail = "Mode: ${request.mode}, Query: ${request.query?.take(20) ?: "None"}",
+            metadata = modalityMetadata
+        )
+        
         // 1. Lexical Channel (Keyword/Metadata)
         val lexicalDeferred = async {
             val query = request.query ?: ""
             if (query.isNotBlank()) {
                 try {
-                    lexicalRetriever.retrieveKeywordCandidates(query, request.limit * 2)
+                    val results = lexicalRetriever.retrieveKeywordCandidates(query, request.limit * 2)
+                    com.example.data.intelligence.DecisionTraceCollector.logEvent(
+                        request.requestId,
+                        com.example.ui.models.TraceEventType.CHANNEL_RETRIEVAL_COMPLETE,
+                        detail = "Channel: KEYWORD, Count: ${results.size}",
+                        metadata = mapOf("channel" to "KEYWORD", "count" to results.size.toString())
+                    )
+                    results
                 } catch (e: Exception) {
                     android.util.Log.e("RetrievalRouter", "Lexical retrieval failed", e)
                     emptyList()
@@ -39,7 +59,14 @@ class RetrievalRouter(
             val query = request.query
             if (query != null && query.isNotBlank() && semanticProvider != null && semanticProvider.isReady()) {
                 try {
-                    semanticProvider.retrieveSemanticCandidates(query, request.limit * 2, 0.15f)
+                    val results = semanticProvider.retrieveSemanticCandidates(query, request.limit * 2, 0.15f)
+                    com.example.data.intelligence.DecisionTraceCollector.logEvent(
+                        request.requestId,
+                        com.example.ui.models.TraceEventType.CHANNEL_RETRIEVAL_COMPLETE,
+                        detail = "Channel: SEMANTIC_CONTENT, Count: ${results.size}",
+                        metadata = mapOf("channel" to "SEMANTIC_CONTENT", "count" to results.size.toString())
+                    )
+                    results
                 } catch (e: Exception) {
                     android.util.Log.e("RetrievalRouter", "Semantic retrieval failed", e)
                     emptyList()
@@ -49,16 +76,17 @@ class RetrievalRouter(
 
         // 3. Visual Channel (CLIP Visual)
         val visualDeferred = async {
-            if (visualProvider != null && visualProvider.isReady()) {
+            val provider = visualProvider
+            if (provider != null && provider.isReady()) {
                 try {
                     val vector = request.visualVector
                     val queryVectors = request.queryVectors
                     val query = request.query
-                    when {
+                    val results = when {
                         // Multi-Vector Union Strategy (A ∪ B ∪ C)
                         queryVectors != null && queryVectors.isNotEmpty() -> {
                             val allResults = queryVectors.flatMap { v ->
-                                visualProvider.retrieveVisualCandidates(v, request.limit, 0.15f)
+                                provider.retrieveVisualCandidates(v, request.limit, 0.15f)
                             }
                             
                             // Deduplicate and re-rank
@@ -76,10 +104,17 @@ class RetrievalRouter(
                                 .take(request.limit * 2)
                                 .mapIndexed { index, item -> item.copy(rank = index + 1) }
                         }
-                        vector != null -> visualProvider.retrieveVisualCandidates(vector, request.limit * 2, 0.15f)
-                        query != null && query.isNotBlank() -> visualProvider.retrieveVisualCandidates(query, request.limit * 2, 0.15f)
+                        vector != null -> provider.retrieveVisualCandidates(vector, request.limit * 2, 0.15f)
+                        query != null && query.isNotBlank() -> provider.retrieveVisualCandidates(query, request.limit * 2, 0.15f)
                         else -> emptyList()
                     }
+                    com.example.data.intelligence.DecisionTraceCollector.logEvent(
+                        request.requestId,
+                        com.example.ui.models.TraceEventType.CHANNEL_RETRIEVAL_COMPLETE,
+                        detail = "Channel: SEMANTIC_VISUAL, Count: ${results.size}",
+                        metadata = mapOf("channel" to "SEMANTIC_VISUAL", "count" to results.size.toString())
+                    )
+                    results
                 } catch (e: Exception) {
                     android.util.Log.e("RetrievalRouter", "Visual retrieval failed", e)
                     emptyList()

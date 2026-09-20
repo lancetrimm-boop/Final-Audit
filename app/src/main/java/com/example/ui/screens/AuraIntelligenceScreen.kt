@@ -22,6 +22,7 @@ import com.example.ui.theme.DiscoveryViolet
 
 enum class IntelligenceSection(val title: String, val isDeveloperOnly: Boolean = false) {
     OVERVIEW("Overview"),
+    CONSUMER_MIRROR("Mirror"),
     INBOX("Inbox"),
     FINDINGS("Findings"),
     IMPROVEMENTS("Recommendations"),
@@ -115,6 +116,11 @@ fun AuraIntelligenceScreen(
                         onNavigateToImprovement = onNavigateToImprovement,
                         onNavigateToFinding = onNavigateToFinding
                     ) { selectedSection = IntelligenceSection.REPORTS }
+                }
+                IntelligenceSection.CONSUMER_MIRROR -> {
+                    ConsumerMirrorScreen(
+                        repository = repository.mediaRepository
+                    )
                 }
                 IntelligenceSection.INBOX -> {
                     IntelligenceInboxScreen(

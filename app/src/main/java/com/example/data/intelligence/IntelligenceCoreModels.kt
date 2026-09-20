@@ -93,7 +93,11 @@ data class IntelligenceRequest(
     val filterType: String = "ALL",
     val explicitConstraints: Map<String, String> = emptyMap(),
     val useLegacyRanking: Boolean = false,
-    val requestId: String = java.util.UUID.randomUUID().toString().take(8)
+    val requestId: String = java.util.UUID.randomUUID().toString().take(8),
+    /** Deterministic items for developer replay. Bypasses repository access. */
+    val poolOverride: List<MediaItem>? = null,
+    /** Suppresses side effects like caching and performance reporting. */
+    val skipPersistence: Boolean = false
 )
 
 /**

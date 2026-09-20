@@ -25,11 +25,14 @@ class ProtectedBaselineVerificationTest {
 
     @Test
     fun verifyApplicationIdentity() {
-        // APPLICATION_ID must remain constant for compatibility with existing device installations
-        assertEquals(
-            "CRITICAL: Application ID has changed. This will break existing library access.",
-            "com.aistudio.auramediaplayer.v3.ppqtdt",
-            BuildConfig.APPLICATION_ID
+        // APPLICATION_ID must start with the authoritative base ID to ensure compatibility.
+        // Developer flavor is allowed to have the .developer suffix.
+        val baseId = "com.aistudio.auramediaplayer.v3.ppqtdt"
+        val actualId = BuildConfig.APPLICATION_ID
+        
+        assertTrue(
+            "CRITICAL: Application ID '$actualId' does not match authoritative base '$baseId'.",
+            actualId == baseId || actualId == "$baseId.developer"
         )
     }
 
