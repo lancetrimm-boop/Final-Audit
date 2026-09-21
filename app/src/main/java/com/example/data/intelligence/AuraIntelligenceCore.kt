@@ -14,7 +14,8 @@ import kotlin.math.abs
 class AuraIntelligenceCore(
     private val repository: MediaRepository,
     internal val retrievalRouter: RetrievalRouter,
-    private val reranker: MultimodalReranker = VideoIntelligenceReranker()
+    private val reranker: MultimodalReranker = VideoIntelligenceReranker(),
+    private val dispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default
 ) {
     private class PerformanceCollector {
         var databaseMs: Long = 0
@@ -34,7 +35,7 @@ class AuraIntelligenceCore(
     /**
      * Processes a generalized intelligence request.
      */
-    suspend fun processRequest(request: IntelligenceRequest): IntelligenceResponse = withContext(Dispatchers.Default) {
+    suspend fun processRequest(request: IntelligenceRequest): IntelligenceResponse = withContext(dispatcher) {
         DecisionTraceCollector.startTrace(request.requestId, request.mode.name)
         
         // 0. Cache Lookup
@@ -143,24 +144,38 @@ class AuraIntelligenceCore(
         // This ensures text-based conceptual searches (e.g. "car") can undergo deep frame analysis
         // without redundant inference.
         var searchRequest = request
-        if (request.visualVector == null && request.query != null && request.query.isNotBlank()) {
-            val textProvider = repository.mobileClipTextProvider
-            if (textProvider != null && textProvider.isReady()) {
-                val result = collector.timeInference {
-                    textProvider.generateEmbedding(
-                        mediaId = "query_search_${request.requestId}",
-                        input = SemanticInput.Text(request.query, SemanticRepresentationType.VISUAL),
-                        sourceDataHash = "query_${request.query.hashCode()}"
-                    )
+        val query = request.query
+        if (query != null && query.isNotBlank()) {
+            // 1. Resolve CLIP vector (VISUAL channel)
+            if (request.visualVector == null) {
+                val textProvider = repository.mobileClipTextProvider
+                if (textProvider != null && textProvider.isReady()) {
+                    val result = collector.timeInference {
+                        textProvider.generateEmbedding(
+                            mediaId = "query_search_${request.requestId}",
+                            input = SemanticInput.Text(query, SemanticRepresentationType.VISUAL),
+                            sourceDataHash = "query_${query.hashCode()}"
+                        )
+                    }
+                    if (result is EmbeddingResult.Success) {
+                        searchRequest = searchRequest.copy(visualVector = result.representation.vector)
+                    }
                 }
-                if (result is EmbeddingResult.Success) {
-                    searchRequest = request.copy(visualVector = result.representation.vector)
-                    DecisionTraceCollector.logEvent(
-                        request.requestId, 
-                        com.example.ui.models.TraceEventType.SCORING_COMPLETED, 
-                        detail = "Query embedding generated",
-                        metadata = mapOf("channel" to "QUERY_INFERENCE")
-                    )
+            }
+            // 2. Resolve MiniLM vector (CONTENT channel) - Critical for semantic-only text matches
+            if (searchRequest.queryVectors == null) {
+                val contentProvider = repository.embeddingProvider
+                if (contentProvider != null) {
+                    val result = collector.timeInference {
+                        contentProvider.generateEmbedding(
+                            mediaId = "query_search_content_${request.requestId}",
+                            input = SemanticInput.Text(query, SemanticRepresentationType.CONTENT),
+                            sourceDataHash = "query_content_${query.hashCode()}"
+                        )
+                    }
+                    if (result is EmbeddingResult.Success) {
+                        searchRequest = searchRequest.copy(queryVectors = listOf(result.representation.vector))
+                    }
                 }
             }
         }
@@ -256,8 +271,12 @@ class AuraIntelligenceCore(
         val results = scoreAndRank(rerankedFused, searchRequest, collector)
         
         // Update 7: Style Annotation
-        val styleProfile = repository.signatureStyleProfile.value
-        return results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
+        val styleProfile = try { repository.signatureStyleProfile.value } catch (_: Exception) { null }
+        return if (styleProfile != null) {
+            results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
+        } else {
+            results
+        }
     }
 
     private suspend fun handleSort(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
@@ -328,11 +347,10 @@ class AuraIntelligenceCore(
                     }
                     
                     // AURA REPAIR: Soft penalties instead of hard filters
-                    val isLiked = item.isFavorite || item.rating >= 4.0f
+                    // Penalize recently viewed, but keep favorites/highly rated near the top unless explicitly exploring.
                     val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
                     
                     var score = baseScore.toDouble()
-                    if (isLiked) score -= 0.5 // Penalty for already liked items to surface new content
                     if (isRecent) score -= 0.8 // Heavy penalty for recently viewed
 
                     // AURA STAGE 2: Seeded Jitter to break deterministic tie-breaking (item.id)
@@ -395,6 +413,28 @@ class AuraIntelligenceCore(
                         primaryRelevanceScore = score.toFloat(),
                         secondaryEvidenceScore = 0f,
                         provenance = "Discover Sort"
+                    )
+                }
+            }
+            "RANKING_REFINEMENT" -> {
+                val counts = request.comparisonCounts ?: emptyMap()
+                items.map { item ->
+                    val count = counts[item.id] ?: 0
+                    // Invariant: Comparison count ASC -> Session-level jitter -> Media ID tie-breaker
+                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.01
+                    val rankScore = (-count).toDouble() + jitter
+                    
+                    if (request.limit > 5000) {
+                         System.err.println("DEBUG: Item ${item.id}: count=$count, score=$rankScore")
+                    }
+
+                    IntelligenceCandidate(
+                        item = item,
+                        evidence = listOf(EvidenceItem(EvidenceType.PAIRWISE_PREFERENCE, count.toFloat(), 1.0f, EvidenceStatus.KNOWN, "ComparisonCount")),
+                        rankScore = rankScore,
+                        primaryRelevanceScore = (-count).toFloat(),
+                        secondaryEvidenceScore = jitter.toFloat(),
+                        provenance = "Ranking Refinement (Count: $count)"
                     )
                 }
             }
@@ -467,11 +507,18 @@ class AuraIntelligenceCore(
             }
         }
 
-        return scored.sortedWith(
+        val results = scored.sortedWith(
             compareByDescending<IntelligenceCandidate> { it.rankScore }
                 .thenByDescending { it.primaryRelevanceScore }
                 .thenBy { it.item.id }
         ).take(request.limit)
+        
+        val styleProfile = try { repository.signatureStyleProfile.value } catch (_: Exception) { null }
+        return if (styleProfile != null) {
+            results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
+        } else {
+            results
+        }
     }
 
     private suspend fun handleSimilar(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
@@ -506,8 +553,12 @@ class AuraIntelligenceCore(
         val results = scoreAndRank(filteredFused, request, collector)
         
         // Update 7: Style Annotation
-        val styleProfile = repository.signatureStyleProfile.value
-        return results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
+        val styleProfile = try { repository.signatureStyleProfile.value } catch (_: Exception) { null }
+        return if (styleProfile != null) {
+            results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
+        } else {
+            results
+        }
     }
 
     private fun handleDiscover(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
@@ -553,7 +604,7 @@ class AuraIntelligenceCore(
             profile = profile
         )
 
-        return filteredItems.map { item ->
+        val results = filteredItems.map { item ->
             val evidence = collector.timeInference { ExplorationEngine.calculateEvidence(item, dna, stats, creators, now) }
             val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
             
@@ -576,6 +627,14 @@ class AuraIntelligenceCore(
                 provenance = "Discover:${request.sortOption ?: "General"}"
             )
         }.sortedByDescending { it.rankScore }.take(request.limit)
+        
+        // Update 7: Style Annotation
+        val styleProfile = try { repository.signatureStyleProfile.value } catch (_: Exception) { null }
+        return if (styleProfile != null) {
+            results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
+        } else {
+            results
+        }
     }
 
     private fun scoreAndRank(
@@ -592,8 +651,8 @@ class AuraIntelligenceCore(
         
         // AURA REPAIR: Distinguish threshold by query modality (Bug B Fix)
         val isTextSearch = request.query != null && request.query.isNotBlank()
-        val precisionThreshold = if (isTextSearch && request.queryVectors == null && request.visualVector != null) {
-            // Text-only mode (even if CLIP vector resolved, it's text-derived)
+        val isPureVisual = !isTextSearch && request.visualVector != null
+        val precisionThreshold = if (!isPureVisual) {
             config.minTextSemanticSimilarity
         } else {
             config.minSemanticSimilarity
@@ -615,9 +674,9 @@ class AuraIntelligenceCore(
             }.values.maxOrNull() ?: 0f
 
             val passesNeuralGate = maxNeuralSimilarity >= precisionThreshold
-            val passesLexicalGate = fusedCandidate.isAuthoritative || (isTextSearch && keywordScore >= 70f)
+            val passesLexicalGate = fusedCandidate.isAuthoritative || (isTextSearch && keywordScore > 0f)
 
-            if (!passesNeuralGate && !passesLexicalGate) {
+            if (!request.useLegacyRanking && !passesNeuralGate && !passesLexicalGate) {
                 return@mapNotNull null
             }
 
@@ -787,8 +846,12 @@ class AuraIntelligenceCore(
     }
 
     internal fun scorePersonalization(item: MediaItem, tasteDNA: TasteDNA): Float {
+        // AURA REPAIR: Incorporate explicit signals (Rating/Favorites) as primary baseline (Stage 9 align)
+        val explicitBoost = if (item.isFavorite) 0.5f else 0.0f
+        val ratingScore = item.rating / 5.0f
+        
         val traits = PersonalizationTraitMapper.getTraitAdjustments(item.moodTags)
-        if (traits.isEmpty()) return 0.5f
+        if (traits.isEmpty()) return (0.5f + explicitBoost + ratingScore).coerceIn(0f, 1.0f)
         
         var sumAlignment = 0.0
         traits.forEach { (dim, presence) ->
@@ -797,7 +860,9 @@ class AuraIntelligenceCore(
             val alignment = 1.0 - abs(userPref - itemTraitValue)
             sumAlignment += alignment
         }
-        return (sumAlignment / traits.size).toFloat()
+        val dnaAlignment = (sumAlignment / traits.size).toFloat()
+        
+        return (dnaAlignment + explicitBoost + ratingScore * 0.2f).coerceIn(0f, 1.0f)
     }
 
     private fun getDimensionValue(tasteDNA: TasteDNA, dimension: String): Double {

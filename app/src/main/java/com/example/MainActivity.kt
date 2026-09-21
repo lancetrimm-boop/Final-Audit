@@ -659,8 +659,8 @@ fun AuraMainContent(repository: MediaRepository) {
                                 onMediaTypeSelect = { filter -> repository.setCompareMediaType(filter) },
                                 onStrategySelect = { strategy -> repository.setCompareStrategy(strategy) },
                                 onSortSelect = { sort -> repository.setCompareSort(sort) },
-                                onVote = { chosenId -> repository.recordComparisonVote(chosenId) },
-                                onSkip = { repository.skipComparison() },
+                                onVote = { chosenId -> coroutineScope.launch { repository.recordComparisonVote(chosenId) } },
+                                onSkip = { coroutineScope.launch { repository.skipComparison() } },
                                 onDeleteMedia = { id -> requestDeletion(id, true) },
                                 onFavoriteToggle = { id -> repository.addToFavorites(id) },
                                 onExitSession = {

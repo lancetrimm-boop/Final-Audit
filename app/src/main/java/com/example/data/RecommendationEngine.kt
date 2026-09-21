@@ -153,19 +153,28 @@ object RecommendationEngine {
         stats: IntelligenceStats = IntelligenceStats(),
         creatorProfiles: Map<String, CreatorProfile> = emptyMap(),
         compareStrategy: CompareStrategy = CompareStrategy.PERSONALIZED,
-        compareSort: CompareSortOption = CompareSortOption.RECOMMENDED
+        compareSort: CompareSortOption = CompareSortOption.RECOMMENDED,
+        seed: Long = 42L
     ): List<Pair<MediaItem, Float>> {
+        val session = repository.compareSelectionSession.value
+        val poolOverride = if (session.isActive) {
+            repository.mediaItems.value.filter { it.id in session.selectedIds }
+        } else null
+
         val core = repository.intelligenceCore
         if (core != null) {
             val req = IntelligenceRequest(
                 mode = IntelligenceMode.SORT,
                 sortOption = "RANKING_REFINEMENT",
                 filterType = mediaTypeFilter,
-                limit = 100,
+                limit = 10000, // High limit for library-wide coverage
                 tasteDNA = tasteDNA,
                 profile = profile,
                 stats = stats,
-                creatorProfiles = creatorProfiles
+                creatorProfiles = creatorProfiles,
+                comparisonCounts = repository.getComparisonCounts(),
+                poolOverride = poolOverride,
+                seed = seed
             )
             val response = core.processRequest(req)
             if (response.isSuccess) {
@@ -190,7 +199,7 @@ object RecommendationEngine {
             }
         }
         
-        return sortedPool.take(100).map { it to 1.0f }
+        return sortedPool.map { it to 1.0f }
     }
 
     fun selectNextPairFromPool(

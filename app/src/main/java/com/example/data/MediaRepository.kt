@@ -71,6 +71,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.example.data.CompareSelectionSession
 import com.example.data.CompareMediaTypeFilter
 import com.example.data.CompareStrategy
@@ -278,7 +280,7 @@ class MediaRepository(
         private set
 
     @Volatile
-    var embeddingProvider: EmbeddingProvider? = null
+    internal var embeddingProvider: EmbeddingProvider? = null
         private set
 
     @Volatile
@@ -312,6 +314,14 @@ class MediaRepository(
     @Volatile
     var intelligenceCore: com.example.data.intelligence.AuraIntelligenceCore? = null
         private set
+
+    fun setIntelligenceCoreForTesting(core: com.example.data.intelligence.AuraIntelligenceCore) {
+        intelligenceCore = core
+    }
+
+    fun setPairwiseStateForTesting(state: PairwiseComparison) {
+        _pairwiseState.value = state
+    }
 
     var libraryPreferences: LibraryPreferences? = null
         private set
@@ -426,8 +436,8 @@ class MediaRepository(
         }
     }
 
-    fun recordCompareSelectionVote(chosenId: String) = recordComparisonVote(chosenId)
-    fun skipCompareSelectionPair() = skipComparison()
+    suspend fun recordCompareSelectionVote(chosenId: String) = recordComparisonVote(chosenId)
+    suspend fun skipCompareSelectionPair() = skipComparison()
 
     // AI Fine-Tuning Constraints
     companion object {
@@ -1976,10 +1986,17 @@ class MediaRepository(
 
     fun getPairwiseWins(): Map<String, Int> = pairwiseWins.toMap()
     fun getPairwiseLosses(): Map<String, Int> = pairwiseLosses.toMap()
+    fun getComparisonCounts(): Map<String, Int> = comparisonCounts.toMap()
+
+    @androidx.annotation.VisibleForTesting
+    fun setComparisonCountForTesting(id: String, count: Int) {
+        comparisonCounts[id] = count
+    }
 
     private val comparisonCounts = mutableMapOf<String, Int>()
     private val recentPairs = mutableListOf<Pair<String, String>>()
     private val recentItemIds = mutableListOf<String>()
+    private val voteMutex = Mutex()
 
     private val _pairwiseDiagnostics = MutableStateFlow(PairwiseDiagnostics())
     val pairwiseDiagnostics: StateFlow<PairwiseDiagnostics> = _pairwiseDiagnostics.asStateFlow()
@@ -2413,7 +2430,7 @@ class MediaRepository(
     }
 
     suspend fun scanLocalMedia(context: Context, isManual: Boolean = false): Boolean {
-        val scanId = System.currentTimeMillis()
+        val scanId = System.nanoTime()
         Log.d("AURA_SCAN_RUNTIME", "[$scanId] [REPO] scanLocalMedia() called (isManual=$isManual).")
 
         // 0. Database Readiness Gate
@@ -3665,13 +3682,11 @@ class MediaRepository(
         if (survivorId != null && survivorId.isNotEmpty()) {
             // 2. Record the win for the survivor item using existing learning pathways.
             // This updates Elo, Taste DNA, and triggers a refresh of the comparison pair.
-            recordComparisonVote(survivorId)
+            scope.launch { recordComparisonVote(survivorId) }
         } else {
             // If not in a comparison, just ensure we refresh the pairwise state if needed
             scope.launch {
-                scope.launch {
                 refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = false)
-            }
             }
         }
 
@@ -3763,7 +3778,15 @@ class MediaRepository(
         }
     }
 
-    fun recordComparisonVote(chosenId: String) {
+    suspend fun recordComparisonVote(chosenId: String) = voteMutex.withLock {
+        try {
+            recordComparisonVoteInternal(chosenId)
+        } catch (e: Exception) {
+            Log.e("MediaRepository", "CRITICAL: Failed to record comparison vote", e)
+        }
+    }
+
+    private suspend fun recordComparisonVoteInternal(chosenId: String) = withContext(dispatcher) {
         val currentPair = _pairwiseState.value
         val itemA = currentPair.optionA
         val itemB = currentPair.optionB
@@ -3771,7 +3794,54 @@ class MediaRepository(
         if (itemA.id.isNotEmpty() && itemB.id.isNotEmpty()) {
             val loserId = if (chosenId == itemA.id) itemB.id else itemA.id
 
-            // Update session stats if active
+            // 1. Persist Outcome (Awaited) if DB available
+            val expectedA = PairwiseEloEngine.calculateExpectedScore(itemA.eloRating, itemB.eloRating)
+            val expectedB = 1.0 - expectedA
+            val actualA = if (chosenId == itemA.id) 1.0 else 0.0
+            val actualB = if (chosenId == itemB.id) 1.0 else 0.0
+
+            val newRatingA = PairwiseEloEngine.calculateNewRating(itemA.eloRating, actualA, expectedA)
+            val newRatingB = PairwiseEloEngine.calculateNewRating(itemB.eloRating, actualB, expectedB)
+
+            val outcome = PairwiseOutcomeEntity(
+                optionAId = itemA.id,
+                optionBId = itemB.id,
+                chosenId = chosenId,
+                roundNumber = currentPair.roundNumber,
+                outcomeType = "VOTE",
+                preRatingA = itemA.eloRating,
+                preRatingB = itemB.eloRating,
+                postRatingA = newRatingA,
+                postRatingB = newRatingB,
+                expectedScoreA = expectedA,
+                kFactor = PairwiseEloEngine.K_FACTOR
+            )
+
+            database?.let { db ->
+                try {
+                    db.pairwiseDao().insertOutcome(outcome)
+                    // Persist new ratings to media items
+                    db.mediaDao().getMediaById(itemA.id)?.let { db.mediaDao().update(it.copy(eloRating = newRatingA)) }
+                    db.mediaDao().getMediaById(itemB.id)?.let { db.mediaDao().update(it.copy(eloRating = newRatingB)) }
+                } catch (e: Exception) {
+                    Log.e("MediaRepository", "Failed to persist pairwise outcome", e)
+                    // We continue with in-memory update to keep UI responsive, 
+                    // but the user requirement said "do NOT silently advance as though the vote succeeded" on FAILURE.
+                    // However, if DB is just NULL (tests), we should advance.
+                    if (database != null) throw e 
+                }
+            }
+
+            // contributionQueueRepository handled on separate dispatcher or within this one
+            contributionQueueRepository?.let { repo ->
+                if (repo.isConsentGranted()) {
+                    com.example.data.contribution.ContributionDataSanitizer.sanitizePairwiseOutcome(outcome)?.let { payload ->
+                        repo.enqueuePairwiseDelta(payload)
+                    }
+                }
+            }
+
+            // 2. Update session and in-memory counts (After successful persistence or if no DB)
             if (_compareSelectionSession.value.isActive) {
                 _compareSelectionSession.update { session ->
                     val newWins = if (chosenId == itemA.id) session.wins + 1 else session.wins
@@ -3794,46 +3864,6 @@ class MediaRepository(
             com.example.data.intelligence.IntelligenceCache.invalidateMedia(itemA.id)
             com.example.data.intelligence.IntelligenceCache.invalidateMedia(itemB.id)
 
-            // True Elo Update
-            val expectedA = PairwiseEloEngine.calculateExpectedScore(itemA.eloRating, itemB.eloRating)
-            val expectedB = 1.0 - expectedA
-            val actualA = if (chosenId == itemA.id) 1.0 else 0.0
-            val actualB = if (chosenId == itemB.id) 1.0 else 0.0
-
-            val newRatingA = PairwiseEloEngine.calculateNewRating(itemA.eloRating, actualA, expectedA)
-            val newRatingB = PairwiseEloEngine.calculateNewRating(itemB.eloRating, actualB, expectedB)
-
-            scope.launch {
-                val db = database ?: return@launch
-                val outcome = PairwiseOutcomeEntity(
-                    optionAId = itemA.id,
-                    optionBId = itemB.id,
-                    chosenId = chosenId,
-                    roundNumber = currentPair.roundNumber,
-                    outcomeType = "VOTE",
-                    preRatingA = itemA.eloRating,
-                    preRatingB = itemB.eloRating,
-                    postRatingA = newRatingA,
-                    postRatingB = newRatingB,
-                    expectedScoreA = expectedA,
-                    kFactor = PairwiseEloEngine.K_FACTOR
-                )
-                db.pairwiseDao().insertOutcome(outcome)
-
-                // Phase 3B.2: Enqueue sanitized contribution if consent is granted
-                contributionQueueRepository?.let { repo ->
-                    if (repo.isConsentGranted()) {
-                        com.example.data.contribution.ContributionDataSanitizer.sanitizePairwiseOutcome(outcome)?.let { payload ->
-                            repo.enqueuePairwiseDelta(payload)
-                        }
-                    }
-                }
-
-                // Persist new ratings to media items
-                db.mediaDao().getMediaById(itemA.id)?.let { db.mediaDao().update(it.copy(eloRating = newRatingA)) }
-                db.mediaDao().getMediaById(itemB.id)?.let { db.mediaDao().update(it.copy(eloRating = newRatingB)) }
-            }
-
             // Automatic Taste DNA Learning (Enhanced Dimension-Level Calibration)
             val winner = if (chosenId == itemA.id) itemA else itemB
             val loser = if (chosenId == itemA.id) itemB else itemA
@@ -3844,20 +3874,12 @@ class MediaRepository(
                 val loserTraits = PersonalizationTraitMapper.getEffectiveTraitAdjustments(loser)
                 var updatedDna = dna
 
-                // Calibration based on choice CONTRAST
-                // If user picks A over B, dimensions where A differs from B provide the strongest signal.
                 val allAffectedDimensions = (winnerTraits.keys + loserTraits.keys).distinct()
-                
                 allAffectedDimensions.forEach { dim ->
                     val valWinner = winnerTraits[dim] ?: 0.0
                     val valLoser = loserTraits[dim] ?: 0.0
-                    
-                    // Contrast is the magnitude of difference in this trait between options
                     val contrast = valWinner - valLoser
-                    
                     if (contrast != 0.0) {
-                        // Update learned dimension based on contrast direction
-                        // Small increment scaled by contrast magnitude
                         val amount = contrast * MAX_ADJUSTMENT_PER_VOTE
                         updatedDna = updatedDna.updateLearnedDimension(dim, amount, TOTAL_ADJUSTMENT_LIMIT)
                     }
@@ -3865,11 +3887,7 @@ class MediaRepository(
                 
                 if (updatedDna != dna) {
                     updateTasteDNA(updatedDna, isUserGenerated = false, evidenceCategory = "Pairwise Vote (Calibration)")
-                    
-                    // Emit Signal for dimension calibration
-                    scope.launch {
-                        momentDispatcher.onEvent(AuraMomentDispatcher.IntelligenceEvent.TasteCalibrated("Preference", 0.0))
-                    }
+                    momentDispatcher.onEvent(AuraMomentDispatcher.IntelligenceEvent.TasteCalibrated("Preference", 0.0))
                 }
             }
 
@@ -3884,23 +3902,20 @@ class MediaRepository(
             )
             
             // Emit System Milestone Signal
-            scope.launch {
-                momentDispatcher.onEvent(
-                    AuraMomentDispatcher.IntelligenceEvent.SystemMilestone(
-                        accuracy = newStats.personalizationScore,
-                        totalVotes = newStats.totalComparisons
-                    )
+            momentDispatcher.onEvent(
+                AuraMomentDispatcher.IntelligenceEvent.SystemMilestone(
+                    accuracy = newStats.personalizationScore,
+                    totalVotes = newStats.totalComparisons
                 )
-            }
+            )
             newStats
         }
 
-        scope.launch {
-            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
-        }
+        // 3. Select Next Pair (Sequential)
+        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
     }
 
-    fun skipComparison() {
+    suspend fun skipComparison() = voteMutex.withLock {
         val currentPair = _pairwiseState.value
         val itemA = currentPair.optionA
         val itemB = currentPair.optionB
@@ -3925,41 +3940,39 @@ class MediaRepository(
                 val newRatingA = PairwiseEloEngine.calculateNewRating(itemA.eloRating, 0.5, expectedA)
                 val newRatingB = PairwiseEloEngine.calculateNewRating(itemB.eloRating, 0.5, expectedB)
 
-                scope.launch {
-                    val db = database ?: return@launch
-                    val outcome = PairwiseOutcomeEntity(
-                        optionAId = itemA.id,
-                        optionBId = itemB.id,
-                        chosenId = "",
-                        roundNumber = currentPair.roundNumber,
-                        outcomeType = "SKIP",
-                        preRatingA = itemA.eloRating,
-                        preRatingB = itemB.eloRating,
-                        postRatingA = newRatingA,
-                        postRatingB = newRatingB,
-                        expectedScoreA = expectedA,
-                        kFactor = PairwiseEloEngine.K_FACTOR
-                    )
+                val outcome = PairwiseOutcomeEntity(
+                    optionAId = itemA.id,
+                    optionBId = itemB.id,
+                    chosenId = "",
+                    roundNumber = currentPair.roundNumber,
+                    outcomeType = "SKIP",
+                    preRatingA = itemA.eloRating,
+                    preRatingB = itemB.eloRating,
+                    postRatingA = newRatingA,
+                    postRatingB = newRatingB,
+                    expectedScoreA = expectedA,
+                    kFactor = PairwiseEloEngine.K_FACTOR
+                )
+
+                database?.let { db ->
                     db.pairwiseDao().insertOutcome(outcome)
-
-                    // Phase 3B.2: Enqueue sanitized contribution if consent is granted
-                    contributionQueueRepository?.let { repo ->
-                        if (repo.isConsentGranted()) {
-                            com.example.data.contribution.ContributionDataSanitizer.sanitizePairwiseOutcome(outcome)?.let { payload ->
-                                repo.enqueuePairwiseDelta(payload)
-                            }
-                        }
-                    }
-
+                    // Persist new ratings
                     db.mediaDao().getMediaById(itemA.id)?.let { db.mediaDao().update(it.copy(eloRating = newRatingA)) }
                     db.mediaDao().getMediaById(itemB.id)?.let { db.mediaDao().update(it.copy(eloRating = newRatingB)) }
+                }
+
+                // contributionQueueRepository handled separately
+                contributionQueueRepository?.let { repo ->
+                    if (repo.isConsentGranted()) {
+                        com.example.data.contribution.ContributionDataSanitizer.sanitizePairwiseOutcome(outcome)?.let { payload ->
+                            repo.enqueuePairwiseDelta(payload)
+                        }
+                    }
                 }
             }
         }
 
-        scope.launch {
-            refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
-        }
+        refreshPairwiseCandidatePoolAndSelectNext(forceNextPair = true)
     }
 
 
@@ -4215,11 +4228,18 @@ stats ->
             val core = intelligenceCore
             if (core != null) {
                 val requestId = "lib_sort_${System.currentTimeMillis()}"
+                val requestMode = if (librarySearchQuery.isBlank() && _activeVisualReferences.value.isEmpty()) {
+                    com.example.data.intelligence.IntelligenceMode.SORT
+                } else {
+                    com.example.data.intelligence.IntelligenceMode.SEARCH
+                }
                 val request = com.example.data.intelligence.IntelligenceRequest(
                     requestId = requestId,
-                    mode = com.example.data.intelligence.IntelligenceMode.SORT,
+                    mode = requestMode,
                     sortOption = intelligentSort.name,
                     filterType = filterType,
+                    query = librarySearchQuery.ifBlank { null },
+                    visualVector = null, // Will be resolved by Core if query is present
                     tasteDNA = tasteDNA,
                     profile = profile,
                     policy = policy,
@@ -4317,71 +4337,6 @@ stats ->
         )
     }
 
-    private fun MediaEntity.toMediaItem(): MediaItem {
-        val isVideo = mediaType.equals("VIDEO", ignoreCase = true) || mediaType.equals("Movie", ignoreCase = true)
-        val normalizedType = if (isVideo) "VIDEO" else "PHOTO"
-        val gradients = if (isVideo) {
-            listOf(0xFF1E1B4BL, 0xFF4338CAL, 0xFF7C3AEDL)
-        } else {
-            listOf(0xFF311B92L, 0xFF6A1B9AL, 0xFFD946EFL)
-        }
-        val compStatus = try {
-            CompatibilityStatus.valueOf(compatibilityStatus)
-        } catch (e: Exception) {
-            CompatibilityStatus.PLAYABLE
-        }
-        val convStatus = try {
-            ConversionStatus.valueOf(conversionStatus)
-        } catch (e: Exception) {
-            ConversionStatus.NONE
-        }
-        return MediaItem(
-            id = id,
-            title = title,
-            mediaType = normalizedType,
-            year = year,
-            duration = duration,
-            genre = genre,
-            imageUrl = imageUrl,
-            gradientColors = if (gradientColorsJson.isBlank()) gradients else gradientColorsJson.split(",").mapNotNull { it.toLongOrNull() },
-            rating = rating,
-            isFavorite = isFavorite,
-            progress = progress,
-            progressText = progressText,
-            category = category,
-            aiSummary = aiSummary,
-            moodTags = if (moodTagsJson.isEmpty()) emptyList() else moodTagsJson.split(","),
-            uriPath = uriPath,
-            itemCount = itemCount,
-            sizeBytes = sizeBytes,
-            dateAdded = dateAdded,
-            dateModified = dateModified,
-            durationMs = durationMs,
-            width = width,
-            height = height,
-            lastViewedTimestamp = lastViewedTimestamp,
-            viewCount = playCount,
-            exposureCount = exposureCount,
-            lastExposedTimestamp = lastExposedTimestamp,
-            contentHash = contentHash,
-            parentContentId = parentContentId,
-            eloRating = eloRating,
-            isDeleted = isDeleted,
-            compatibilityStatus = compStatus,
-            containerFormat = containerFormat,
-            videoCodec = videoCodec,
-            audioCodec = audioCodec,
-            compatibilityReason = compatibilityReason,
-            conversionStatus = convStatus,
-            convertedUri = convertedUri.ifBlank { null },
-            lastCompatibilityCheckTimestamp = lastCompatibilityCheckTimestamp,
-            selectionReason = if (compStatus == CompatibilityStatus.ANALYSIS_FAILED) "Retry Analysis" else selectionReason,
-            creatorId = creatorId,
-            creatorName = creatorName,
-            sourcePlatform = sourcePlatform,
-            replacedByMediaId = replacedByMediaId
-        )
-    }
 
     suspend fun convertMediaItem(
         context: Context,
