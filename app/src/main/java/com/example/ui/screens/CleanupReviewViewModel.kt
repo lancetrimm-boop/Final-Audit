@@ -11,7 +11,7 @@ data class CleanupReviewUiState(
     val recommendations: List<CleanupRecommendation> = emptyList(),
     val filteredRecommendations: List<CleanupRecommendation> = emptyList(),
     val mediaItems: Map<String, MediaItem> = emptyMap(),
-    val selectedCategory: CleanupCategory = CleanupCategory.FORGOTTEN,
+    val selectedCategory: CleanupCategory = CleanupCategory.DELETE_RECOMMENDATIONS,
     val selectedIds: Set<String> = emptySet(),
     val isLoading: Boolean = true,
     val isLocked: Boolean = false,
@@ -47,10 +47,24 @@ class CleanupReviewViewModel(
     val uiState: StateFlow<CleanupReviewUiState> = _uiState.asStateFlow()
 
     init {
-        loadRecommendations()
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                repository.databaseState,
+                repository.mediaItems,
+                entitlementRepository.proState
+            ) { dbState, items, proState ->
+                Triple(dbState, items, proState)
+            }.collect { (dbState, _, _) ->
+                if (dbState != com.example.data.DatabaseState.READY) {
+                    _uiState.update { it.copy(isLoading = true, isLocked = false) }
+                } else {
+                    loadRecommendations()
+                }
+            }
+        }
         
         viewModelScope.launch {
-            deleteManager.deletionState.collect { state ->
+            deleteManager?.deletionState?.collect { state ->
                 when (state) {
                     DeletionState.CONFIRMED, DeletionState.CANCELLED, DeletionState.FAILED -> {
                         _uiState.update { it.copy(isDeleting = false, requiresInternalConfirmation = false) }
@@ -123,6 +137,7 @@ class CleanupReviewViewModel(
                 val metadataMap = allItems.associate { item ->
                     item.id to CleanupItemMetadata(
                         mediaId = item.id,
+                        title = item.title,
                         sizeBytes = item.sizeBytes,
                         exposureCount = item.exposureCount,
                         viewCount = item.viewCount,
@@ -152,12 +167,13 @@ class CleanupReviewViewModel(
                 }
 
                 _uiState.update { state ->
+                    val newSelectedIds = state.selectedIds.intersect(recommendations.map { it.mediaId }.toSet())
                     val newState = state.copy(
                         recommendations = recommendations,
                         mediaItems = allItems.associateBy { it.id },
                         categoryStats = statsMap,
                         isLoading = false,
-                        selectedIds = recommendations.map { it.mediaId }.toSet()
+                        selectedIds = newSelectedIds
                     )
                     applyFiltersAndSort(newState)
                 }
@@ -235,7 +251,24 @@ class CleanupReviewViewModel(
         val item = repository.getMediaItemById(mediaId) ?: return
         val rec = _uiState.value.recommendations.find { it.mediaId == mediaId } ?: return
         deleteManager.markAsKept(item, rec)
-        loadRecommendations()
+        _uiState.update { state ->
+            val updatedRecs = state.recommendations.filterNot { it.mediaId == mediaId }
+            val updatedSelection = state.selectedIds - mediaId
+            val statsMap = CleanupCategory.entries.associateWith { cat ->
+                val catRecs = updatedRecs.filter { it.category == cat }
+                CategoryStat(
+                    count = catRecs.size,
+                    storageBytes = catRecs.sumOf { it.storageSize },
+                    averageKeepScore = if (catRecs.isNotEmpty()) catRecs.map { it.keepScore }.average().toFloat() else 0f
+                )
+            }
+            val newState = state.copy(
+                recommendations = updatedRecs,
+                selectedIds = updatedSelection,
+                categoryStats = statsMap
+            )
+            applyFiltersAndSort(newState)
+        }
     }
 
     fun confirmInternalDeletion() {
@@ -250,10 +283,10 @@ class CleanupReviewViewModel(
         val filtered = state.recommendations.filter { it.category == state.selectedCategory }
         
         val sorted = when (state.currentSort) {
-            ReviewSort.LOWEST_KEEP_SCORE -> filtered.sortedBy { it.keepScore }
-            ReviewSort.HIGHEST_CONFIDENCE -> filtered.sortedByDescending { it.confidenceScore }
-            ReviewSort.LARGEST_STORAGE -> filtered.sortedByDescending { it.storageSize }
-            ReviewSort.MOST_EXPOSED -> filtered.sortedByDescending { it.exposureCount }
+            ReviewSort.LOWEST_KEEP_SCORE -> filtered.sortedWith(compareBy<CleanupRecommendation> { it.keepScore }.thenBy { it.mediaId })
+            ReviewSort.HIGHEST_CONFIDENCE -> filtered.sortedWith(compareByDescending<CleanupRecommendation> { it.confidenceScore }.thenBy { it.mediaId })
+            ReviewSort.LARGEST_STORAGE -> filtered.sortedWith(compareByDescending<CleanupRecommendation> { it.storageSize }.thenBy { it.mediaId })
+            ReviewSort.MOST_EXPOSED -> filtered.sortedWith(compareByDescending<CleanupRecommendation> { it.exposureCount }.thenBy { it.mediaId })
         }
         
         return state.copy(

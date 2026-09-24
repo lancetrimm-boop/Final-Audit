@@ -920,9 +920,10 @@ fun VideoTilePreview(
             return@LaunchedEffect
         }
 
-        val acquisitionDelay = when(priority) {
-            PreviewPriority.VISIBLE -> 400L
-            PreviewPriority.NEARBY -> 1200L // Longer delay for nearby pre-warming
+        val acquisitionDelay = when {
+            locationTag.startsWith("compare_") -> 0L // Immediate acquisition for Compare previews
+            priority == PreviewPriority.VISIBLE -> 400L
+            priority == PreviewPriority.NEARBY -> 1200L // Longer delay for nearby pre-warming
             else -> 2000L
         }
         

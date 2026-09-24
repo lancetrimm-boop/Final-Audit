@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.CompareArrows
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.outlined.CompareArrows
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.Delete
@@ -127,6 +128,7 @@ fun CompareScreen(
     compareMediaType: CompareMediaTypeFilter = CompareMediaTypeFilter.PHOTOS,
     compareStrategy: CompareStrategy = CompareStrategy.PERSONALIZED,
     compareSort: CompareSortOption = CompareSortOption.NEWEST,
+    isRepositoryReady: Boolean = true,
     onMediaTypeSelect: (CompareMediaTypeFilter) -> Unit = {},
     onStrategySelect: (CompareStrategy) -> Unit = {},
     onSortSelect: (CompareSortOption) -> Unit = {},
@@ -288,7 +290,14 @@ fun CompareScreen(
                 onSortSelect = onSortSelect
             )
 
-            if (session.isComplete) {
+            if (!isRepositoryReady) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = DiscoveryViolet)
+                }
+            } else if (session.isComplete) {
                 val topItems = remember(session.selectedIds, mediaItemsMap) {
                     CompareResultsHelper.getRankedResults(session.selectedIds, mediaItemsMap)
                 }

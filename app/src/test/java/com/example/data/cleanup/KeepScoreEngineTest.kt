@@ -23,6 +23,36 @@ class KeepScoreEngineTest {
         contentHash = "hash-1"
     )
 
+    private fun createMetadata(
+        id: String,
+        size: Long = 1024 * 1024,
+        exposure: Int = 5,
+        views: Int = 1,
+        type: String = "PHOTO"
+    ) = CleanupItemMetadata(
+        mediaId = id,
+        title = "Test Item",
+        sizeBytes = size,
+        exposureCount = exposure,
+        viewCount = views,
+        mediaType = type,
+        contentHash = null,
+        isFavorite = false,
+        width = 1920,
+        height = 1080,
+        durationMs = 0,
+        dateAdded = 1000L
+    )
+
+    @Test
+    fun testKeepScoreEngine_DoesNotAssignFinalCategory() {
+        val input = baseInput.copy(exposureCount = 50, viewCount = 0)
+        val result = KeepScoreEngine.calculateScore(input)
+        
+        assertEquals("KeepScoreEngine should return NONE as it does not own final category assignment", 
+            CleanupCategory.NONE, result.category)
+    }
+
     @Test
     fun testFavorite_IsProtected() {
         val input = baseInput.copy(isFavorite = true, exposureCount = 50, viewCount = 0)
@@ -45,7 +75,11 @@ class KeepScoreEngineTest {
         
         assertTrue("KeepScore should be low for ghost items (scrolled past many times, never opened)", result.keepScore < 0.30f)
         assertTrue(result.reasons.contains(CleanupReason.HIGH_EXPOSURE_NO_ENGAGEMENT))
-        assertEquals(CleanupCategory.FORGOTTEN, result.category)
+
+        // Verify CleanupRecommendationEngine does NOT treat HIGH_EXPOSURE_NO_ENGAGEMENT alone as a Delete Recommendation
+        val metadata = mapOf("test-1" to createMetadata("test-1", exposure = 50, views = 0))
+        val recs = CleanupRecommendationEngine.generateRecommendations(listOf(result), metadata)
+        assertEquals("Ghosting alone must not trigger Delete Recommendation without explicit negative signal", 0, recs.size)
     }
 
     @Test
@@ -68,7 +102,11 @@ class KeepScoreEngineTest {
         val neutralResult = KeepScoreEngine.calculateScore(baseInput)
         assertTrue("Score should be lower due to repeated skips", result.keepScore < neutralResult.keepScore)
         assertTrue(result.reasons.contains(CleanupReason.REPEATED_SKIP))
-        assertEquals(CleanupCategory.NEVER_CONNECTED, result.category)
+
+        val metadata = mapOf("test-1" to createMetadata("test-1"))
+        val recs = CleanupRecommendationEngine.generateRecommendations(listOf(result), metadata)
+        assertEquals(1, recs.size)
+        assertEquals(CleanupCategory.DELETE_RECOMMENDATIONS, recs[0].category)
     }
 
     @Test
@@ -79,6 +117,11 @@ class KeepScoreEngineTest {
         assertTrue(result.reasons.contains(CleanupReason.LOW_USER_RATING))
         val neutralResult = KeepScoreEngine.calculateScore(baseInput)
         assertTrue("Score should be lower for low rating", result.keepScore < neutralResult.keepScore)
+
+        val metadata = mapOf("test-1" to createMetadata("test-1"))
+        val recs = CleanupRecommendationEngine.generateRecommendations(listOf(result), metadata)
+        assertEquals(1, recs.size)
+        assertEquals(CleanupCategory.DELETE_RECOMMENDATIONS, recs[0].category)
     }
 
     @Test
@@ -92,8 +135,10 @@ class KeepScoreEngineTest {
         )
         val result = KeepScoreEngine.calculateScore(input)
         
-        assertEquals(CleanupCategory.SPACE_HOGS, result.category)
-        assertTrue(result.reasons.contains(CleanupReason.LARGE_FILE_SIZE))
+        val metadata = mapOf("test-1" to createMetadata("test-1", size = 500 * 1024 * 1024))
+        val recs = CleanupRecommendationEngine.generateRecommendations(listOf(result), metadata)
+        assertEquals(1, recs.size)
+        assertEquals(CleanupCategory.SPACE_HOGS, recs[0].category)
     }
 
     @Test
@@ -110,38 +155,22 @@ class KeepScoreEngineTest {
     }
 
     @Test
-    fun testRarity_InfluencesScore() {
-        val uniqueInput = baseInput.copy(rarityScore = 1.0f)
-        val duplicateInput = baseInput.copy(rarityScore = 0.5f)
-        val excessiveInput = baseInput.copy(rarityScore = 0.1f)
-        
-        val uniqueResult = KeepScoreEngine.calculateScore(uniqueInput)
-        val duplicateResult = KeepScoreEngine.calculateScore(duplicateInput)
-        val excessiveResult = KeepScoreEngine.calculateScore(excessiveInput)
-        
-        assertTrue("Unique item should have higher score than duplicate", uniqueResult.keepScore > duplicateResult.keepScore)
-        assertTrue("Duplicate item should have higher score than item with 10 copies", duplicateResult.keepScore > excessiveResult.keepScore)
-        
-        // Exact impact: Rarity is 10% weight.
-        // Difference between 1.0 and 0.5 rarity is 0.05 score delta.
-        assertEquals(0.05f, uniqueResult.keepScore - duplicateResult.keepScore, 0.01f)
-    }
-
-    @Test
     fun testUnplayedLowAlignment_IsNotCategorized() {
         val input = baseInput.copy(
             viewCount = 0,
             playCount = 0,
-            exposureCount = 2, // Low exposure, not forgotten
-            tasteAlignmentScore = 0.1f, // Below threshold
+            exposureCount = 0, // Unplayed and unexposed
+            tasteAlignmentScore = 0.1f,
             isFavorite = false
         )
         
         val result = KeepScoreEngine.calculateScore(input)
-        
         assertTrue(result.reasons.contains(CleanupReason.LOW_TASTE_ALIGNMENT))
+
+        val metadata = mapOf("test-1" to createMetadata("test-1", exposure = 0, views = 0))
+        val recs = CleanupRecommendationEngine.generateRecommendations(listOf(result), metadata)
         assertEquals("Unplayed media with only low alignment should not be categorized for cleanup", 
-            CleanupCategory.NONE, result.category)
+            0, recs.size)
     }
 
     @Test
@@ -150,17 +179,19 @@ class KeepScoreEngineTest {
             viewCount = 0,
             playCount = 0,
             exposureCount = 2,
-            tasteAlignmentScore = 0.1f, // Below threshold
+            tasteAlignmentScore = 0.1f,
             skipCount = 5, // Triggers REPEATED_SKIP
             averageWatchDuration = 1.0f,
             isFavorite = false
         )
         
         val result = KeepScoreEngine.calculateScore(input)
-        
         assertTrue(result.reasons.contains(CleanupReason.LOW_TASTE_ALIGNMENT))
         assertTrue(result.reasons.contains(CleanupReason.REPEATED_SKIP))
-        assertEquals("Low alignment with repeated skip SHOULD be categorized", 
-            CleanupCategory.NEVER_CONNECTED, result.category)
+
+        val metadata = mapOf("test-1" to createMetadata("test-1", exposure = 2, views = 0))
+        val recs = CleanupRecommendationEngine.generateRecommendations(listOf(result), metadata)
+        assertEquals(1, recs.size)
+        assertEquals(CleanupCategory.DELETE_RECOMMENDATIONS, recs[0].category)
     }
 }

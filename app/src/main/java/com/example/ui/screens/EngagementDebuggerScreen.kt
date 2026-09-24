@@ -39,6 +39,7 @@ import com.example.ui.components.EditableBlueprintStudioCard
 import com.example.ui.theme.*
 import com.example.util.IntelligenceExporter
 import com.example.util.ModularReportType
+import kotlinx.coroutines.launch
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -398,6 +399,9 @@ fun EngagementDebuggerScreen(
                 )
                 
                 MetricsGrid(metrics!!)
+
+                Spacer(modifier = Modifier.height(16.dp))
+                DeveloperEntitlementCard(repository)
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
@@ -1095,6 +1099,68 @@ private fun ClosedLoopDiagnosticsCard(
                         Text("  Step ${act.stepOrder}: ${act.action} (${act.targetComponent})", fontSize = 10.sp, color = AuraOnSurfaceVariant)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeveloperEntitlementCard(repository: MediaRepository) {
+    if (!com.example.BuildConfig.ENABLE_DEVELOPER_TOOLS) return
+
+    val coroutineScope = rememberCoroutineScope()
+    val entitlementRepo = repository.entitlementRepository
+    val proState = entitlementRepo?.proState?.collectAsStateWithLifecycle()?.value ?: com.example.data.entitlement.ProState.Free
+    val isPro = proState.isPro
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = AuraSurface),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "DEVELOPER TOOLS — PRO TEST ENTITLEMENT",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = AuraPurple
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (isPro) "Status: Aura Pro Enabled (Test Override)" else "Status: Free Tier (Locked)",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isPro) Color(0xFF2E7D32) else AuraOnSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Developer-only entitlement for testing Pro features in runtime. Does not perform a Google Play purchase.",
+                fontSize = 11.sp,
+                color = AuraOnSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        entitlementRepo?.updateEntitlement(!isPro)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isPro) Color(0xFFC62828) else DiscoveryViolet
+                )
+            ) {
+                Icon(
+                    imageVector = if (isPro) Icons.Outlined.LockOpen else Icons.Outlined.AutoAwesome,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (isPro) "Disable Aura Pro (Test)" else "Enable Aura Pro (Test)",
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

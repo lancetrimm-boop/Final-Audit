@@ -62,6 +62,18 @@ class SafeDeleteManager(
         recommendations: List<CleanupRecommendation>,
         launcher: ActivityResultLauncher<IntentSenderRequest>
     ) {
+        val isEntitled = repository.entitlementRepository?.isFeatureAvailable(
+            com.example.data.entitlement.ProFeature.CLEANUP_AUTOMATION
+        ) == true
+
+        if (!isEntitled) {
+            Log.w("SafeDeleteManager", "requestDeletion aborted: Pro feature CLEANUP_AUTOMATION is not available.")
+            _deletionState.value = DeletionState.FAILED
+            resetPending()
+            clearPersistedState()
+            return
+        }
+
         if (items.isEmpty()) return
 
         pendingRecommendations = recommendations

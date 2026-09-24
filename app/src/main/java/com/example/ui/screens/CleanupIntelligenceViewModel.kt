@@ -11,10 +11,12 @@ import kotlinx.coroutines.Dispatchers
 
 data class CleanupIntelligenceUiState(
     val totalRecommendations: Int = 0,
-    val forgottenCount: Int = 0,
-    val neverConnectedCount: Int = 0,
+    val deleteRecommendationsCount: Int = 0,
+    val unplayableCount: Int = 0,
     val spaceHogCount: Int = 0,
     val redundantCount: Int = 0,
+    val forgottenCount: Int = 0,
+    val neverConnectedCount: Int = 0,
     val potentialStorageRecovery: Long = 0L,
     val averageConfidence: Float = 0f,
     val averageKeepScore: Float = 0f,
@@ -42,7 +44,25 @@ class CleanupIntelligenceViewModel(
     val uiState: StateFlow<CleanupIntelligenceUiState> = _uiState.asStateFlow()
 
     init {
-        refreshAnalysis()
+        viewModelScope.launch {
+            val dbStateFlow = repository.databaseState ?: kotlinx.coroutines.flow.flowOf(com.example.data.DatabaseState.READY)
+            val mediaItemsFlow = repository.mediaItems ?: kotlinx.coroutines.flow.flowOf(emptyList())
+            val proStateFlow = entitlementRepository.proState ?: kotlinx.coroutines.flow.flowOf(com.example.data.entitlement.ProState.Free)
+
+            kotlinx.coroutines.flow.combine(
+                dbStateFlow,
+                mediaItemsFlow,
+                proStateFlow
+            ) { dbState, items, proState ->
+                Triple(dbState, items, proState)
+            }.collect { (dbState, _, _) ->
+                if (dbState != com.example.data.DatabaseState.READY) {
+                    _uiState.update { it.copy(isLoading = true, isLocked = false) }
+                } else {
+                    refreshAnalysis()
+                }
+            }
+        }
     }
 
     fun refreshAnalysis() {
@@ -64,8 +84,8 @@ class CleanupIntelligenceViewModel(
             // Perform heavy processing in background
             withContext(backgroundDispatcher) {
                 // 2. Gather signals and calculate Keep Scores
-                val tasteDNA = repository.tasteDNA.value
-                val stats = repository.intelligenceStats.value
+                val tasteDNA = repository.tasteDNA?.value ?: com.example.data.TasteDNA()
+                val stats = repository.intelligenceStats?.value ?: com.example.data.IntelligenceStats()
                 
                 val allIds = allItems.map { it.id }
                 val skipCounts = repository.getSkipCounts(allIds)
@@ -108,6 +128,7 @@ class CleanupIntelligenceViewModel(
                 val metadataMap = allItems.associate { item ->
                     item.id to CleanupItemMetadata(
                         mediaId = item.id,
+                        title = item.title,
                         sizeBytes = item.sizeBytes,
                         exposureCount = item.exposureCount,
                         viewCount = item.viewCount,
@@ -144,10 +165,12 @@ class CleanupIntelligenceViewModel(
                 _uiState.update { state ->
                     state.copy(
                         totalRecommendations = recommendations.size,
-                        forgottenCount = recommendations.count { it.category == CleanupCategory.FORGOTTEN },
-                        neverConnectedCount = recommendations.count { it.category == CleanupCategory.NEVER_CONNECTED },
+                        deleteRecommendationsCount = recommendations.count { it.category == CleanupCategory.DELETE_RECOMMENDATIONS },
+                        unplayableCount = recommendations.count { it.category == CleanupCategory.UNPLAYABLE_FILES },
                         spaceHogCount = recommendations.count { it.category == CleanupCategory.SPACE_HOGS },
                         redundantCount = recommendations.count { it.category == CleanupCategory.REDUNDANT },
+                        forgottenCount = recommendations.count { it.category == CleanupCategory.DELETE_RECOMMENDATIONS },
+                        neverConnectedCount = recommendations.count { it.category == CleanupCategory.UNPLAYABLE_FILES },
                         potentialStorageRecovery = recovery,
                         averageConfidence = avgConf,
                         averageKeepScore = avgKeep,
@@ -162,7 +185,8 @@ class CleanupIntelligenceViewModel(
                 println("CleanupIntelligence: Average confidence: ${(avgConf * 100).toInt()}%")
                 println("CleanupIntelligence: Potential recovery: ${recovery / (1024 * 1024)} MB")
                 println("CleanupIntelligence: Category distribution:")
-                println("  FORGOTTEN: ${recommendations.count { it.category == CleanupCategory.FORGOTTEN }}")
+                println("  DELETE_RECOMMENDATIONS: ${recommendations.count { it.category == CleanupCategory.DELETE_RECOMMENDATIONS }}")
+                println("  UNPLAYABLE_FILES: ${recommendations.count { it.category == CleanupCategory.UNPLAYABLE_FILES }}")
                 println("  SPACE_HOGS: ${recommendations.count { it.category == CleanupCategory.SPACE_HOGS }}")
                 println("  REDUNDANT: ${recommendations.count { it.category == CleanupCategory.REDUNDANT }}")
             }

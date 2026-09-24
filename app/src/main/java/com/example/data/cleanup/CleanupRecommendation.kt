@@ -12,5 +12,7 @@ data class CleanupRecommendation(
     val storageSize: Long,
     val exposureCount: Int = 0,
     val createdTimestamp: Long = System.currentTimeMillis(),
-    val explanation: String
+    val explanation: String,
+    val masterMediaId: String? = null,
+    val masterSelectionRationale: String? = null
 )

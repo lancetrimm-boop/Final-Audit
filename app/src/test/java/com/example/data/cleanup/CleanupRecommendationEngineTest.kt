@@ -44,41 +44,104 @@ class CleanupRecommendationEngineTest {
     )
 
     @Test
-    fun testForgottenItem_CategorizedCorrectly() {
-        val id = "forgotten-1"
-        val results = listOf(createResult(id, CleanupCategory.FORGOTTEN))
+    fun testDeleteRecommendations_CategorizedCorrectly_OnRepeatedSkip() {
+        val id = "delete-1"
+        val results = listOf(createResult(id, CleanupCategory.NONE, listOf(CleanupReason.REPEATED_SKIP), score = 0.15f))
         val metadata = mapOf(id to createMetadata(id, exposure = 50, views = 0))
         
         val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata)
         
         assertEquals(1, recommendations.size)
-        assertEquals(CleanupCategory.FORGOTTEN, recommendations[0].category)
-        assertTrue(recommendations[0].explanation.contains("50 times"))
+        assertEquals(CleanupCategory.DELETE_RECOMMENDATIONS, recommendations[0].category)
+        assertTrue(recommendations[0].explanation.contains("Repeatedly skipped"))
     }
 
     @Test
-    fun testNeverConnectedItem_CategorizedCorrectly() {
-        val id = "never-1"
-        val results = listOf(createResult(id, CleanupCategory.NEVER_CONNECTED, listOf(CleanupReason.LOW_TASTE_ALIGNMENT)))
-        val metadata = mapOf(id to createMetadata(id))
+    fun testHighExposureZeroViews_IsNotDeleteRecommendation() {
+        val id = "ghost-1"
+        val results = listOf(createResult(id, CleanupCategory.NONE, listOf(CleanupReason.HIGH_EXPOSURE_NO_ENGAGEMENT), score = 0.10f))
+        val metadata = mapOf(id to createMetadata(id, exposure = 50, views = 0))
+        
+        val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata)
+        
+        assertEquals("High exposure with zero views must NOT independently trigger Delete Recommendation",
+            0, recommendations.size)
+    }
+
+    @Test
+    fun testUnplayedUnratedMedia_IsNotDeleteRecommendation() {
+        val id = "unplayed-1"
+        val results = listOf(createResult(id, CleanupCategory.NONE, emptyList(), score = 0.20f))
+        val metadata = mapOf(id to createMetadata(id, exposure = 0, views = 0))
+        
+        val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata)
+        
+        assertEquals("Unplayed/unrated media without explicit negative feedback must NOT be a Delete Recommendation",
+            0, recommendations.size)
+    }
+
+    @Test
+    fun testLowUserRating_IsDeleteRecommendation() {
+        val id = "low-rated-1"
+        val results = listOf(createResult(id, CleanupCategory.NONE, listOf(CleanupReason.LOW_USER_RATING), score = 0.20f))
+        val metadata = mapOf(id to createMetadata(id, exposure = 5, views = 1))
         
         val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata)
         
         assertEquals(1, recommendations.size)
-        assertEquals(CleanupCategory.NEVER_CONNECTED, recommendations[0].category)
+        assertEquals(CleanupCategory.DELETE_RECOMMENDATIONS, recommendations[0].category)
+        assertTrue(recommendations[0].explanation.contains("Low user rating"))
+    }
+
+    @Test
+    fun testUnplayableFiles_CategorizedCorrectly() {
+        val id = "unplayable-1"
+        val results = listOf(createResult(id, CleanupCategory.NONE, score = 0.8f))
+        val metadata = mapOf(id to createMetadata(id))
+        val unplayableIds = setOf(id)
+        
+        val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata, unplayableIds)
+        
+        assertEquals(1, recommendations.size)
+        assertEquals(CleanupCategory.UNPLAYABLE_FILES, recommendations[0].category)
+        assertTrue(recommendations[0].explanation.contains("Confirmed playback failure"))
     }
 
     @Test
     fun testSpaceHog_CategorizedCorrectly() {
         val id = "huge-1"
         val size = 2L * 1024 * 1024 * 1024 // 2GB
-        val results = listOf(createResult(id, CleanupCategory.SPACE_HOGS, score = 0.2f))
+        val results = listOf(createResult(id, CleanupCategory.NONE, score = 0.2f))
         val metadata = mapOf(id to createMetadata(id, size = size, type = "VIDEO"))
         
         val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata)
         
         assertEquals(1, recommendations.size)
         assertEquals(CleanupCategory.SPACE_HOGS, recommendations[0].category)
+        assertTrue(recommendations[0].explanation.contains("Large file — 2.0 GB"))
+    }
+
+    @Test
+    fun testCategoryPrecedence_UnplayableOverridesSpaceHogsAndRedundant() {
+        val masterId = "master"
+        val dupId = "unplayable-and-dup"
+        val hash = "fixed-hash"
+        
+        val results = listOf(
+            createResult(masterId, score = 0.9f),
+            createResult(dupId, score = 0.1f)
+        )
+        val metadata = mapOf(
+            masterId to createMetadata(masterId, hash = hash),
+            dupId to createMetadata(dupId, size = 500 * 1024 * 1024L, hash = hash)
+        )
+        val unplayableIds = setOf(dupId)
+        
+        val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata, unplayableIds)
+        
+        assertEquals(1, recommendations.size)
+        assertEquals(dupId, recommendations[0].mediaId)
+        assertEquals(CleanupCategory.UNPLAYABLE_FILES, recommendations[0].category)
     }
 
     @Test
@@ -173,104 +236,10 @@ class CleanupRecommendationEngineTest {
     }
 
     @Test
-    fun testRedundantItem_FavoriteProtection() {
-        val id1 = "normal"
-        val id2 = "fav" // Master (Higher score usually, but engine ensures master is never REDUNDANT)
-        val hash = "fixed-hash"
-        
-        val results = listOf(
-            createResult(id1, score = 0.4f), 
-            createResult(id2, score = 0.9f, category = CleanupCategory.NONE)
-        )
-        val metadata = mapOf(
-            id1 to createMetadata(id1, hash = hash),
-            id2 to createMetadata(id2, hash = hash).copy(isFavorite = true)
-        )
-        
-        val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata)
-        
-        assertEquals(1, recommendations.size)
-        assertEquals(id1, recommendations[0].mediaId)
-        assertEquals(CleanupCategory.REDUNDANT, recommendations[0].category)
-    }
-
-    @Test
-    fun testRedundantItem_MultipleGroups() {
-        val hash1 = "hash-1"
-        val hash2 = "hash-2"
-        
-        val results = listOf(
-            createResult("1a", score = 0.9f),
-            createResult("1b", score = 0.1f),
-            createResult("2a", score = 0.9f),
-            createResult("2b", score = 0.1f)
-        )
-        val metadata = mapOf(
-            "1a" to createMetadata("1a", hash = hash1),
-            "1b" to createMetadata("1b", hash = hash1),
-            "2a" to createMetadata("2a", hash = hash2),
-            "2b" to createMetadata("2b", hash = hash2)
-        )
-        
-        val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata)
-        
-        assertEquals(2, recommendations.size)
-        assertTrue(recommendations.any { it.mediaId == "1b" })
-        assertTrue(recommendations.any { it.mediaId == "2b" })
-    }
-
-    @Test
-    fun testRedundantItem_CategoryPrecedence_NonMaster() {
-        val id1 = "master"
-        val id2 = "forgotten-and-dup"
-        val hash = "fixed-hash"
-        
-        val results = listOf(
-            createResult(id1, score = 0.9f),
-            createResult(id2, score = 0.1f, category = CleanupCategory.FORGOTTEN)
-        )
-        val metadata = mapOf(
-            id1 to createMetadata(id1, hash = hash),
-            id2 to createMetadata(id2, hash = hash)
-        )
-        
-        val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata)
-        
-        assertEquals(1, recommendations.size)
-        assertEquals(id2, recommendations[0].mediaId)
-        assertEquals(CleanupCategory.REDUNDANT, recommendations[0].category)
-    }
-
-    @Test
-    fun testRedundantItem_MasterStaysForgotten() {
-        val id1 = "forgotten-master"
-        val id2 = "even-worse-dup"
-        val hash = "fixed-hash"
-        
-        val results = listOf(
-            createResult(id1, score = 0.2f, category = CleanupCategory.FORGOTTEN),
-            createResult(id2, score = 0.1f, category = CleanupCategory.FORGOTTEN)
-        )
-        val metadata = mapOf(
-            id1 to createMetadata(id1, hash = hash),
-            id2 to createMetadata(id2, hash = hash)
-        )
-        
-        val recommendations = CleanupRecommendationEngine.generateRecommendations(results, metadata)
-        
-        assertEquals(2, recommendations.size)
-        val rec1 = recommendations.find { it.mediaId == id1 }!!
-        val rec2 = recommendations.find { it.mediaId == id2 }!!
-        
-        assertEquals(CleanupCategory.FORGOTTEN, rec1.category)
-        assertEquals(CleanupCategory.REDUNDANT, rec2.category)
-    }
-
-    @Test
     fun testStorageCalculation() {
         val recommendations = listOf(
-            CleanupRecommendation("1", 0.1f, 0.9f, CleanupCategory.FORGOTTEN, emptyList(), 100L, explanation = ""),
-            CleanupRecommendation("2", 0.1f, 0.9f, CleanupCategory.FORGOTTEN, emptyList(), 200L, explanation = "")
+            CleanupRecommendation("1", 0.1f, 0.9f, CleanupCategory.DELETE_RECOMMENDATIONS, emptyList(), 100L, explanation = ""),
+            CleanupRecommendation("2", 0.1f, 0.9f, CleanupCategory.DELETE_RECOMMENDATIONS, emptyList(), 200L, explanation = "")
         )
         
         val total = CleanupRecommendationEngine.calculatePotentialRecovery(recommendations)

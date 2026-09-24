@@ -452,7 +452,11 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
     
     private fun scoreMediaItemForPersonalization(mediaId: String): Float = getMediaItemById(mediaId)?.let { intelligenceCore?.scorePersonalization(it, _tasteDNA.value) } ?: 0.5f
     
-    private val pairwiseWins = mutableMapOf<String, Int>(); private val pairwiseLosses = mutableMapOf<String, Int>(); private val recentPairs = mutableListOf<Pair<String, String>>(); private val recentItemIds = mutableListOf<String>()
+    private val pairwiseLock = Any()
+    private val pairwiseWins = mutableMapOf<String, Int>()
+    private val pairwiseLosses = mutableMapOf<String, Int>()
+    private val recentPairs = mutableListOf<Pair<String, String>>()
+    private val recentItemIds = mutableListOf<String>()
     
     fun refreshPairwiseCandidatePoolAndSelectNext(forceNextPair: Boolean = true) {
         scope.launch {
@@ -483,10 +487,14 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
                 _pairwiseState.value = PairwiseComparison("p_empty", _pairwiseState.value.roundNumber, 50, emptyMediaItem, emptyMediaItem)
                 return@launch 
             }
+            val currentWins = synchronized(pairwiseLock) { pairwiseWins.toMap() }
+            val currentLosses = synchronized(pairwiseLock) { pairwiseLosses.toMap() }
+            val currentRecentPairs = synchronized(pairwiseLock) { recentPairs.toList() }
+            val currentRecentItemIds = synchronized(pairwiseLock) { recentItemIds.toList() }
             val top100 = RecommendationEngine.getTop100PairwiseCandidates(
                 repository = this@MediaRepository, 
-                winsMap = pairwiseWins, 
-                lossesMap = pairwiseLosses, 
+                winsMap = currentWins, 
+                lossesMap = currentLosses, 
                 mediaTypeFilter = mediaTypeFilter.name,
                 compareStrategy = _compareStrategy.value, 
                 compareSort = _compareSort.value,
@@ -500,8 +508,8 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
             val selectedPair = RecommendationEngine.selectNextPairFromPool(
                 top100, 
                 _comparisonCounts.value, 
-                if (session.isActive) session.comparedPairIds else recentPairs, 
-                if (session.isActive) session.comparedPairIds.flatMap { listOf(it.first, it.second) } else recentItemIds, 
+                if (session.isActive) session.comparedPairIds else currentRecentPairs, 
+                if (session.isActive) session.comparedPairIds.flatMap { listOf(it.first, it.second) } else currentRecentItemIds, 
                 mediaTypeFilter.name, 
                 _librarySessionSeed.value, 
                 DiscoveryPolicyManager.resolveStrategy(_discoveryPolicy.value, _userIntent.value, RecommendationObjective.RANKING_REFINEMENT, ConfidenceEngine.calculateDiscoveryState(items, _intelligenceStats.value), _tasteDNA.value, _preferenceProfile.value), 
@@ -514,11 +522,13 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
                 val round = if (session.isActive) session.roundNumber else (if (forceNextPair) _pairwiseState.value.roundNumber + 1 else _pairwiseState.value.roundNumber)
                 _pairwiseState.value = PairwiseComparison("p$round", round, if (session.isActive) session.maxRounds else 50, next.first, next.second)
                 if (!session.isActive) { 
-                    recentPairs.add(0, next.first.id to next.second.id)
-                    if (recentPairs.size > 10) recentPairs.removeAt(10)
-                    recentItemIds.add(0, next.first.id)
-                    recentItemIds.add(0, next.second.id)
-                    if (recentItemIds.size > 20) { recentItemIds.removeAt(20); recentItemIds.removeAt(19) } 
+                    synchronized(pairwiseLock) {
+                        recentPairs.add(0, next.first.id to next.second.id)
+                        if (recentPairs.size > 10) recentPairs.removeAt(10)
+                        recentItemIds.add(0, next.first.id)
+                        recentItemIds.add(0, next.second.id)
+                        while (recentItemIds.size > 20) { recentItemIds.removeAt(recentItemIds.size - 1) } 
+                    }
                 }
                 recordExposures(listOf(next.first.id, next.second.id))
             } else if (session.isActive && !session.isComplete) {
@@ -779,8 +789,51 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
     }
     
     private suspend fun discoverLocalMedia(context: Context): DiscoveryResult {
-        val entities = mutableListOf<MediaEntity>(); val ids = mutableSetOf<String>(); val volumes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.getExternalVolumeNames(context) else setOf("external")
-        volumes.forEach { vol -> context.contentResolver.query(MediaStore.Video.Media.getContentUri(vol), arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.TITLE, MediaStore.Video.Media.SIZE), null, null, null)?.use { cursor -> while (cursor.moveToNext()) { val id = cursor.getLong(0); entities.add(MediaEntity(id = "local_vid_$id", title = cursor.getString(1) ?: "Video", mediaType = "VIDEO", uriPath = ContentUris.withAppendedId(MediaStore.Video.Media.getContentUri(vol), id).toString(), sizeBytes = cursor.getLong(2))); ids.add("local_vid_$id") } } }
+        val entities = mutableListOf<MediaEntity>()
+        val ids = mutableSetOf<String>()
+        val volumes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.getExternalVolumeNames(context) else setOf("external")
+        volumes.forEach { vol ->
+            // Query Videos
+            context.contentResolver.query(
+                MediaStore.Video.Media.getContentUri(vol),
+                arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.TITLE, MediaStore.Video.Media.SIZE),
+                null, null, null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(0)
+                    entities.add(
+                        MediaEntity(
+                            id = "local_vid_$id",
+                            title = cursor.getString(1) ?: "Video",
+                            mediaType = "VIDEO",
+                            uriPath = ContentUris.withAppendedId(MediaStore.Video.Media.getContentUri(vol), id).toString(),
+                            sizeBytes = cursor.getLong(2)
+                        )
+                    )
+                    ids.add("local_vid_$id")
+                }
+            }
+            // Query Images
+            context.contentResolver.query(
+                MediaStore.Images.Media.getContentUri(vol),
+                arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.TITLE, MediaStore.Images.Media.SIZE),
+                null, null, null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(0)
+                    entities.add(
+                        MediaEntity(
+                            id = "local_img_$id",
+                            title = cursor.getString(1) ?: "Photo",
+                            mediaType = "PHOTO",
+                            uriPath = ContentUris.withAppendedId(MediaStore.Images.Media.getContentUri(vol), id).toString(),
+                            sizeBytes = cursor.getLong(2)
+                        )
+                    )
+                    ids.add("local_img_$id")
+                }
+            }
+        }
         return DiscoveryResult.Complete(entities, ids, volumes, setOf("VIDEO", "PHOTO"))
     }
     
@@ -920,7 +973,10 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
 
     fun setAutoScrollSpeed(speed: AutoScrollSpeed) { _autoScrollSpeed.value = speed }
     fun setGridDensity(density: Float) { _gridDensity.value = density }
-    fun setMediaItemsForTesting(items: List<MediaItem>) { _mediaItems.value = items }
+    fun setMediaItemsForTesting(items: List<MediaItem>) { 
+        _mediaItems.value = items 
+        _databaseState.value = DatabaseState.READY
+    }
     fun setDatabaseForTesting(db: AuraDatabase) { 
         observersJob?.cancel()
         database = db

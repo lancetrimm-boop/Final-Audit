@@ -99,7 +99,8 @@ fun CleanupReviewScreen(
                         onSelectAll = { viewModel.selectAllInCategory() },
                         onClearSelection = { viewModel.clearSelection() },
                         onUpdateSort = { viewModel.updateSort(it) },
-                        onKeepItem = { viewModel.keepItem(it) }
+                        onKeepItem = { viewModel.keepItem(it) },
+                        onViewMedia = onMediaDetail
                     )
                     
                     // Bulk Action Overlay
@@ -198,8 +199,15 @@ private fun CategoryTabs(
         val categories = CleanupCategory.entries.filter { it != CleanupCategory.NONE }
         items(categories) { cat ->
             val stat = stats[cat] ?: CategoryStat(0, 0L, 0f)
+            val label = when (cat) {
+                CleanupCategory.DELETE_RECOMMENDATIONS -> "DELETE RECS"
+                CleanupCategory.UNPLAYABLE_FILES -> "UNPLAYABLE"
+                CleanupCategory.SPACE_HOGS -> "SPACE HOGS"
+                CleanupCategory.REDUNDANT -> "REDUNDANT"
+                CleanupCategory.NONE -> ""
+            }
             CategoryChip(
-                label = cat.name.replace("_", " "),
+                label = label,
                 count = stat.count,
                 isSelected = selectedCategory == cat,
                 onClick = { onCategorySelect(cat) }
@@ -252,7 +260,8 @@ private fun RecommendationsList(
     onSelectAll: () -> Unit,
     onClearSelection: () -> Unit,
     onUpdateSort: (ReviewSort) -> Unit,
-    onKeepItem: (String) -> Unit
+    onKeepItem: (String) -> Unit,
+    onViewMedia: (MediaItem) -> Unit = {}
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -312,7 +321,8 @@ private fun RecommendationsList(
                     recommendation = rec,
                     isSelected = uiState.selectedIds.contains(rec.mediaId),
                     onToggleSelection = { onToggleSelection(rec.mediaId) },
-                    onKeep = { onKeepItem(rec.mediaId) }
+                    onKeep = { onKeepItem(rec.mediaId) },
+                    onViewMedia = { onViewMedia(item) }
                 )
             }
         }

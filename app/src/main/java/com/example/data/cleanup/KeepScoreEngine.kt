@@ -42,9 +42,14 @@ object KeepScoreEngine {
         
         // Engagement: 25% (Views, Plays, Duration)
         val engagementWeight = 0.25f
-        val viewScore = min(1.0f, input.viewCount / 5.0f)
-        val completionScore = input.completionPercentage
-        val engagementComponent = ((viewScore + completionScore) / 2.0f) * engagementWeight
+        val isUnreviewed = input.exposureCount == 0 && input.viewCount == 0 && input.playCount == 0
+        val engagementComponent = if (isUnreviewed) {
+            0.50f * engagementWeight // Neutral baseline: unreviewed media is not negative evidence
+        } else {
+            val viewScore = min(1.0f, input.viewCount / 5.0f)
+            val completionScore = input.completionPercentage
+            ((viewScore + completionScore) / 2.0f) * engagementWeight
+        }
         
         // Explicit Preference: 25% (Rating, Favorite)
         val preferenceWeight = 0.25f
@@ -122,18 +127,9 @@ object KeepScoreEngine {
             reasons.add(CleanupReason.FAVORITE_PROTECTED)
         }
         
-        // --- 5. Categorization ---
+        // --- 5. Categorization (Centralized in CleanupRecommendationEngine) ---
         
-        val category = when {
-            input.isFavorite -> CleanupCategory.NONE
-            reasons.contains(CleanupReason.HIGH_EXPOSURE_NO_ENGAGEMENT) -> CleanupCategory.FORGOTTEN
-            reasons.contains(CleanupReason.REPEATED_SKIP) -> CleanupCategory.NEVER_CONNECTED
-            input.fileSize > 100 * 1024 * 1024 && finalScore < 0.40f -> {
-                reasons.add(CleanupReason.LARGE_FILE_SIZE)
-                CleanupCategory.SPACE_HOGS
-            }
-            else -> CleanupCategory.NONE
-        }
+        val category = CleanupCategory.NONE
         
         // Confidence Score: Higher if we have more interaction history
         val interactionConfidence = min(1.0f, (input.exposureCount + input.viewCount * 2) / 30.0f)

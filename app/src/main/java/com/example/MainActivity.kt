@@ -656,6 +656,7 @@ fun AuraMainContent(repository: MediaRepository) {
                                 compareMediaType = compareMediaType,
                                 compareStrategy = compareStrategy,
                                 compareSort = compareSort,
+                                isRepositoryReady = (databaseState == com.example.data.DatabaseState.READY),
                                 onMediaTypeSelect = { filter -> repository.setCompareMediaType(filter) },
                                 onStrategySelect = { strategy -> repository.setCompareStrategy(strategy) },
                                 onSortSelect = { sort -> repository.setCompareSort(sort) },
@@ -780,7 +781,7 @@ fun AuraMainContent(repository: MediaRepository) {
                                     currentRoute = NavDestination.PROFILE.route
                                 },
                                 onMediaDetail = { item ->
-                                    // Navigate to detail
+                                    repository.setPlaylist(listOf(item), 0, "Smart Cleanup Review")
                                 },
                                 deleteLauncher = deleteRequestLauncher,
                                 onUnlockPro = onUnlockPro

@@ -40,7 +40,8 @@ fun CleanupMediaCard(
     recommendation: CleanupRecommendation,
     isSelected: Boolean,
     onToggleSelection: () -> Unit,
-    onKeep: () -> Unit
+    onKeep: () -> Unit,
+    onViewMedia: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -55,8 +56,8 @@ fun CleanupMediaCard(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.Top) {
-                // Thumbnail with Selection Overlay
-                Box(modifier = Modifier.size(100.dp)) {
+                // Thumbnail with Selection Overlay & View Action
+                Box(modifier = Modifier.size(100.dp).clickable { onViewMedia() }) {
                     AuraMediaThumbnail(
                         itemId = item.id,
                         mediaType = item.mediaType,
@@ -126,12 +127,6 @@ fun CleanupMediaCard(
                     Spacer(modifier = Modifier.height(12.dp))
                     
                     Text(
-                        text = "Confidence: ${(recommendation.confidenceScore * 100).toInt()}%",
-                        style = labelExtraSmall(),
-                        color = AuraMutedSlate.copy(alpha = 0.6f)
-                    )
-                    
-                    Text(
                         text = "${formatSize(recommendation.storageSize)} • ${item.mediaType}",
                         fontSize = 11.sp,
                         color = AuraMutedSlate.copy(alpha = 0.7f)
@@ -144,28 +139,37 @@ fun CleanupMediaCard(
             // Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                OutlinedButton(
+                    onClick = onViewMedia,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(24.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
+                ) {
+                    Text("VIEW", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuraMidnight)
+                }
+
                 OutlinedButton(
                     onClick = onKeep,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(24.dp), // Pill shape
+                    shape = RoundedCornerShape(24.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
                 ) {
-                    Text("KEEP", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuraMidnight)
+                    Text("KEEP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuraMidnight)
                 }
                 
                 Button(
                     onClick = onToggleSelection,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(24.dp), // Pill shape
+                    shape = RoundedCornerShape(24.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isSelected) DiscoveryViolet else DiscoveryViolet.copy(alpha = 0.1f)
                     )
                 ) {
                     Text(
                         text = if (isSelected) "SELECTED" else "DELETE",
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isSelected) Color.White else DiscoveryViolet
                     )

@@ -239,6 +239,16 @@ private fun RecommendationItemCard(rec: CleanupRecommendation) {
             Text("WHY:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AuraOnSurfaceVariant)
             Text(rec.explanation, fontSize = 13.sp, color = AuraOnSurface)
             
+            if (rec.reasons.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Factors: ${rec.reasons.joinToString(", ")}", fontSize = 11.sp, color = AuraMutedSlate)
+            }
+
+            if (rec.masterSelectionRationale != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(rec.masterSelectionRationale, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AuraPurple)
+            }
+            
             Spacer(modifier = Modifier.height(8.dp))
             
             Row(verticalAlignment = Alignment.CenterVertically) {

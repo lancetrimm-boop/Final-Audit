@@ -1,8 +1,8 @@
 package com.example.data.cleanup
 
 enum class CleanupCategory {
-    FORGOTTEN,
-    NEVER_CONNECTED,
+    DELETE_RECOMMENDATIONS,
+    UNPLAYABLE_FILES,
     SPACE_HOGS,
     REDUNDANT,
     NONE
