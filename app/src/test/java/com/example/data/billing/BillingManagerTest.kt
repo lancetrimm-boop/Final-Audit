@@ -22,7 +22,7 @@ class BillingManagerTest {
 
     @Before
     fun setup() {
-        billingManager = BillingManager(mock(), mockEntitlementRepo, testScope, mockProvider)
+        billingManager = BillingManager(mock(), mockEntitlementRepo, testScope, mockProvider, testDispatcher)
     }
 
     @Test

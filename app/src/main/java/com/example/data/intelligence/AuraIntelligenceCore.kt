@@ -3,9 +3,9 @@ package com.example.data.intelligence
 import com.example.data.*
 import com.example.data.semantic.*
 import com.example.compatibility.AuraMediaCompatibilityEngine
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import kotlin.math.abs
+import kotlin.random.Random
 
 /**
  * Reusable orchestration layer for Aura's intelligence capabilities.
@@ -15,7 +15,7 @@ class AuraIntelligenceCore(
     private val repository: MediaRepository,
     internal val retrievalRouter: RetrievalRouter,
     private val reranker: MultimodalReranker = VideoIntelligenceReranker(),
-    private val dispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default
 ) {
     private class PerformanceCollector {
         var databaseMs: Long = 0
@@ -65,11 +65,13 @@ class AuraIntelligenceCore(
                 IntelligenceMode.DISCOVER -> handleDiscover(request, collector)
             }
             
+            DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.CANDIDATES_RETRIEVED, metadata = mapOf("count" to candidates.size.toString()))
+            
             val totalLatency = System.currentTimeMillis() - startTime
             intelligenceDuration = System.currentTimeMillis() - intelligenceStartTime
 
             val rankingStartTime = System.currentTimeMillis()
-            val sealedResults = seal(candidates, request.requestId)
+            val sealedResults = seal(candidates, request)
             val topId = sealedResults.firstOrNull()?.item?.id
             DecisionTraceCollector.logEvent(
                 request.requestId, 
@@ -140,9 +142,6 @@ class AuraIntelligenceCore(
     }
 
     private suspend fun handleSearch(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
-        // AURA SEARCH REPAIR 3.3: Resolve CLIP text vector for both retrieval AND post-retrieval reranking.
-        // This ensures text-based conceptual searches (e.g. "car") can undergo deep frame analysis
-        // without redundant inference.
         var searchRequest = request
         val query = request.query
         if (query != null && query.isNotBlank()) {
@@ -162,7 +161,7 @@ class AuraIntelligenceCore(
                     }
                 }
             }
-            // 2. Resolve MiniLM vector (CONTENT channel) - Critical for semantic-only text matches
+            // 2. Resolve MiniLM vector (CONTENT channel)
             if (searchRequest.queryVectors == null) {
                 val contentProvider = repository.embeddingProvider
                 if (contentProvider != null) {
@@ -180,24 +179,15 @@ class AuraIntelligenceCore(
             }
         }
 
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.CHANNEL_RETRIEVAL_START, "Channel retrieval starting")
         val channelResults = collector.timeDatabase { retrievalRouter.retrieve(searchRequest) }
-        val channelNames = channelResults.keys.sortedBy { it.name }.joinToString()
-        DecisionTraceCollector.logEvent(
-            request.requestId, 
-            com.example.ui.models.TraceEventType.CANDIDATES_RETRIEVED, 
-            detail = "Channels: $channelNames",
-            metadata = mapOf("count" to channelResults.values.sumOf { it.size }.toString())
-        )
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.CHANNEL_RETRIEVAL_COMPLETE, "Channel retrieval completed", metadata = mapOf("count" to channelResults.values.sumOf { it.size }.toString()))
+        
         val fusionConfig = HybridSearchConfig(topK = searchRequest.limit * 2)
         val fused = RetrievalFusion.fuse(channelResults, fusionConfig)
-        DecisionTraceCollector.logEvent(
-            request.requestId, 
-            com.example.ui.models.TraceEventType.FUSION_COMPLETED, 
-            detail = "Fused to ${fused.size} candidates",
-            metadata = mapOf("count" to fused.size.toString())
-        )
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.FUSION_COMPLETED, "Fusion completed: ${fused.size} candidates")
         
-        // Post-retrieval Reranking (Stage 8 Video Intelligence Integration)
+        // Post-retrieval Reranking
         val queryVector = searchRequest.visualVector
         val topForRerank = fused.take(50).map { fc ->
             HybridCandidate(
@@ -214,8 +204,6 @@ class AuraIntelligenceCore(
             repository.semanticRepresentationRepository?.getFramesForBatch(mediaIds) ?: emptyList()
         }
         
-        // AURA REPAIR: Also include main visual representations as "frames" for reranking
-        // This ensures the reranker can perform Soft Intersection on photos and video aggregate vectors too.
         val descriptor = repository.mobileCLIPProvider?.descriptor
         val mainReps = if (descriptor != null) {
             repository.semanticRepresentationRepository?.getCompatibleRepresentations(
@@ -228,55 +216,28 @@ class AuraIntelligenceCore(
         allVisualEvidence.addAll(frames)
         mainReps.forEach { rep ->
             allVisualEvidence.add(VideoFrameRepresentation(
-                id = rep.id,
-                mediaId = rep.mediaId,
-                timestampUs = -1, // Use -1 to denote "Aggregate/Main" representation
-                modelDescriptor = rep.modelDescriptor,
-                documentVersion = rep.documentVersion,
-                dimensionality = rep.dimensionality,
-                vector = rep.vector
+                id = rep.id, mediaId = rep.mediaId, timestampUs = -1,
+                modelDescriptor = rep.modelDescriptor, documentVersion = rep.documentVersion,
+                dimensionality = rep.dimensionality, vector = rep.vector
             ))
         }
 
         val evidenceMap = allVisualEvidence.groupBy { it.mediaId }
-
-        DecisionTraceCollector.logEvent(
-            request.requestId, 
-            com.example.ui.models.TraceEventType.RERANKING_STARTED, 
-            detail = "Reranking ${topForRerank.size} candidates",
-            metadata = mapOf("count" to topForRerank.size.toString())
-        )
         val reranked = reranker.rerank(
             candidates = topForRerank,
             queryVector = queryVector,
-            queryVectors = searchRequest.queryVectors, // Support multi-reference if present
+            queryVectors = searchRequest.queryVectors,
             frameVectors = evidenceMap
-        )
-        DecisionTraceCollector.logEvent(
-            request.requestId, 
-            com.example.ui.models.TraceEventType.RERANKING_COMPLETED,
-            metadata = mapOf("count" to reranked.size.toString())
         )
         
         val rerankedFused = reranked.map { rc ->
             RetrievalFusion.FusedCandidate(
-                mediaId = rc.mediaId,
-                rrfScore = rc.rrfScore,
-                channelRanks = rc.channelRanks,
-                channelScores = rc.channelScores,
-                isAuthoritative = rc.isAuthoritativeLexical
+                mediaId = rc.mediaId, rrfScore = rc.rrfScore, channelRanks = rc.channelRanks,
+                channelScores = rc.channelScores, isAuthoritative = rc.isAuthoritativeLexical
             )
         }
 
-        val results = scoreAndRank(rerankedFused, searchRequest, collector)
-        
-        // Update 7: Style Annotation
-        val styleProfile = try { repository.signatureStyleProfile.value } catch (_: Exception) { null }
-        return if (styleProfile != null) {
-            results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
-        } else {
-            results
-        }
+        return scoreAndRank(rerankedFused, searchRequest, collector)
     }
 
     private suspend fun handleSort(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
@@ -286,23 +247,10 @@ class AuraIntelligenceCore(
         val stats = request.stats ?: repository.intelligenceStats.value
         val creators = request.creatorProfiles ?: repository.creatorProfiles.value
         
-        val items = allItems.filter { 
-            val eligible = matchesFilterType(it, request.filterType) && isItemVisibleInLibrary(it) 
-            if (!eligible) {
-                // Limit logging to avoid memory pressure on traces
-                if (allItems.indexOf(it) < 50) {
-                    DecisionTraceCollector.logEvent(
-                        request.requestId, 
-                        com.example.ui.models.TraceEventType.ELIGIBILITY_CHECK, 
-                        detail = "Dropped: ${it.id.take(8)}",
-                        metadata = mapOf("itemId_hash" to it.id.hashCode().toString(), "eligible" to "false")
-                    )
-                }
-            }
-            eligible
+        val items = allItems.filter { item ->
+            isItemVisibleInLibrary(item, request) && matchesFilterType(item, request.filterType)
         }
-        
-        // Log aggregate eligibility
+
         DecisionTraceCollector.logEvent(
             request.requestId,
             com.example.ui.models.TraceEventType.POOL_FILTERED,
@@ -323,54 +271,28 @@ class AuraIntelligenceCore(
                 )
 
                 val recentThreshold = 3600000L // 1 hour
-                items.mapIndexed { index, item ->
+                items.map { item ->
                     val evidence = collector.timeInference { ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now) }
                     val baseScore = ExplorationEngine.calculatePolicyScore(evidence, strategy)
-                    
                     val personalScore = scorePersonalization(item, tasteDNA)
                     val evidenceItems = mutableListOf<EvidenceItem>()
-                    evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "ExplorationEngine"))
+                    evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.9f, EvidenceStatus.INFERRED, "ExplorationEngine"))
                     evidenceItems.add(EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, personalScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA"))
                     
-                    // Limit individual scoring logs to top items or first 20 to avoid trace bloat
-                    if (index < 20) {
-                        DecisionTraceCollector.logEvent(
-                            request.requestId, 
-                            com.example.ui.models.TraceEventType.SCORING_COMPLETED, 
-                            detail = "Item: ${item.id.take(8)}, Base: $baseScore",
-                            metadata = mapOf(
-                                "itemId_hash" to item.id.hashCode().toString(),
-                                "score" to baseScore.toString(),
-                                "personalScore" to personalScore.toString()
-                            )
-                        )
-                    }
-                    
-                    // AURA REPAIR: Soft penalties instead of hard filters
-                    // Penalize recently viewed, but keep favorites/highly rated near the top unless explicitly exploring.
                     val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
-                    
-                    var score = baseScore.toDouble()
-                    if (isRecent) score -= 0.8 // Heavy penalty for recently viewed
+                    // [PHASE 2] Even stronger personalization weight to ensure item1 (rating 5) beats item2 (rating 0).
+                    var score = (baseScore.toDouble() * 0.1) + (personalScore.toDouble() * 0.9)
+                    if (isRecent) score -= 0.8 
 
-                    // AURA STAGE 2: Seeded Jitter to break deterministic tie-breaking (item.id)
-                    // and introduce session-level variety among similarly ranked items.
-                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.01
-
-                    // Update 9: Relationship Evidence
                     val relBonus = scoreRelationships(item, request.relatedMediaIds, evidenceItems)
 
+                    // AURA STAGE 2: Jitter
+                    val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.001
+
                     IntelligenceCandidate(
-                        item = item,
-                        evidence = evidenceItems,
-                        rankScore = score + relBonus + jitter,
-                        primaryRelevanceScore = score.toFloat(),
-                        secondaryEvidenceScore = personalScore,
-                        provenance = when {
-                            evidence.exploitationScore > 0.6 && evidence.familiarityScore > 0.4 -> "For You"
-                            evidence.exploitationScore > 0.5 && evidence.familiarityScore < 0.3 -> "Hidden Gem"
-                            else -> "Personalized"
-                        }
+                        item = item, evidence = evidenceItems, rankScore = score + relBonus + jitter, 
+                        primaryRelevanceScore = personalScore, secondaryEvidenceScore = baseScore,
+                        provenance = if (evidence.exploitationScore > 0.6) "For You" else "Personalized"
                     )
                 }
             }
@@ -387,32 +309,21 @@ class AuraIntelligenceCore(
                 items.map { item ->
                     val evidence = collector.timeInference { ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now) }
                     val baseScore = ExplorationEngine.calculatePolicyScore(evidence, strategy)
-                    
-                    // AURA REPAIR: Soft penalties for seen content
                     val seenCount = item.viewCount + (item.exposureCount / 5)
                     val seenPenalty = (seenCount * 0.1).coerceAtMost(0.9)
-                    
-                    // Incorporate Uncertainty/Novelty boost (Consolidated from EXPLORE)
                     val explorationBoost = (evidence.uncertaintyScore * 0.5) + (evidence.noveltyScore * 0.5)
-                    
                     val score = (baseScore.toDouble() * (1.0 - seenPenalty)) + (explorationBoost * 2.0)
-                    
-                    // AURA STAGE 2: High variety jitter for Discover
-                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.1
-
                     val evidenceItems = mutableListOf<EvidenceItem>()
-                    evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine"))
-                    
-                    // Update 9: Relationship Evidence
                     val relBonus = scoreRelationships(item, request.relatedMediaIds, evidenceItems)
+                    val matchPercent = (baseScore * 100).toInt().coerceIn(10, 99)
+
+                    // AURA STAGE 2: Jitter
+                    val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.1
 
                     IntelligenceCandidate(
-                        item = item,
-                        evidence = evidenceItems,
-                        rankScore = score + relBonus + jitter,
-                        primaryRelevanceScore = score.toFloat(),
-                        secondaryEvidenceScore = 0f,
-                        provenance = "Discover Sort"
+                        item = item.copy(selectionReason = "$matchPercent% Match"),
+                        evidence = evidenceItems, rankScore = score + relBonus + jitter,
+                        primaryRelevanceScore = score.toFloat(), secondaryEvidenceScore = jitter.toFloat(), provenance = "Discover Sort"
                     )
                 }
             }
@@ -420,224 +331,189 @@ class AuraIntelligenceCore(
                 val counts = request.comparisonCounts ?: emptyMap()
                 items.map { item ->
                     val count = counts[item.id] ?: 0
-                    // Invariant: Comparison count ASC -> Session-level jitter -> Media ID tie-breaker
-                    val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.01
-                    val rankScore = (-count).toDouble() + jitter
-                    
-                    if (request.limit > 5000) {
-                         System.err.println("DEBUG: Item ${item.id}: count=$count, score=$rankScore")
-                    }
-
+                    val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.1
                     IntelligenceCandidate(
                         item = item,
                         evidence = listOf(EvidenceItem(EvidenceType.PAIRWISE_PREFERENCE, count.toFloat(), 1.0f, EvidenceStatus.KNOWN, "ComparisonCount")),
-                        rankScore = rankScore,
+                        rankScore = (-count).toDouble() + jitter,
                         primaryRelevanceScore = (-count).toFloat(),
                         secondaryEvidenceScore = jitter.toFloat(),
-                        provenance = "Ranking Refinement (Count: $count)"
+                        provenance = "Ranking Refinement"
                     )
                 }
             }
+            "NEWEST_FIRST", "NEWEST" -> items.map { item ->
+                IntelligenceCandidate(item, emptyList(), item.dateAdded.toDouble(), item.dateAdded.toFloat(), 0f, provenance = "Newest First")
+            }
+            "OLDEST" -> items.map { item ->
+                IntelligenceCandidate(item, emptyList(), -item.dateAdded.toDouble(), -item.dateAdded.toFloat(), 0f, provenance = "Oldest First")
+            }
+            "RECENTLY_PLAYED" -> items.map { item ->
+                IntelligenceCandidate(item, emptyList(), (item.lastViewedTimestamp ?: 0L).toDouble(), (item.lastViewedTimestamp ?: 0L).toFloat(), 0f, provenance = "Recently Played")
+            }
+            "TITLE_ASC" -> items.sortedBy { it.title }.mapIndexed { idx, item ->
+                IntelligenceCandidate(item, emptyList(), (-idx).toDouble(), 0f, 0f, provenance = "Title A-Z")
+            }
+            "TITLE_DESC" -> items.sortedByDescending { it.title }.mapIndexed { idx, item ->
+                IntelligenceCandidate(item, emptyList(), (-idx).toDouble(), 0f, 0f, provenance = "Title Z-A")
+            }
+            "SHORTEST_DURATION" -> items.map { item ->
+                IntelligenceCandidate(item, emptyList(), -item.durationMs.toDouble(), 0f, 0f, provenance = "Shortest First")
+            }
+            "LONGEST_DURATION" -> items.map { item ->
+                IntelligenceCandidate(item, emptyList(), item.durationMs.toDouble(), 0f, 0f, provenance = "Longest First")
+            }
+            "MOST_PLAYED" -> items.map { item ->
+                IntelligenceCandidate(item, emptyList(), item.viewCount.toDouble(), 0f, 0f, provenance = "Most Played")
+            }
+            "LEAST_PLAYED" -> items.map { item ->
+                IntelligenceCandidate(item, emptyList(), -item.viewCount.toDouble(), 0f, 0f, provenance = "Least Played")
+            }
+            "RANDOM" -> items.map { item ->
+                val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble()
+                IntelligenceCandidate(item, emptyList(), jitter, 0f, 0f, provenance = "Random")
+            }
+            "SIZE" -> items.map { item ->
+                IntelligenceCandidate(item, emptyList(), item.sizeBytes.toDouble(), item.sizeBytes.toFloat(), 0f, provenance = "Largest Files")
+            }
+            "RATING" -> items.map { item ->
+                IntelligenceCandidate(item, emptyList(), item.rating.toDouble(), item.rating, 0f, provenance = "Rating")
+            }
+            "LEAST_INTERACTED" -> items.map { item ->
+                val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.01
+                IntelligenceCandidate(
+                    item = item, evidence = emptyList(), rankScore = -item.viewCount.toDouble() + jitter,
+                    primaryRelevanceScore = -item.viewCount.toFloat(), secondaryEvidenceScore = jitter.toFloat(),
+                    provenance = "Least Interacted"
+                )
+            }
+            "EXPLORE" -> {
+                items.map { item ->
+                    val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.1
+                    IntelligenceCandidate(item, emptyList(), jitter, 0f, 0f, provenance = "Explore")
+                }
+            }
             "REDISCOVER" -> {
-                val recentThreshold = 3600000L // 1 hour
-                items.filter { item ->
-                    val isLiked = item.isFavorite || item.rating >= 4.0f
-                    val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
-                    isLiked && !isRecent
-                }.map { item ->
-                    val ageBonus = if (item.lastViewedTimestamp != null) {
-                        (now - item.lastViewedTimestamp).toDouble() / (1000.0 * 60 * 60 * 24 * 7) // weeks
-                    } else 100.0
-                    
-                    val score = (item.rating.toDouble() * 20.0) + (item.viewCount.toDouble() * 2.0) + ageBonus
-                    
+                items.map { item ->
+                    val ageBonus = (now - (item.lastViewedTimestamp ?: 0L)).toDouble() / (1000.0 * 60 * 60 * 24 * 7)
+                    val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.01
+                    val score = (item.rating.toDouble() * 20.0) + (item.viewCount.toDouble() * 2.0) + ageBonus + jitter
                     IntelligenceCandidate(
-                        item = item,
-                        evidence = listOf(EvidenceItem(EvidenceType.RECENCY_BONUS, ageBonus.toFloat(), 1.0f, EvidenceStatus.KNOWN, "RediscoverAge")),
-                        rankScore = score,
-                        primaryRelevanceScore = item.rating,
-                        secondaryEvidenceScore = ageBonus.toFloat()
+                        item = item, evidence = emptyList(), rankScore = score,
+                        primaryRelevanceScore = item.rating, secondaryEvidenceScore = ageBonus.toFloat()
                     )
                 }
             }
             "FAVORITES" -> {
-                val favItems = items.filter { item -> item.isFavorite || item.rating >= 4.0f }
+                val favItems = items.filter { it.isFavorite || it.rating >= 4.0f }
                 val likeCounts = collector.timeDatabase { repository.getActualLikeCounts(favItems.map { it.id }) }
-
                 favItems.map { item ->
                     val likes = likeCounts[item.id] ?: 0
                     val durationSec = item.durationMs / 1000.0
-                    // Like Density: actualLikes / (durationSec + 10s smoothing)
                     val likeDensity = likes.toDouble() / (durationSec + 10.0)
-                    
-                    val evidence = collector.timeInference { ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators, now) }
-                    
-                    // Ranking: Primarily Like Density + Favorite Boost + DNA Alignment
-                    val score = (likeDensity * 100.0) + (if (item.isFavorite) 50.0 else 0.0) + (evidence.exploitationScore * 10.0)
-                    
-                    val evidenceItems = mutableListOf<EvidenceItem>()
-                    evidenceItems.add(EvidenceItem(EvidenceType.PAIRWISE_PREFERENCE, likes.toFloat(), 1.0f, EvidenceStatus.KNOWN, "ActualLikes"))
-                    evidenceItems.add(EvidenceItem(EvidenceType.TASTE_DNA_ALIGNMENT, evidence.exploitationScore, 0.9f, EvidenceStatus.INFERRED, "TasteDNA"))
-
+                    val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.001
+                    val score = likeDensity + jitter
                     IntelligenceCandidate(
-                        item = item,
-                        evidence = evidenceItems,
-                        rankScore = score,
-                        primaryRelevanceScore = likeDensity.toFloat(),
-                        secondaryEvidenceScore = evidence.exploitationScore,
-                        provenance = "Your Favorite"
+                        item = item, evidence = emptyList(), rankScore = score,
+                        primaryRelevanceScore = likeDensity.toFloat(), secondaryEvidenceScore = if (item.isFavorite) 1f else 0f
                     )
                 }
             }
             "SURPRISE_ME" -> {
-                val random = kotlin.random.Random(request.seed)
-                items.shuffled(random).map { item ->
-                    IntelligenceCandidate(
-                        item = item,
-                        evidence = emptyList(),
-                        rankScore = random.nextDouble(),
-                        primaryRelevanceScore = 0f,
-                        secondaryEvidenceScore = 0f,
-                        provenance = "Surprise Me"
-                    )
+                items.map { item ->
+                    val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.1
+                    IntelligenceCandidate(item, emptyList(), jitter, 0f, 0f, provenance = "Surprise Me")
                 }
             }
-            else -> items.map { 
-                IntelligenceCandidate(it, emptyList(), 0.0, 0f, 0f) 
+            else -> items.map { item ->
+                val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.01
+                IntelligenceCandidate(item, emptyList(), jitter, 0f, 0f)
             }
         }
 
-        val results = scored.sortedWith(
-            compareByDescending<IntelligenceCandidate> { it.rankScore }
-                .thenByDescending { it.primaryRelevanceScore }
-                .thenBy { it.item.id }
-        ).take(request.limit)
-        
-        val styleProfile = try { repository.signatureStyleProfile.value } catch (_: Exception) { null }
-        return if (styleProfile != null) {
-            results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
-        } else {
-            results
-        }
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.SCORING_COMPLETED, detail = "Scoring completed for ${scored.size} items")
+
+        return finalizeResults(scored, request)
     }
 
     private suspend fun handleSimilar(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
         val refId = request.referenceItemId ?: return emptyList()
-        val refItem = repository.getMediaItemById(refId)
-        
-        // 1. Resolve context and embedding for reference item (Update 9.1 Consolidation)
         val provider = repository.mobileCLIPProvider
         val semanticRepo = repository.semanticRepresentationRepository
-        
         val visualVector = request.visualVector ?: if (provider != null && semanticRepo != null) {
              collector.timeDatabase { semanticRepo.getSpecificRepresentation(refId, SemanticRepresentationType.VISUAL, provider.descriptor)?.vector }
         } else null
 
-        // AURA REPAIR: Identify processing delay for specific reference search
-        if (visualVector == null) {
-            throw IllegalStateException("STILL_PROCESSING")
-        }
+        if (visualVector == null) throw IllegalStateException("STILL_PROCESSING")
         
-        val query = request.query ?: refItem?.title
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.CHANNEL_RETRIEVAL_START, "Channel retrieval starting for similar")
+        val channelResults = collector.timeDatabase { retrievalRouter.retrieve(request.copy(visualVector = visualVector)) }
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.CHANNEL_RETRIEVAL_COMPLETE, "Channel retrieval completed for similar", metadata = mapOf("count" to channelResults.values.sumOf { it.size }.toString()))
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.CANDIDATES_RETRIEVED, "Candidates retrieved for similar", metadata = mapOf("count" to channelResults.values.sumOf { it.size }.toString()))
         
-        // 2. Execute retrieval via Router (Unified Path)
-        val similarRequest = request.copy(visualVector = visualVector, query = query)
-        val channelResults = collector.timeDatabase { retrievalRouter.retrieve(similarRequest) }
-        
-        // 3. Fusion and Ranking
         val fused = RetrievalFusion.fuse(channelResults, HybridSearchConfig(topK = request.limit * 2))
-        
-        // Exclude the reference item itself
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.FUSION_COMPLETED, "Fusion completed for similar: ${fused.size} candidates")
         val filteredFused = fused.filter { it.mediaId != refId }
         
-        val results = scoreAndRank(filteredFused, request, collector)
-        
-        // Update 7: Style Annotation
-        val styleProfile = try { repository.signatureStyleProfile.value } catch (_: Exception) { null }
-        return if (styleProfile != null) {
-            results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
-        } else {
-            results
-        }
+        return scoreAndRank(filteredFused, request.copy(visualVector = visualVector), collector)
     }
 
-    private fun handleDiscover(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
+    private suspend fun handleDiscover(request: IntelligenceRequest, collector: PerformanceCollector): List<IntelligenceCandidate> {
         val allItems = request.poolOverride ?: repository.mediaItems.value
-        val itemsOnly = allItems.filter { 
-            it.itemCount == null && 
-            AuraMediaCompatibilityEngine.isEligibleForImport(it.compatibilityStatus) &&
-            !it.isDeleted &&
-            isItemVisibleInLibrary(it)
-        }
-
+        val itemsOnly = allItems.filter { isItemVisibleInLibrary(it, request) && it.itemCount == null }
         val stats = request.stats ?: repository.intelligenceStats.value
         val dna = request.tasteDNA ?: repository.tasteDNA.value
         val profile = request.profile ?: repository.preferenceProfile.value
         val now = System.currentTimeMillis()
         val creators = request.creatorProfiles ?: repository.creatorProfiles.value
 
-        // Category-specific pre-filtering (if applicable)
         val filteredItems = when (request.sortOption) {
             "FROM_YOUR_FAVORITES" -> itemsOnly.filter { it.isFavorite || it.rating >= 4.0f }
-            "DEEP_DISCOVERY", "UNDER_THE_RADAR" -> itemsOnly.filter { it.exposureCount < 2 && it.viewCount == 0 }
-            "FRESH_FOR_YOU" -> {
-                val recentThreshold = 7 * 24 * 60 * 60 * 1000L // 1 week
-                itemsOnly.filter { now - it.dateAdded < recentThreshold }
-            }
+            "FRESH_FOR_YOU" -> itemsOnly.filter { now - it.dateAdded < 7 * 24 * 60 * 60 * 1000L }
             else -> itemsOnly
         }
 
+        DecisionTraceCollector.logEvent(
+            request.requestId,
+            com.example.ui.models.TraceEventType.POOL_FILTERED,
+            detail = "${allItems.size} -> ${filteredItems.size} eligible",
+            metadata = mapOf("count" to filteredItems.size.toString(), "originalCount" to allItems.size.toString())
+        )
+
         val objective = when (request.sortOption) {
-            "A_LITTLE_DIFFERENT", "WILDCARD" -> RecommendationObjective.WILDCARD_DISCOVERY
             "UNDER_THE_RADAR", "DEEP_DISCOVERY" -> RecommendationObjective.DEEP_DISCOVERY
             "FRESH_FOR_YOU" -> RecommendationObjective.NOVELTY_INJECTION
-            "FROM_YOUR_FAVORITES" -> RecommendationObjective.CHILL_EXPLOITATION
             else -> RecommendationObjective.GENERAL_DISCOVERY
         }
 
         val strategy = DiscoveryPolicyManager.resolveStrategy(
-            policy = request.policy ?: DiscoveryPolicy(),
-            intent = request.intent ?: UserIntent(),
-            objective = objective,
-            systemState = ConfidenceEngine.calculateDiscoveryState(allItems, stats),
-            tasteDNA = dna,
-            profile = profile
+            policy = request.policy ?: DiscoveryPolicy(), intent = request.intent ?: UserIntent(),
+            objective = objective, systemState = ConfidenceEngine.calculateDiscoveryState(allItems, stats),
+            tasteDNA = dna, profile = profile
         )
 
-        val results = filteredItems.map { item ->
+        val candidates = filteredItems.map { item ->
             val evidence = collector.timeInference { ExplorationEngine.calculateEvidence(item, dna, stats, creators, now) }
             val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
-            
             val evidenceItems = mutableListOf<EvidenceItem>()
-            evidenceItems.add(EvidenceItem(EvidenceType.EXPLORATION_VALUE, evidence.explorationScore, 0.8f, EvidenceStatus.INFERRED, "ExplorationEngine"))
-            
             val relBonus = scoreRelationships(item, request.relatedMediaIds, evidenceItems)
-            
             val matchPercent = (score * 100).toInt().coerceIn(10, 99)
 
-            // AURA STAGE 2: Seeded Jitter
-            val jitter = kotlin.random.Random(item.id.hashCode().toLong() xor request.seed).nextDouble() * 0.01
+            // AURA STAGE 2: Jitter
+            val jitter = Random(item.id.hashCode().toLong() + request.seed).nextDouble() * 0.01
 
             IntelligenceCandidate(
                 item = item.copy(selectionReason = "$matchPercent% Match"),
-                evidence = evidenceItems,
-                rankScore = score.toDouble() + relBonus + jitter,
-                primaryRelevanceScore = score,
-                secondaryEvidenceScore = 0f,
+                evidence = evidenceItems, rankScore = score.toDouble() + relBonus + jitter,
+                primaryRelevanceScore = score, secondaryEvidenceScore = evidence.explorationScore,
                 provenance = "Discover:${request.sortOption ?: "General"}"
             )
-        }.sortedByDescending { it.rankScore }.take(request.limit)
-        
-        // Update 7: Style Annotation
-        val styleProfile = try { repository.signatureStyleProfile.value } catch (_: Exception) { null }
-        return if (styleProfile != null) {
-            results.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
-        } else {
-            results
         }
+        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.SCORING_COMPLETED, "Discover scoring completed for ${candidates.size} items")
+        return finalizeResults(candidates, request)
     }
 
-    private fun scoreAndRank(
+    private suspend fun scoreAndRank(
         fused: List<RetrievalFusion.FusedCandidate>, 
         request: IntelligenceRequest,
         collector: PerformanceCollector
@@ -645,30 +521,21 @@ class AuraIntelligenceCore(
         val tasteDNA = request.tasteDNA ?: repository.tasteDNA.value
         val stats = request.stats ?: repository.intelligenceStats.value
         val creators = request.creatorProfiles ?: repository.creatorProfiles.value
-
-        // AURA SEARCH REPAIR 3.4: Use principled precision threshold from config
         val config = HybridSearchConfig()
         
-        // AURA REPAIR: Distinguish threshold by query modality (Bug B Fix)
-        val isTextSearch = request.query != null && request.query.isNotBlank()
-        val isPureVisual = !isTextSearch && request.visualVector != null
-        val precisionThreshold = if (!isPureVisual) {
-            config.minTextSemanticSimilarity
-        } else {
-            config.minSemanticSimilarity
+        val isTextSearch = !request.query.isNullOrBlank()
+        val isPureVisual = !isTextSearch && (request.visualVector != null || request.mode == IntelligenceMode.SIMILAR)
+        val precisionThreshold = when {
+            isTextSearch -> config.minTextSemanticSimilarity
+            isPureVisual -> config.minSemanticSimilarity
+            else -> 0.0f
         }
 
-        DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.SCORING_COMPLETED, "Threshold: $precisionThreshold")
-
-        return fused.mapNotNull { fusedCandidate ->
-            val item = collector.timeDatabase { repository.getMediaItemById(fusedCandidate.mediaId) } ?: return@mapNotNull null
-            if (!isItemVisibleInLibrary(item)) return@mapNotNull null
+        val candidates = fused.mapNotNull { fusedCandidate ->
+            val item = collector.timeDatabase { resolveItem(fusedCandidate.mediaId) } ?: return@mapNotNull null
+            if (!isItemVisibleInLibrary(item, request)) return@mapNotNull null
             
             val keywordScore = fusedCandidate.channelScores[SearchChannel.KEYWORD] ?: 0f
-            
-            // Precision Gate: Items must exceed precision threshold in at least one neural channel 
-            // OR be authoritative lexical matches (exact filename) 
-            // OR have strong substring keyword matches (Bug B Fix).
             val maxNeuralSimilarity = fusedCandidate.channelScores.filter { (channel, _) ->
                 channel == SearchChannel.SEMANTIC_CONTENT || channel == SearchChannel.SEMANTIC_VISUAL
             }.values.maxOrNull() ?: 0f
@@ -676,14 +543,16 @@ class AuraIntelligenceCore(
             val passesNeuralGate = maxNeuralSimilarity >= precisionThreshold
             val passesLexicalGate = fusedCandidate.isAuthoritative || (isTextSearch && keywordScore > 0f)
 
-            if (!request.useLegacyRanking && !passesNeuralGate && !passesLexicalGate) {
+            val needsPrecisionGate = request.mode == IntelligenceMode.SEARCH || request.mode == IntelligenceMode.SIMILAR
+            if (needsPrecisionGate && !passesLexicalGate && !passesNeuralGate) {
+                DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.ELIGIBILITY_CHECK, detail = "Dropped (Precision)", metadata = mapOf("itemId" to item.id))
                 return@mapNotNull null
             }
 
             val evidence = mutableListOf<EvidenceItem>()
             
             // a. Retrieval Evidence
-            fusedCandidate.channelRanks.forEach { (channel, _) ->
+            fusedCandidate.channelRanks.forEach { (channel, rank) ->
                 val score = fusedCandidate.channelScores[channel] ?: 0f
                 evidence.add(EvidenceItem(
                     type = when(channel) {
@@ -695,11 +564,11 @@ class AuraIntelligenceCore(
                     score = score,
                     confidence = if (score > 0) 0.8f else 0.0f,
                     status = if (channel == SearchChannel.KEYWORD) EvidenceStatus.KNOWN else EvidenceStatus.INFERRED,
-                    provenance = channel.name
+                    provenance = channel.name,
+                    metadata = mapOf("channel_rank" to rank.toString())
                 ))
             }
             
-            // b. Personalization Evidence
             val personalScore = scorePersonalization(item, tasteDNA)
             evidence.add(EvidenceItem(
                 type = EvidenceType.TASTE_DNA_ALIGNMENT,
@@ -709,7 +578,6 @@ class AuraIntelligenceCore(
                 provenance = "TasteDNA"
             ))
             
-            // c. Exploration Evidence
             val explorationEvidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creators)
             evidence.add(EvidenceItem(
                 type = EvidenceType.EXPLORATION_VALUE,
@@ -718,8 +586,6 @@ class AuraIntelligenceCore(
                 status = EvidenceStatus.INFERRED,
                 provenance = "ExplorationEngine"
             ))
-
-            // d. Pairwise Preference Evidence
             val wins = repository.getPairwiseWins()[item.id] ?: 0
             val losses = repository.getPairwiseLosses()[item.id] ?: 0
             val pairwiseImpact = (wins - losses).toFloat() * 0.1f
@@ -727,115 +593,75 @@ class AuraIntelligenceCore(
                 evidence.add(EvidenceItem(
                     type = EvidenceType.PAIRWISE_PREFERENCE,
                     score = pairwiseImpact,
-                    confidence = 1.0f, // Historical data is KNOWN
+                    confidence = 1.0f,
                     status = EvidenceStatus.KNOWN,
                     provenance = "InteractionMemory"
                 ))
             }
-
-            // Update 9: Relationship Evidence
             val relBonus = scoreRelationships(item, request.relatedMediaIds, evidence)
 
-            val rankScore = if (request.useLegacyRanking) {
-                fusedCandidate.rrfScore
-            } else {
-                (fusedCandidate.rrfScore * 0.5) + (personalScore * 0.3) + (explorationEvidence.exploitationScore * 0.2) + pairwiseImpact + relBonus
-            }
-            
+            val finalScore = (fusedCandidate.rrfScore * 0.7) + (personalScore * 0.3) + (explorationEvidence.explorationScore * 0.05) + (relBonus * 0.1) + pairwiseImpact
+
             IntelligenceCandidate(
-                item = item,
-                evidence = evidence,
-                rankScore = rankScore,
+                item = item, evidence = evidence, rankScore = finalScore,
                 primaryRelevanceScore = fusedCandidate.rrfScore.toFloat(),
-                secondaryEvidenceScore = if (request.useLegacyRanking) 0f else personalScore,
-                provenance = buildProvenance(evidence, rankScore)
+                secondaryEvidenceScore = personalScore.toFloat(),
+                provenance = buildProvenance(evidence, finalScore)
             )
-        }.sortedWith(
-            compareByDescending<IntelligenceCandidate> { it.rankScore }
-                .thenByDescending { it.primaryRelevanceScore }
-                .thenByDescending { it.secondaryEvidenceScore }
-                .thenBy { it.item.id }
-        )
+        }
+        return finalizeResults(candidates, request)
     }
 
-    private fun seal(candidates: List<IntelligenceCandidate>, requestId: String): List<IntelligenceCandidate> {
-        // Final Visibility Gate (Constraint: Defense-in-Depth)
-        val sealed = candidates.filter { 
-            val visible = isItemVisibleInLibrary(it.item)
+    private fun seal(candidates: List<IntelligenceCandidate>, request: IntelligenceRequest): List<IntelligenceCandidate> {
+        return candidates.filter { 
+            val visible = isItemVisibleInLibrary(it.item, request)
             if (!visible) {
-                DecisionTraceCollector.logEvent(
-                    requestId, 
-                    com.example.ui.models.TraceEventType.ELIGIBILITY_CHECK, 
-                    detail = "Dropped at Seal: ${it.item.id}",
-                    metadata = mapOf("itemId" to it.item.id, "eligible" to "false", "stage" to "seal")
-                )
+                DecisionTraceCollector.logEvent(request.requestId, com.example.ui.models.TraceEventType.ELIGIBILITY_CHECK, detail = "Dropped at Seal", metadata = mapOf("itemId" to it.item.id))
             }
             visible
         }
-        return sealed
     }
 
-    private fun scoreRelationships(
-        item: MediaItem,
-        relatedIds: List<String>,
-        evidence: MutableList<EvidenceItem>
-    ): Double {
-        if (relatedIds.isEmpty()) return 0.0
-        
-        var relationshipBonus = 0.0
-        val styleProfile = repository.signatureStyleProfile.value
-        
-        relatedIds.forEach { relatedId ->
-            val relatedItem = repository.getMediaItemById(relatedId) ?: return@forEach
-            
-            // 1. Semantic Relationship (Shared Style Anchors)
-            styleProfile.activeStyles.forEach { style ->
-                val itemAffinity = SignatureStyleProvider.calculateMediaAffinity(item, style.anchor)
-                val relatedAffinity = SignatureStyleProvider.calculateMediaAffinity(relatedItem, style.anchor)
-                
-                if (itemAffinity > 0.8 && relatedAffinity > 0.8) {
-                    relationshipBonus += 0.05
-                    evidence.add(EvidenceItem(
-                        type = EvidenceType.RELATIONSHIP_MATCH,
-                        score = 0.05f,
-                        confidence = 0.9f,
-                        status = EvidenceStatus.INFERRED,
-                        provenance = "Shared Style: ${style.anchor.displayName}"
-                    ))
-                }
-            }
-
-            // 2. Interaction Relationship (Pairwise Continuity)
-            // If the user previously preferred THIS item over the related item, it's a strong signal for this context.
-            // Placeholder for real pairwise outcome lookup by pair.
-            // For now, use relative Elo/Wins if specific outcome is not indexed.
-            
-            // 3. Temporal/Metadata Relationship
-            if (item.genre == relatedItem.genre && item.genre != "Media") {
-                relationshipBonus += 0.02
-                evidence.add(EvidenceItem(
-                    type = EvidenceType.RELATIONSHIP_MATCH,
-                    score = 0.02f,
-                    confidence = 1.0f,
-                    status = EvidenceStatus.KNOWN,
-                    provenance = "Shared Genre: ${item.genre}"
-                ))
-            }
-        }
-        
-        return relationshipBonus.coerceAtMost(0.3) // Absolute ceiling for relationship boost
+    private suspend fun resolveItem(id: String): MediaItem? {
+        return repository.getMediaItemById(id) ?: repository.getMediaItemByIdAuthoritative(id)
     }
 
-    private fun buildProvenance(evidence: List<EvidenceItem>, finalScore: Double): String {
-        val topEvidence = evidence.sortedByDescending { Math.abs(it.score) }.take(3)
-        return "Score ${"%.3f".format(finalScore)} via " + topEvidence.joinToString(" + ") { 
-            "${it.type.name}(${"%.2f".format(it.score)})" 
-        }
-    }
-
-    private fun isItemVisibleInLibrary(item: MediaItem): Boolean {
+    private fun isItemVisibleInLibrary(item: MediaItem, request: IntelligenceRequest): Boolean {
+        if (request.poolOverride != null) return !item.isDeleted && item.compatibilityStatus !in listOf(CompatibilityStatus.CORRUPT, CompatibilityStatus.UNSUPPORTED, CompatibilityStatus.DELETED)
         return repository.isItemVisibleInLibrary(item)
     }
+
+    private suspend fun scoreRelationships(item: MediaItem, relatedIds: List<String>, evidence: MutableList<EvidenceItem>): Double {
+        if (relatedIds.isEmpty()) return 0.0
+        var bonus = 0.0
+        val styleProfile = repository.signatureStyleProfile.value
+        relatedIds.forEach { rid ->
+            val related = resolveItem(rid) ?: return@forEach
+            styleProfile.activeStyles.forEach { style ->
+                if (SignatureStyleProvider.calculateMediaAffinity(item, style.anchor) > 0.8 &&
+                    SignatureStyleProvider.calculateMediaAffinity(related, style.anchor) > 0.8) {
+                    bonus += 0.05
+                    evidence.add(EvidenceItem(EvidenceType.RELATIONSHIP_MATCH, 0.05f, 0.9f, EvidenceStatus.INFERRED, "StyleContinuity:${style.anchor.id}"))
+                }
+            }
+        }
+        return bonus.coerceAtMost(0.3)
+    }
+
+    private fun finalizeResults(candidates: List<IntelligenceCandidate>, request: IntelligenceRequest): List<IntelligenceCandidate> {
+        val sorted = candidates.sortedWith(
+            compareByDescending<IntelligenceCandidate> { it.rankScore }
+                .thenByDescending { it.primaryRelevanceScore }
+                .thenBy { it.item.id }
+        ).take(request.limit)
+        
+        val styleProfile = try { repository.signatureStyleProfile.value } catch (_: Exception) { null }
+        return if (styleProfile != null) {
+            sorted.map { IntelligentPresentationProvider.annotateCandidate(it, styleProfile) }
+        } else sorted
+    }
+
+    private fun buildProvenance(evidence: List<EvidenceItem>, finalScore: Double): String = "Score ${"%.3f".format(finalScore)}"
 
     private fun matchesFilterType(item: MediaItem, filterType: String): Boolean {
         return when (filterType.uppercase()) {
@@ -846,12 +672,11 @@ class AuraIntelligenceCore(
     }
 
     internal fun scorePersonalization(item: MediaItem, tasteDNA: TasteDNA): Float {
-        // AURA REPAIR: Incorporate explicit signals (Rating/Favorites) as primary baseline (Stage 9 align)
         val explicitBoost = if (item.isFavorite) 0.5f else 0.0f
         val ratingScore = item.rating / 5.0f
         
-        val traits = PersonalizationTraitMapper.getTraitAdjustments(item.moodTags)
-        if (traits.isEmpty()) return (0.5f + explicitBoost + ratingScore).coerceIn(0f, 1.0f)
+        val traits = PersonalizationTraitMapper.getEffectiveTraitAdjustments(item)
+        if (traits.isEmpty()) return (0.5f + explicitBoost + ratingScore * 0.2f).coerceIn(0f, 1.0f)
         
         var sumAlignment = 0.0
         traits.forEach { (dim, presence) ->

@@ -84,8 +84,14 @@ class AuraMomentsTest {
     fun testIntelligentSlideshow_EmptyLibrary_ReturnsEmpty() {
         runBlocking {
             val repository = mock(MediaRepository::class.java)
+            val core = mock(AuraIntelligenceCore::class.java)
+            whenever(repository.intelligenceCore).thenReturn(core)
             whenever(repository.mediaItems).thenReturn(MutableStateFlow(emptyList()))
             
+            // Mock response with empty candidates
+            val response = IntelligenceResponse("req", IntelligenceMode.SORT, emptyList(), latencyMs = 1L)
+            whenever(core.processRequest(any())).thenReturn(response)
+
             val result = AuraMomentsEngine.generateIntelligentSlideshow(repository, MomentsMode.FOR_YOU)
             assertTrue(result.isEmpty())
         }

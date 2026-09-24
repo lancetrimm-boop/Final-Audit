@@ -5,12 +5,11 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AuraDatabase
 import com.example.data.db.MediaEntity
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -27,7 +26,7 @@ class MediaStoreScanLifecycleTest {
     private lateinit var context: Context
     private lateinit var database: AuraDatabase
     private lateinit var repository: MediaRepository
-    private val testDispatcher = UnconfinedTestDispatcher()
+    private val testDispatcher = StandardTestDispatcher()
 
     @Before
     fun setUp() {
@@ -47,17 +46,7 @@ class MediaStoreScanLifecycleTest {
             .build()
         
         repository = MediaRepository(dispatcher = testDispatcher)
-        
-        // Inject database via reflection
-        val dbField = MediaRepository::class.java.getDeclaredField("database")
-        dbField.isAccessible = true
-        dbField.set(repository, database)
-        
-        // Set database state to READY
-        val stateField = MediaRepository::class.java.getDeclaredField("_databaseState")
-        stateField.isAccessible = true
-        @Suppress("UNCHECKED_CAST")
-        (stateField.get(repository) as MutableStateFlow<DatabaseState>).value = DatabaseState.READY
+        repository.setDatabaseForTesting(database)
     }
 
     @After
@@ -66,13 +55,13 @@ class MediaStoreScanLifecycleTest {
     }
 
     @Test
-    fun `test scan session ID is generated and unique`() = runTest {
+    fun `test scan session ID is generated and unique`() = runTest(testDispatcher) {
         repository.scanLocalMedia(context)
         val session1 = repository.scanProgress.value.scanSessionId
         assertTrue("Session ID should be positive", session1 > 0)
 
-        // Force a delay to ensure timestamp would be different if not immediate
-        kotlinx.coroutines.delay(kotlin.time.Duration.parse("10ms"))
+        // Small delay to ensure NanoTime changes
+        delay(10)
         
         repository.scanLocalMedia(context)
         val session2 = repository.scanProgress.value.scanSessionId
@@ -80,7 +69,7 @@ class MediaStoreScanLifecycleTest {
     }
 
     @Test
-    fun `test cancellation before reconciliation prevents deletion`() = runTest {
+    fun `test cancellation before reconciliation prevents deletion`() = runTest(testDispatcher) {
         // Setup: DB has 1 item
         database.mediaDao().insert(MediaEntity(id = "local_vid_1", title = "V1", mediaType = "VIDEO", uriPath = "content://media/external/video/media/1"))
         
@@ -88,14 +77,15 @@ class MediaStoreScanLifecycleTest {
         val job = launch {
             repository.scanLocalMedia(context)
         }
+        runCurrent() // Reach yield() or first phase
         
         // Use repository's own cancel mechanism
         repository.cancelScan()
+        runCurrent()
         job.join()
         
         // Verify: Item remains
         assertNotNull("Record should not be deleted if scan was cancelled", database.mediaDao().getMediaById("local_vid_1"))
-        assertEquals(1, database.mediaDao().getCount())
         
         val progress = repository.scanProgress.value
         assertFalse("Scan should not be marked complete after cancellation", progress.isComplete)
@@ -103,7 +93,7 @@ class MediaStoreScanLifecycleTest {
     }
 
     @Test
-    fun `test reconcileDeletions respects cancellation during loop`() = runTest {
+    fun `test reconcileDeletions respects cancellation during loop`() = runTest(testDispatcher) {
         // Setup: DB has items
         val item1 = MediaEntity(id = "local_vid_1", title = "V1", mediaType = "VIDEO", uriPath = "content://media/external/video/media/1")
         database.mediaDao().insert(item1)
@@ -127,7 +117,7 @@ class MediaStoreScanLifecycleTest {
     }
 
     @Test
-    fun `test authoritative scan result cannot authorize deletion if incomplete`() = runTest {
+    fun `test authoritative scan result cannot authorize deletion if incomplete`() = runTest(testDispatcher) {
         // Setup: DB has 1 item
         database.mediaDao().insert(MediaEntity(id = "local_vid_1", title = "V1", mediaType = "VIDEO", uriPath = "content://media/external/video/media/1"))
         

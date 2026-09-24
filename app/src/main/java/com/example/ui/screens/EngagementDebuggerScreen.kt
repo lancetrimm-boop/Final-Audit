@@ -197,7 +197,7 @@ fun EngagementDebuggerScreen(
             val fetchedMetrics = repository.getEngagementMetrics()
             metrics = fetchedMetrics
             
-            val report = repository.generateClosedLoopReport(baselineScore = 50.0, targetScore = 60.0)
+            val report = repository.generateClosedLoopReport(baseline = 50.0, target = 60.0)
             closedLoopReport = report
             
             val bp = StrategyBlueprintGenerator.generateBlueprint(

@@ -17,7 +17,8 @@ class BillingManager(
     private val context: Context,
     private val entitlementRepository: EntitlementRepository,
     private val scope: CoroutineScope,
-    private val provider: BillingProvider? = null // Optional for testing
+    private val provider: BillingProvider? = null, // Optional for testing
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
 ) : PurchasesUpdatedListener {
 
     private val PRODUCT_ID = "aura_pro_unlock_one_time"
@@ -110,7 +111,7 @@ class BillingManager(
             val params = AcknowledgePurchaseParams.newBuilder()
                 .setPurchaseToken(purchase.purchaseToken)
                 .build()
-            withContext(Dispatchers.IO) {
+            withContext(ioDispatcher) {
                 billingProvider.acknowledgePurchase(params) { result ->
                     if (result.responseCode == BillingClient.BillingResponseCode.OK) {
                         scope.launch { entitlementRepository.updateEntitlement(true, purchase.purchaseToken) }

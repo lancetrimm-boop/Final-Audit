@@ -29,7 +29,7 @@ object SemanticDocumentBuilder {
         var cleanTitle = item.title.trim()
         if (cleanTitle.isBlank()) {
             // AURA REPAIR: Fallback to filename if title is blank (common in raw camera imports)
-            cleanTitle = item.uriPath.substringAfterLast('/').substringBeforeLast('.')
+            cleanTitle = item.uriPath.substringAfterLast('/')
         }
         
         if (cleanTitle.isNotBlank()) {

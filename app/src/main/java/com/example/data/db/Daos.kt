@@ -364,7 +364,7 @@ interface PlaybackErrorLogDao {
     @Query("SELECT * FROM playback_error_logs WHERE mediaItemId = :mediaItemId AND errorCode = :errorCode AND exceptionClass = :exceptionClass AND sessionId = :sessionId LIMIT 1")
     suspend fun findExistingError(mediaItemId: String?, errorCode: Int?, exceptionClass: String?, sessionId: String?): PlaybackErrorLogEntity?
 
-    @Query("SELECT * FROM playback_error_logs ORDER BY timestamp DESC")
+    @Query("SELECT * FROM playback_error_logs ORDER BY timestamp DESC, id DESC")
     fun observeRecentErrors(): Flow<List<PlaybackErrorLogEntity>>
 
     @Query("SELECT * FROM playback_error_logs WHERE mediaItemId = :mediaItemId ORDER BY timestamp DESC")
@@ -385,7 +385,7 @@ interface PlaybackErrorLogDao {
     @Query("UPDATE playback_error_logs SET recoveryAttempted = :attempted, recoverySuccessful = :successful WHERE id = :id")
     suspend fun updateRecoveryStatus(id: Long, attempted: Boolean, successful: Boolean?)
 
-    @Query("DELETE FROM playback_error_logs WHERE id NOT IN (SELECT id FROM playback_error_logs ORDER BY timestamp DESC LIMIT :limit)")
+    @Query("DELETE FROM playback_error_logs WHERE id NOT IN (SELECT id FROM (SELECT id FROM playback_error_logs ORDER BY timestamp DESC, id DESC LIMIT :limit))")
     suspend fun trimLog(limit: Int)
 }
 

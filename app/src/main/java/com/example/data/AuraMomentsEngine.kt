@@ -55,7 +55,7 @@ object AuraMomentsEngine {
         limit: Int = 25
     ): List<MediaItem> {
         val totalStart = System.currentTimeMillis()
-        val core = repository.intelligenceCore ?: return generateSlideshow(repository.mediaItems.value, limit)
+        val core = repository.intelligenceCore
         
         Log.d("AuraMoments", "Generating intelligent slideshow for mode: ${mode.id}")
         
@@ -71,9 +71,9 @@ object AuraMomentsEngine {
             limit = limit * 3 // Over-sample for sequencing variety
         )
         
-        val response = core.processRequest(request)
+        val response = core?.processRequest(request)
         val selectionMs = System.currentTimeMillis() - selectionStart
-        if (!response.isSuccess) return generateSlideshow(repository.mediaItems.value, limit)
+        if (response == null || !response.isSuccess) return generateSlideshow(repository.mediaItems.value, limit)
 
         val candidates = response.candidates
         

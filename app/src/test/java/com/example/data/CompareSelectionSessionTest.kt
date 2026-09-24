@@ -2,6 +2,7 @@ package com.example.data
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -21,6 +22,13 @@ class CompareSelectionSessionTest {
     @Before
     fun setUp() {
         repository = MediaRepository(testDispatcher)
+    }
+
+    @org.junit.After
+    fun tearDown() {
+        if (::repository.isInitialized) {
+            repository.close()
+        }
     }
 
     private fun createMediaItem(id: String, title: String = "Item $id", mediaType: String = "PHOTO", sizeBytes: Long = 1000L, dateAdded: Long = System.currentTimeMillis(), rating: Float = 0f, eloRating: Double = 1500.0): MediaItem {
@@ -79,6 +87,7 @@ class CompareSelectionSessionTest {
         
         val selectedIds = setOf("1", "2", "3", "4")
         repository.startCompareSelectionSession(selectedIds)
+        advanceUntilIdle()
         
         val pair = repository.pairwiseState.value
         assertTrue("Option A must be in selectedIds. Got: ${pair.optionA.id}", selectedIds.contains(pair.optionA.id))
@@ -89,24 +98,29 @@ class CompareSelectionSessionTest {
 
     @Test
     fun testIsolationAfterLoop() = runTest {
-        val allItems = (1..10).map { createMediaItem(it.toString()) }
+        // [PHASE 2] Ensure items have ratings so they are eligible for REDISCOVER strategy
+        val allItems = (1..10).map { createMediaItem(it.toString(), rating = 5f) }
         repository.setMediaItemsForTesting(allItems)
         
         val selectedIds = setOf("1", "2", "3", "4", "5")
         repository.startCompareSelectionSession(selectedIds)
+        advanceUntilIdle()
         
         // Vote
         repository.recordCompareSelectionVote(repository.pairwiseState.value.optionA.id)
+        advanceUntilIdle()
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionA.id))
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionB.id))
 
         // Skip
         repository.skipCompareSelectionPair()
+        advanceUntilIdle()
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionA.id))
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionB.id))
 
         // Filter change
         repository.setCompareMediaType(CompareMediaTypeFilter.PHOTOS)
+        advanceUntilIdle()
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionA.id))
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionB.id))
 
@@ -117,16 +131,20 @@ class CompareSelectionSessionTest {
 
         // Strategy change
         repository.setCompareStrategy(CompareStrategy.PERSONALIZED)
+        advanceUntilIdle()
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionA.id))
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionB.id))
         
         repository.setCompareStrategy(CompareStrategy.REDISCOVER)
+        advanceUntilIdle()
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionA.id))
         
         repository.setCompareStrategy(CompareStrategy.LEAST_INTERACTED)
+        advanceUntilIdle()
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionA.id))
         
         repository.setCompareStrategy(CompareStrategy.EXPLORE)
+        advanceUntilIdle()
         assertTrue(selectedIds.contains(repository.pairwiseState.value.optionA.id))
     }
 
@@ -144,12 +162,14 @@ class CompareSelectionSessionTest {
         
         // PHOTOS
         repository.setCompareMediaType(CompareMediaTypeFilter.PHOTOS)
+        advanceUntilIdle()
         val pairPhotos = repository.pairwiseState.value
         assertEquals("PHOTO", pairPhotos.optionA.mediaType.uppercase())
         assertEquals("PHOTO", pairPhotos.optionB.mediaType.uppercase())
 
         // VIDEOS
         repository.setCompareMediaType(CompareMediaTypeFilter.VIDEOS)
+        advanceUntilIdle()
         val pairVideos = repository.pairwiseState.value
         assertEquals("VIDEO", pairVideos.optionA.mediaType.uppercase())
         assertEquals("VIDEO", pairVideos.optionB.mediaType.uppercase())

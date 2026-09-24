@@ -50,7 +50,41 @@ class CumulativeLikeTest {
 
     @After
     fun tearDown() {
-        database.close()
+        if (::repository.isInitialized) {
+            repository.close()
+        }
+        if (::database.isInitialized) {
+            database.close()
+        }
+    }
+
+    private fun MediaItem.toEntity(): com.example.data.db.MediaEntity = com.example.data.db.MediaEntity(
+        id = id,
+        title = title,
+        mediaType = mediaType,
+        year = year,
+        duration = duration,
+        genre = genre,
+        imageUrl = imageUrl,
+        rating = rating,
+        isFavorite = isFavorite,
+        progress = progress,
+        progressText = progressText,
+        moodTagsJson = moodTags.joinToString(","),
+        uriPath = uriPath,
+        dateAdded = dateAdded,
+        dateModified = dateModified,
+        playCount = viewCount,
+        eloRating = eloRating,
+        isDeleted = isDeleted,
+        sizeBytes = sizeBytes,
+        durationMs = durationMs,
+        compatibilityStatus = compatibilityStatus.name
+    )
+
+    private suspend fun seedMediaItems(items: List<MediaItem>) {
+        database.mediaDao().insertAll(items.map { it.toEntity() })
+        repository.setMediaItemsForTesting(items)
     }
 
     private fun createMediaItem(
@@ -72,7 +106,7 @@ class CumulativeLikeTest {
     @Test
     fun testFavoriteOn_CreatesOneLike() = testScope.runTest {
         val item = createMediaItem(id = "item_1", isFavorite = false)
-        repository.setMediaItemsForTesting(listOf(item))
+        seedMediaItems(listOf(item))
 
         // Initial state: 0 Likes
         assertEquals("Initial Like count must be 0", 0, repository.getLikeCount("item_1"))
@@ -90,7 +124,7 @@ class CumulativeLikeTest {
     @Test
     fun testFavoriteOff_DoesNotRemoveLike() = testScope.runTest {
         val item = createMediaItem(id = "item_2", isFavorite = false)
-        repository.setMediaItemsForTesting(listOf(item))
+        seedMediaItems(listOf(item))
 
         // Step 1: Turn ON
         repository.toggleFavorite("item_2")
@@ -109,7 +143,7 @@ class CumulativeLikeTest {
     @Test
     fun testRepeatedFavoriteCycles_AccumulatesLikes() = testScope.runTest {
         val item = createMediaItem(id = "item_3", isFavorite = false)
-        repository.setMediaItemsForTesting(listOf(item))
+        seedMediaItems(listOf(item))
 
         assertEquals("Initial count is 0", 0, repository.getLikeCount("item_3"))
 
@@ -140,7 +174,7 @@ class CumulativeLikeTest {
     @Test
     fun testHistoricalLikeEvidence_SurvivesUnfavoriteInDatabase() = testScope.runTest {
         val item = createMediaItem(id = "item_4", isFavorite = false)
-        repository.setMediaItemsForTesting(listOf(item))
+        seedMediaItems(listOf(item))
 
         // Turn ON
         repository.toggleFavorite("item_4")
@@ -166,7 +200,7 @@ class CumulativeLikeTest {
         advanceUntilIdle()
 
         val item = createMediaItem(id = "item_5", moodTags = listOf("Vibrant"), isFavorite = false)
-        repository.setMediaItemsForTesting(listOf(item))
+        seedMediaItems(listOf(item))
 
         // Turn ON with Fine Tuning DISABLED
         repository.toggleFavorite("item_5")
@@ -191,7 +225,7 @@ class CumulativeLikeTest {
         advanceUntilIdle()
 
         val item = createMediaItem(id = "item_6", moodTags = listOf("Vibrant"), isFavorite = false)
-        repository.setMediaItemsForTesting(listOf(item))
+        seedMediaItems(listOf(item))
 
         // Turn ON -> Learns positive signal & records Like 1
         repository.toggleFavorite("item_6")

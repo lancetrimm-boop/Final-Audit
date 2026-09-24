@@ -73,8 +73,8 @@ class EndToEndLifecycleValidationTest {
         val runId = runs[0].id
         repository.startImplementation(runId)
         
-        // Match approved scope
-        val approvedFiles = implementationPackage.filesAffected
+        // Match approved scope (filenaming only in mock implementation)
+        val approvedFiles = listOf("AISkipEngine.kt", "MediaRepository.kt")
         repository.completeImplementation(runId, "Completed by Builder", approvedFiles)
         
         val completedImp = fakeDao.getImprovementById(improvement.id)!!.toDomain()

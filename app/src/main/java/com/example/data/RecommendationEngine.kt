@@ -26,7 +26,8 @@ object RecommendationEngine {
         stats: IntelligenceStats = IntelligenceStats(),
         creatorProfiles: Map<String, CreatorProfile> = emptyMap()
     ): DiscoverCategories {
-        val core = repository.intelligenceCore ?: return DiscoverCategories(null, emptyList(), emptyList(), emptyList(), emptyList(), null)
+        val core = repository.intelligenceCore
+        if (core == null) return DiscoverCategories(null, emptyList(), emptyList(), emptyList(), emptyList(), null, emptyList(), emptyList())
         
         // 1. Hero / Next Obsession
         val heroRequest = IntelligenceRequest(
@@ -154,38 +155,49 @@ object RecommendationEngine {
         creatorProfiles: Map<String, CreatorProfile> = emptyMap(),
         compareStrategy: CompareStrategy = CompareStrategy.PERSONALIZED,
         compareSort: CompareSortOption = CompareSortOption.RECOMMENDED,
+        inputItems: List<MediaItem>? = null,
         seed: Long = 42L
     ): List<Pair<MediaItem, Float>> {
         val session = repository.compareSelectionSession.value
-        val poolOverride = if (session.isActive) {
+        val poolOverride = inputItems ?: if (session.isActive) {
             repository.mediaItems.value.filter { it.id in session.selectedIds }
         } else null
 
         val core = repository.intelligenceCore
-        if (core != null) {
-            val req = IntelligenceRequest(
-                mode = IntelligenceMode.SORT,
-                sortOption = "RANKING_REFINEMENT",
-                filterType = mediaTypeFilter,
-                limit = 10000, // High limit for library-wide coverage
-                tasteDNA = tasteDNA,
-                profile = profile,
-                stats = stats,
-                creatorProfiles = creatorProfiles,
-                comparisonCounts = repository.getComparisonCounts(),
-                poolOverride = poolOverride,
-                seed = seed
-            )
-            val response = core.processRequest(req)
-            if (response.isSuccess) {
-                return response.candidates.map { it.item to it.rankScore.toFloat() }
-            }
+        if (core == null) return emptyList()
+        
+        val reqSortOption = when (compareStrategy) {
+            CompareStrategy.PERSONALIZED -> if (compareSort != CompareSortOption.RECOMMENDED) compareSort.name else "RANKING_REFINEMENT"
+            CompareStrategy.REDISCOVER -> "REDISCOVER"
+            CompareStrategy.LEAST_INTERACTED -> "LEAST_INTERACTED"
+            CompareStrategy.EXPLORE -> "EXPLORE"
+        }
+
+        val req = IntelligenceRequest(
+            mode = IntelligenceMode.SORT,
+            sortOption = reqSortOption,
+            filterType = mediaTypeFilter,
+            limit = 10000, // High limit for library-wide coverage
+            tasteDNA = tasteDNA,
+            profile = profile,
+            stats = stats,
+            creatorProfiles = creatorProfiles,
+            comparisonCounts = repository.getComparisonCounts(),
+            poolOverride = poolOverride,
+            seed = seed
+        )
+        val response = core.processRequest(req)
+        if (response.isSuccess) {
+            return response.candidates.map { it.item to it.rankScore.toFloat() }
         }
         
-        // Final fallback (Safe degraded state - used in tests or when AI core is starting)
-        val basePool = repository.mediaItems.value.filter { 
+        // Final fallback (Safe degraded state - used in tests or when AI core fails)
+        val basePool = (inputItems ?: repository.mediaItems.value).filter { 
             AuraMediaCompatibilityEngine.isEligibleForImport(it.compatibilityStatus) && !it.isDeleted
-        }.filter { (repository as? MediaRepository)?.compareSelectionSession?.value?.selectedIds?.contains(it.id) ?: true }
+        }.filter { 
+            val sessionIds = (repository as? MediaRepository)?.compareSelectionSession?.value?.selectedIds ?: emptySet()
+            if (sessionIds.isEmpty()) true else sessionIds.contains(it.id)
+        }
         
         val sortedPool = when (compareStrategy) {
             CompareStrategy.REDISCOVER -> basePool.sortedByDescending { it.rating }

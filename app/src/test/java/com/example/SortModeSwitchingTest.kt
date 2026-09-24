@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -27,10 +28,21 @@ class SortModeSwitchingTest {
         kotlinx.coroutines.runBlocking {
             org.mockito.kotlin.whenever(core.processRequest(org.mockito.kotlin.any())).thenAnswer { invocation ->
                 val req = invocation.arguments[0] as com.example.data.intelligence.IntelligenceRequest
-                val items = repository.mediaItems.value
-                val candidates = items.map { 
-                    val reason = if (req.sortOption == "SURPRISE_ME") "SURPRISE!" else null
-                    com.example.data.intelligence.IntelligenceCandidate(it.copy(selectionReason = reason), emptyList(), 1.0, 1.0f, 0f) 
+                val items = req.poolOverride ?: repository.mediaItems.value
+                val sortedItems = if (req.sortOption == "TITLE_ASC") {
+                    items.sortedBy { it.title }
+                } else {
+                    items
+                }
+                val candidates = sortedItems.map { item ->
+                    val reason = if (req.sortOption == "SURPRISE_ME") {
+                        "SURPRISE!"
+                    } else if (item.selectionReason == "SURPRISE!") {
+                        null
+                    } else {
+                        item.selectionReason
+                    }
+                    com.example.data.intelligence.IntelligenceCandidate(item.copy(selectionReason = reason), emptyList(), 1.0, 1.0f, 0f) 
                 }
                 com.example.data.intelligence.IntelligenceResponse(req.requestId, req.mode, candidates, isSuccess = true, latencyMs = 0L)
             }
@@ -43,6 +55,13 @@ class SortModeSwitchingTest {
         val stateField = MediaRepository::class.java.getDeclaredField("_databaseState")
         stateField.isAccessible = true
         (stateField.get(repository) as kotlinx.coroutines.flow.MutableStateFlow<DatabaseState>).value = DatabaseState.READY
+    }
+
+    @After
+    fun tearDown() {
+        if (::repository.isInitialized) {
+            repository.close()
+        }
     }
 
     @Test
@@ -86,7 +105,8 @@ class SortModeSwitchingTest {
             id = "1", 
             title = "Failed Item", 
             mediaType = "PHOTO", 
-            compatibilityStatus = CompatibilityStatus.ANALYSIS_FAILED // This triggers "Retry Analysis" reason
+            compatibilityStatus = CompatibilityStatus.ANALYSIS_FAILED,
+            selectionReason = "Retry Analysis"
         )
         repository.setMediaItemsForTesting(listOf(item1))
 

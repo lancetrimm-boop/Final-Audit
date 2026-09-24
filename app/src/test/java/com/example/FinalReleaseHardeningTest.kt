@@ -74,7 +74,7 @@ class FinalReleaseHardeningTest {
         val itemA = MediaItem(id = "a", title = "Vibrant A", mediaType = "PHOTO", moodTags = listOf("Vibrant"))
         val itemB = MediaItem(id = "b", title = "Dark B", mediaType = "PHOTO", moodTags = listOf("Dark"))
         
-        val initialDna = TasteDNA(isFineTuningEnabled = true, learnedVibrancy = 0.5)
+        val initialDna = TasteDNA(isFineTuningEnabled = true, learnedVibrancy = 0.5, confVibrancy = 1.0)
         
         // Simulation of learning from a vote for itemA (Vibrant)
         var learnedV = initialDna.learnedVibrancy

@@ -28,15 +28,40 @@ object SignatureStyleProvider {
         }
 
         val active = allStyles.filter { it.affinityScore >= STYLE_CONFIRMED_THRESHOLD && it.confidence > 0.4 }
-            .sortedByDescending { it.affinityScore }
-        
+            .sortedWith(
+                compareByDescending<SignatureStyle> { it.affinityScore }
+                    .thenBy { it.representativeMedia.size } // Prioritize styles with fewer evidence options for deduplication
+            )
+      
+        val usedRepresentativeIds = mutableSetOf<String>()
+        val finalizedActive = active.map { style ->
+            // Phase 2: Systematic cross-style deduplication
+            // Try all 5 available representativeMedia items and pick the first one not already used by an active style.
+            val firstUnused = style.representativeMedia.find { it.id !in usedRepresentativeIds }
+            
+            // If all are used, fall back to the first one.
+            val finalRep = if (firstUnused != null) {
+                listOf(firstUnused)
+            } else if (style.representativeMedia.isNotEmpty()) {
+                listOf(style.representativeMedia.first())
+            } else {
+                emptyList()
+            }
+            
+            if (finalRep.isNotEmpty()) {
+                usedRepresentativeIds.add(finalRep.first().id)
+            }
+            
+            style.copy(representativeMedia = finalRep)
+        }
+
         val emerging = allStyles.filter { 
             (it.affinityScore in STYLE_EMERGING_THRESHOLD..STYLE_CONFIRMED_THRESHOLD) || 
             (it.affinityScore >= STYLE_CONFIRMED_THRESHOLD && it.confidence <= 0.4)
         }.sortedByDescending { it.affinityScore }
 
         return SignatureStyleProfile(
-            activeStyles = active,
+            activeStyles = finalizedActive,
             emergingStyles = emerging
         )
     }
@@ -105,7 +130,7 @@ object SignatureStyleProvider {
             .sortedByDescending { it.second }
         
         val supportingIds = scoredItems.map { it.first.id }
-        val representative = scoredItems.take(3).map { it.first }
+        val representative = scoredItems.take(5).map { it.first } // Increased to 5 for deduplication room (P2 Stability)
 
         val status = when {
             dnaConfidence > 0.7 && finalAffinity > STYLE_CONFIRMED_THRESHOLD -> EvidenceStatus.KNOWN

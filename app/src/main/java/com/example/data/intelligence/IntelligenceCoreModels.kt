@@ -88,6 +88,7 @@ data class IntelligenceRequest(
     val intent: UserIntent? = null,
     val stats: IntelligenceStats? = null,
     val creatorProfiles: Map<String, CreatorProfile>? = null,
+    val comparisonCounts: Map<String, Int>? = null,
     val seed: Long = 42L,
     val sortOption: String? = null,
     val filterType: String = "ALL",

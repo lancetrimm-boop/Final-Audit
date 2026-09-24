@@ -105,7 +105,7 @@ class SafeDeleteManagerTest {
         // Should confirm deletion for items gone from MediaStore
         verify(repository).deleteMediaItem("ms-1")
         verify(repository).addRejectedMedia(any())
-        verify(repository).recordCleanupSignal(eq("ms-1"), any(), any(), eq(true))
+        verify(repository).recordCleanupSignal(eq("ms-1"), any(), any(), eq(true), anyOrNull())
         
         // Should clear state after recovery
         verify(preferenceDao).deletePreference("pending_cleanup_transaction")

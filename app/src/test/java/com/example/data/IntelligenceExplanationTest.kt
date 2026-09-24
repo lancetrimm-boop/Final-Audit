@@ -40,6 +40,12 @@ class IntelligenceExplanationTest {
     fun test02_GenerateImprovementExplanation() = runTest {
         val evidence = listOf(
             EvidenceRecord(
+                tier = EvidenceTier.PRODUCTION,
+                sampleCount = 10,
+                score = 65.0,
+                quality = 0.9
+            ),
+            EvidenceRecord(
                 tier = EvidenceTier.EXPERIMENTAL,
                 sampleCount = 10,
                 score = 65.0,
@@ -48,7 +54,7 @@ class IntelligenceExplanationTest {
         )
         val report = ClosedLoopEngine.evaluate(50.0, 65.0, 70.0, evidence)
         val finding = repository.createFindingFromReport(report, "Test Finding")
-        val imp = repository.getAllImprovements().first().first()
+        val imp = repository.getAllImprovements().first { it.isNotEmpty() }.first()
         
         val viewModel = IntelligenceViewModel(repository)
         viewModel.askAuraToExplain(imp)

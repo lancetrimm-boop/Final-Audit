@@ -50,7 +50,7 @@ class IntelligentSlideshowTest {
         val embeddings = mapOf(
             "1" to floatArrayOf(1f, 0f),
             "2" to floatArrayOf(0f, 1f), // Dissimilar to 1
-            "3" to floatArrayOf(0.85f, 0.15f) // Similar to 1 (in continuity zone)
+            "3" to floatArrayOf(0.8f, 0.4f) // Similar to 1 (in continuity zone)
         )
 
         val result = SlideshowSequencer.sequence(candidates, embeddings)

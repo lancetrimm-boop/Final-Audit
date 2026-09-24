@@ -55,17 +55,7 @@ class NeuralSearchQualityValidationTest {
             .build()
         
         repository = MediaRepository(dispatcher = testDispatcher)
-        
-        // Inject database via reflection
-        val dbField = MediaRepository::class.java.getDeclaredField("database")
-        dbField.isAccessible = true
-        dbField.set(repository, database)
-        
-        // Set database state to READY
-        val stateField = MediaRepository::class.java.getDeclaredField("_databaseState")
-        stateField.isAccessible = true
-        val stateFlow = stateField.get(repository) as MutableStateFlow<com.example.data.DatabaseState>
-        stateFlow.value = com.example.data.DatabaseState.READY
+        repository.setDatabaseForTesting(database)
 
         // Inject semantic components
         val semanticRepo = RoomSemanticRepresentationRepository(database.semanticRepresentationDao())

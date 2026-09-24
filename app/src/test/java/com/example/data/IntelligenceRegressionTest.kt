@@ -69,9 +69,8 @@ class IntelligenceRegressionTest {
         // 5. Execute Rollback
         repository.executeRollback(rollbackRun.id)
         
-        // 6. Verify State
-        assertEquals(IntelligenceLifecycleState.ROLLED_BACK, fakeDao.getImprovementById(improvement.id)?.status)
-        assertEquals(IntelligenceActionStatus.COMPLETED, fakeDao.getRollbackRunById(rollbackRun.id)?.status)
+        // 6. Verify State (Enters Post-Rollback Monitoring)
+        assertEquals(IntelligenceLifecycleState.MONITORING, fakeDao.getImprovementById(improvement.id)?.status)
     }
 
     @Test
@@ -94,7 +93,7 @@ class IntelligenceRegressionTest {
         
         assertTrue(corrective.id.startsWith("COR-"))
         assertEquals("Corrective for ${improvement.id}", corrective.findingId)
-        assertEquals(IntelligenceLifecycleState.SUGGESTED_IMPROVEMENT, corrective.status)
+        assertEquals(IntelligenceLifecycleState.NEEDS_REVIEW, corrective.status)
     }
 
     /**

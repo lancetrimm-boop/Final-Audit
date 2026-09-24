@@ -27,6 +27,72 @@ private val integrityIssueAdapter = moshi.adapter<List<IntegrityIssue>>(
     Types.newParameterizedType(List::class.java, IntegrityIssue::class.java)
 )
 
+fun MediaEntity.toMediaItem(): MediaItem {
+    val isVideo = mediaType.equals("VIDEO", ignoreCase = true) || mediaType.equals("Movie", ignoreCase = true)
+    val normalizedType = if (isVideo) "VIDEO" else "PHOTO"
+    val gradients = if (isVideo) {
+        listOf(0xFF1E1B4BL, 0xFF4338CAL, 0xFF7C3AEDL)
+    } else {
+        listOf(0xFF311B92L, 0xFF6A1B9AL, 0xFFD946EFL)
+    }
+    val compStatus = try {
+        CompatibilityStatus.valueOf(compatibilityStatus)
+    } catch (e: Exception) {
+        CompatibilityStatus.PLAYABLE
+    }
+    val convStatus = try {
+        ConversionStatus.valueOf(conversionStatus)
+    } catch (e: Exception) {
+        ConversionStatus.NONE
+    }
+    return MediaItem(
+        id = id,
+        title = title,
+        mediaType = normalizedType,
+        year = year,
+        duration = duration,
+        genre = genre,
+        imageUrl = imageUrl,
+        gradientColors = if (gradientColorsJson.isBlank()) gradients else gradientColorsJson.split(",").mapNotNull { it.toLongOrNull() },
+        rating = rating,
+        isFavorite = isFavorite,
+        progress = progress,
+        progressText = progressText,
+        category = category,
+        aiSummary = aiSummary,
+        moodTags = if (moodTagsJson.isEmpty()) emptyList() else moodTagsJson.split(","),
+        uriPath = uriPath,
+        itemCount = itemCount,
+        sizeBytes = sizeBytes,
+        dateAdded = dateAdded,
+        dateModified = dateModified,
+        durationMs = durationMs,
+        width = width,
+        height = height,
+        lastViewedTimestamp = lastViewedTimestamp,
+        viewCount = playCount,
+        exposureCount = exposureCount,
+        lastExposedTimestamp = lastExposedTimestamp,
+        contentHash = contentHash,
+        parentContentId = parentContentId,
+        eloRating = eloRating,
+        isDeleted = isDeleted,
+        compatibilityStatus = compStatus,
+        containerFormat = containerFormat,
+        videoCodec = videoCodec,
+        audioCodec = audioCodec,
+        compatibilityReason = compatibilityReason,
+        conversionStatus = convStatus,
+        convertedUri = convertedUri.ifBlank { null },
+        lastCompatibilityCheckTimestamp = lastCompatibilityCheckTimestamp,
+        selectionReason = if (compStatus == CompatibilityStatus.ANALYSIS_FAILED) "Retry Analysis" else selectionReason,
+        creatorId = creatorId,
+        creatorName = creatorName,
+        sourcePlatform = sourcePlatform,
+        replacedByMediaId = replacedByMediaId
+    )
+}
+
 fun FindingEntity.toDomainFinding() = Finding(
     id = id,
     title = title,

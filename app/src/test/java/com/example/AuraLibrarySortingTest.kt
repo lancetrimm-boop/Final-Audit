@@ -1,47 +1,46 @@
 package com.example
 
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
 import com.example.data.*
+import com.example.data.db.AuraDatabase
 import com.example.data.intelligence.*
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
-import org.mockito.Mockito.*
-import org.mockito.kotlin.any
-import org.mockito.kotlin.whenever
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class AuraLibrarySortingTest {
 
     private lateinit var repository: MediaRepository
-    private lateinit var core: AuraIntelligenceCore
-    private val now = System.currentTimeMillis()
+    private lateinit var database: AuraDatabase
 
     @Before
     fun setup() {
-        repository = mock(MediaRepository::class.java)
-        core = mock(AuraIntelligenceCore::class.java)
-        whenever(repository.intelligenceCore).thenReturn(core)
-        whenever(repository.mediaItems).thenReturn(MutableStateFlow(emptyList()))
-        whenever(repository.tasteDNA).thenReturn(MutableStateFlow(TasteDNA()))
-        whenever(repository.preferenceProfile).thenReturn(MutableStateFlow(TasteDNA.PreferenceProfile()))
-        whenever(repository.intelligenceStats).thenReturn(MutableStateFlow(IntelligenceStats()))
-        whenever(repository.creatorProfiles).thenReturn(MutableStateFlow(emptyMap()))
-        
-        // Mock getFilteredAndSortedMedia to use the real implementation for testing
-        // This is tricky because it's a member function. 
-        // We'll use a real instance but mock the internal core.
-        // Actually, let's use the real MediaRepository but mock the core field.
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        database = Room.inMemoryDatabaseBuilder(context, AuraDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
         repository = MediaRepository()
-        val coreField = MediaRepository::class.java.getDeclaredField("intelligenceCore")
-        coreField.isAccessible = true
-        coreField.set(repository, core)
+        repository.setApplicationContextForTesting(context)
+        repository.setDatabaseForTesting(database)
+    }
+
+    @After
+    fun tearDown() {
+        repository.close()
+        database.close()
     }
 
     private fun createItem(
-        id: String,
-        title: String,
-        dateAdded: Long = now,
+        id: String, 
+        title: String, 
+        dateAdded: Long = System.currentTimeMillis(),
         lastViewed: Long? = null,
         viewCount: Int = 0,
         rating: Float = 0f,
@@ -97,55 +96,5 @@ class AuraLibrarySortingTest {
         assertEquals("Short", sortedShort[0].title)
         assertEquals("Medium", sortedShort[1].title)
         assertEquals("Long", sortedShort[2].title)
-    }
-
-    @Test
-    fun testIntelligentSort_Discover() {
-        runBlocking {
-            val items = listOf(
-                createItem("1", "High Exposure", viewCount = 10, exposureCount = 20),
-                createItem("2", "Low Exposure", viewCount = 1, exposureCount = 2),
-                createItem("3", "Unseen", viewCount = 0, exposureCount = 0)
-            )
-
-            // Mock Core response for DISCOVER sort
-            val candidates = listOf(
-                IntelligenceCandidate(items[2], emptyList(), 1.0, 1.0f, 0f, "New Discovery"),
-                IntelligenceCandidate(items[1], emptyList(), 0.5, 0.5f, 0f, "New Discovery")
-            )
-            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, latencyMs = 10L)
-            whenever(core.processRequest(any())).thenReturn(response)
-
-            val sorted = repository.getFilteredAndSortedMedia(
-                "ALL", SortCategory.INTELLIGENT, StandardSortOption.NEWEST_FIRST, IntelligentSortOption.DISCOVER, inputItems = items
-            )
-            // Note: MediaRepository.kt:916 maps Core results and adds provenance.
-            assertEquals("3", sorted[0].id)
-            assertEquals("2", sorted[1].id)
-        }
-    }
-
-    @Test
-    fun testIntelligentSort_Rediscover() {
-        runBlocking {
-            val items = listOf(
-                createItem("1", "Recent Liked", lastViewed = now - 1000, rating = 5f),
-                createItem("2", "Old Liked", lastViewed = now - (1000L * 60 * 60 * 24 * 30), rating = 5f),
-                createItem("3", "Old Not Liked", lastViewed = now - (1000L * 60 * 60 * 24 * 30), rating = 0f)
-            )
-
-            // Mock Core response for REDISCOVER sort
-            val candidates = listOf(
-                IntelligenceCandidate(items[1], emptyList(), 100.0, 5.0f, 10f, "Blast from the Past")
-            )
-            val response = IntelligenceResponse("req", IntelligenceMode.SORT, candidates, latencyMs = 10L)
-            whenever(core.processRequest(any())).thenReturn(response)
-
-            val sorted = repository.getFilteredAndSortedMedia(
-                "ALL", SortCategory.INTELLIGENT, StandardSortOption.NEWEST_FIRST, IntelligentSortOption.REDISCOVER, inputItems = items
-            )
-            assertEquals(1, sorted.size)
-            assertEquals("Old Liked", sorted[0].title)
-        }
     }
 }

@@ -41,14 +41,7 @@ class SearchQualityAuditTest {
         context = ApplicationProvider.getApplicationContext()
         database = Room.inMemoryDatabaseBuilder(context, AuraDatabase::class.java).build()
         repository = MediaRepository(dispatcher = testDispatcher)
-        
-        val dbField = MediaRepository::class.java.getDeclaredField("database")
-        dbField.isAccessible = true
-        dbField.set(repository, database)
-        
-        val stateField = MediaRepository::class.java.getDeclaredField("_databaseState")
-        stateField.isAccessible = true
-        (stateField.get(repository) as MutableStateFlow<DatabaseState>).value = DatabaseState.READY
+        repository.setDatabaseForTesting(database)
     }
 
     @After
@@ -128,6 +121,6 @@ class SearchQualityAuditTest {
         }
         clipTextEngine.close()
         
-        fail("Audit complete - capture output")
+        println("AURA AUDIT: Score distribution verification complete.")
     }
 }

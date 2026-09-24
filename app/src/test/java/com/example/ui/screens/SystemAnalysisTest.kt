@@ -33,8 +33,10 @@ class SystemAnalysisTest {
         ))
         repository.createFindingFromReport(report, "Regression Detected")
         
-        // Wait for ViewModel to process the update
-        val state = viewModel.state.first { it.findings.isNotEmpty() }
+        // Wait for ViewModel to process the update including analysis
+        val state = viewModel.state.first { 
+            it.findings.isNotEmpty() && it.systemAnalysis?.actionStatus == ActionStatus.ACTION_REQUIRED 
+        }
         val analysis = state.systemAnalysis
         
         assertNotNull(analysis)
@@ -67,7 +69,9 @@ class SystemAnalysisTest {
         ))
         repository.createFindingFromReport(report, "Potential Improvement")
         
-        val state = viewModel.state.first { it.findings.isNotEmpty() }
+        val state = viewModel.state.first { 
+            it.findings.isNotEmpty() && it.systemAnalysis?.actionStatus == ActionStatus.MORE_EVIDENCE_NEEDED
+        }
         val analysis = state.systemAnalysis
         
         assertNotNull(analysis)

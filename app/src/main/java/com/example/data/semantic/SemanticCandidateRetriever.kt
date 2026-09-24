@@ -1,11 +1,6 @@
 package com.example.data.semantic
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -39,8 +34,10 @@ interface SemanticCandidateRetriever {
  */
 class DefaultSemanticCandidateRetriever(
     private val repository: SemanticRepresentationRepository,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val dispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : SemanticCandidateRetriever {
+
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + dispatcher)
 
     // Index key: "$type:${descriptor.modelId}:${descriptor.modelVersion}:${descriptor.dimensionality}"
     private val indices = ConcurrentHashMap<String, VectorIndex>()
@@ -55,7 +52,7 @@ class DefaultSemanticCandidateRetriever(
     override suspend fun initializeIndex(
         type: SemanticRepresentationType,
         descriptor: EmbeddingModelDescriptor
-    ) = withContext(Dispatchers.IO) {
+    ) = withContext(dispatcher) {
         val key = getIndexKey(type, descriptor)
         
         // AURA SYNC: Atomically check/create the initialization job in the persistent scope
@@ -82,7 +79,7 @@ class DefaultSemanticCandidateRetriever(
         descriptor: EmbeddingModelDescriptor,
         topK: Int,
         minSimilarity: Float
-    ): List<SemanticRetrievalCandidate> = withContext(Dispatchers.Default) {
+    ): List<SemanticRetrievalCandidate> = withContext(dispatcher) {
         val key = getIndexKey(type, descriptor)
         var index = indices[key]
 

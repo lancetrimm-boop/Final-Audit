@@ -14,7 +14,10 @@ import kotlin.math.roundToInt
  * - Every metric is derived from traceable local signals (Room DB).
  * - No external or unverified AI inference is used in report generation.
  */
-class IntelligenceReportingEngine(private val database: AuraDatabase) {
+class IntelligenceReportingEngine(
+    private val database: AuraDatabase,
+    private val repository: com.example.data.MediaRepository = com.example.data.MediaRepository.instance
+) {
 
     companion object {
         private const val CURRENT_SCHEMA_VERSION = 1
@@ -95,7 +98,7 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
         }
 
         // Calculate actual match score from core (Update 9 Consolidation)
-        val core = com.example.data.MediaRepository.instance.intelligenceCore
+        val core = repository.intelligenceCore
         val rawScore = core?.scorePersonalization(item, tasteDNA)?.toDouble() ?: 0.5
         val normalizedScore = (rawScore / 1.0).coerceIn(0.0, 1.0)
 
@@ -153,9 +156,13 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
             }
 
         // --- Update 7: Use SignatureStyleProvider ---
-        val items = com.example.data.MediaRepository.instance.mediaItems.value
+        val items = repository.mediaItems.value
         val styleProfile = SignatureStyleProvider.calculateStyleProfile(dna, items)
-        val tasteClusters = styleProfile.activeStyles.map { style ->
+        val tasteClusters = styleProfile.activeStyles.filter { style ->
+            // AURA REPAIR: Filter out styles that have no valid visual evidence (Stage 7 Fix)
+            val thumb = style.representativeMedia.firstOrNull()?.imageUrl
+            !thumb.isNullOrBlank()
+        }.map { style ->
             TasteClusterEvidence(
                 categoryId = style.anchor.id,
                 title = style.anchor.displayName,
@@ -241,7 +248,7 @@ class IntelligenceReportingEngine(private val database: AuraDatabase) {
 
         // Synthesis
         if (strongInsights.isEmpty()) {
-            return "Your visual style is versatile and balanced, showing an appreciation for a wide variety of aesthetic elements without a single dominant preference."
+            return "Your visual style is versatile and balanced as Aura is still learning your preferences. You show an appreciation for a wide variety of aesthetic elements without a single dominant preference."
         }
 
         val description = StringBuilder("Your visual style ")

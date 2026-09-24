@@ -33,12 +33,13 @@ interface SemanticIndexingService {
  * Production implementation of [SemanticIndexingService].
  */
 class DefaultSemanticIndexingService(
-    private val embeddingProvider: EmbeddingProvider,
+    internal val embeddingProvider: EmbeddingProvider,
     private val candidateRetriever: SemanticCandidateRetriever,
-    private val repository: SemanticRepresentationRepository
+    private val repository: SemanticRepresentationRepository,
+    private val dispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default
 ) : SemanticIndexingService {
 
-    override suspend fun indexMediaItem(item: MediaItem): EmbeddingResult = withContext(Dispatchers.Default) {
+    override suspend fun indexMediaItem(item: MediaItem): EmbeddingResult = withContext(dispatcher) {
         try {
             // 1. Synthesize structured document from available metadata
             val document = SemanticDocumentBuilder.buildDocument(item)

@@ -68,6 +68,7 @@ fun LibraryScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val selectedFilter by repository.libraryFilterFlow.collectAsStateWithLifecycle()
     val activeCategory by repository.activeSortCategory.collectAsStateWithLifecycle()
     val standardSort by repository.selectedStandardSort.collectAsStateWithLifecycle()
@@ -145,12 +146,17 @@ fun LibraryScreen(
             repository.addToFavorites(id)
         },
         onAddVisualReference = { repository.addVisualReference(it) },
-        onRemoveVisualReference = { repository.removeVisualReference(it) },
+        onRemoveVisualReference = { index -> 
+            val list = repository.activeVisualReferences.value
+            if (index in list.indices) {
+                repository.removeVisualReference(list[index].id)
+            }
+        },
         onClearSearch = { repository.clearSearch() },
         onSearchByImage = { bitmap, uri -> repository.searchByImage(bitmap, uri) },
         onSearchByMultipleImages = { items -> repository.searchByMultipleImages(items) },
         onTriggerScan = {
-            repository.scope.launch {
+            scope.launch {
                 onScanDevice?.invoke()
             }
         },
@@ -201,6 +207,7 @@ fun LibraryContent(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val coroutineScope = rememberCoroutineScope()
 
     // AURA REPAIR: Global search error feedback
@@ -1158,6 +1165,8 @@ private fun CompactControlsRow(
                     StandardSortOption.LONGEST_DURATION -> "Long"
                     StandardSortOption.RANDOM -> "Shuffle"
                     StandardSortOption.LEAST_PLAYED -> "Unplayed"
+                    StandardSortOption.SIZE -> "Size"
+                    StandardSortOption.RATING -> "Rating"
                 },
                 isSelected = true,
                 options = StandardSortOption.entries,
@@ -1175,6 +1184,8 @@ private fun CompactControlsRow(
                     IntelligentSortOption.REDISCOVER -> "Rediscover"
                     IntelligentSortOption.FAVORITES -> "Favorites"
                     IntelligentSortOption.SURPRISE_ME -> "Surprise Me"
+                    IntelligentSortOption.RANKING_REFINEMENT -> "Refinement"
+                    IntelligentSortOption.HIDDEN_GEMS -> "Gems"
                 },
                 isSelected = true,
                 options = IntelligentSortOption.entries,

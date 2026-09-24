@@ -28,6 +28,7 @@ class SemanticIndexingServiceTest {
 
     @Before
     fun setUp() {
+        whenever(embeddingProvider.descriptor).thenReturn(descriptor)
         service = DefaultSemanticIndexingService(embeddingProvider, candidateRetriever, repository)
     }
 

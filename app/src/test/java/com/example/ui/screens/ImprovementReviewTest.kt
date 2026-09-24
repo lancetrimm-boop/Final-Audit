@@ -52,9 +52,12 @@ class ImprovementReviewTest {
         val improvement = repository.proposeImprovement(finding.id, blueprint)
         
         viewModel.loadImprovement(improvement.id)
+        testDispatcher.scheduler.runCurrent()
         
         // 2. Approve
         viewModel.approveImprovement(improvement.id, "Validated by human")
+        testDispatcher.scheduler.runCurrent()
+        testDispatcher.scheduler.runCurrent()
         
         val updatedImp = fakeDao.improvements[improvement.id]
         assertEquals(IntelligenceLifecycleState.APPROVED, updatedImp?.status)
@@ -74,6 +77,7 @@ class ImprovementReviewTest {
         val improvement = repository.proposeImprovement(finding.id, finding.technicalDetails)
         
         viewModel.rejectImprovement(improvement.id, "Too risky for now")
+        testDispatcher.scheduler.runCurrent()
         
         val updatedImp = fakeDao.improvements[improvement.id]
         assertEquals(IntelligenceLifecycleState.REJECTED, updatedImp?.status)

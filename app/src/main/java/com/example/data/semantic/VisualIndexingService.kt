@@ -5,8 +5,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import com.example.data.MediaItem
 import com.example.util.MediaThumbnailFetcher
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 
 /**
  * Service responsible for generating and persisting visual embeddings for MediaItems.
@@ -36,7 +35,8 @@ interface VisualIndexingService {
 class DefaultVisualIndexingService(
     private val visualProvider: EmbeddingProvider, // Expected to be MobileCLIP
     private val candidateRetriever: SemanticCandidateRetriever,
-    private val repository: SemanticRepresentationRepository
+    private val repository: SemanticRepresentationRepository,
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : VisualIndexingService {
 
     companion object {
@@ -60,7 +60,7 @@ class DefaultVisualIndexingService(
         )
     }
 
-    override suspend fun indexVisual(context: Context, item: MediaItem): EmbeddingResult = withContext(Dispatchers.Default) {
+    override suspend fun indexVisual(context: Context, item: MediaItem): EmbeddingResult = withContext(dispatcher) {
         try {
             val descriptor = visualProvider.descriptor
             val isVideo = item.mediaType == "VIDEO" || item.mediaType == "Movie"

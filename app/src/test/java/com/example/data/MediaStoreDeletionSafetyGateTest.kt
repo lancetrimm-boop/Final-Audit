@@ -31,21 +31,12 @@ class MediaStoreDeletionSafetyGateTest {
             .build()
         
         repository = MediaRepository()
-        
-        // Inject database via reflection
-        val dbField = MediaRepository::class.java.getDeclaredField("database")
-        dbField.isAccessible = true
-        dbField.set(repository, database)
-        
-        // Set database state to READY
-        val stateField = MediaRepository::class.java.getDeclaredField("_databaseState")
-        stateField.isAccessible = true
-        @Suppress("UNCHECKED_CAST")
-        (stateField.get(repository) as MutableStateFlow<DatabaseState>).value = DatabaseState.READY
+        repository.setDatabaseForTesting(database)
     }
 
     @After
     fun tearDown() {
+        repository.close()
         database.close()
     }
 

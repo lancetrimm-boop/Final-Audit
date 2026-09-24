@@ -24,12 +24,14 @@ class ImplementationHandoffTest {
     @Test
     fun test01_FullExecutionLifecycle() = runTest {
         // 1. Setup Finding
-        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, emptyList())
+        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, listOf(
+            EvidenceRecord(tier = EvidenceTier.PRODUCTION, sampleCount = 100, score = 60.0)
+        ))
         val finding = repository.createFindingFromReport(report, "Growth Strategy")
         
         // 2. Propose Improvement
         val improvement = repository.proposeImprovement(finding.id, finding.technicalDetails)
-        assertEquals(IntelligenceLifecycleState.SUGGESTED_IMPROVEMENT, improvement.status)
+        assertEquals(IntelligenceLifecycleState.NEEDS_REVIEW, improvement.status)
         
         // 3. Approve Improvement (Creates Contract/Artifact)
         val artifact = BlueprintArtifact(
@@ -58,7 +60,7 @@ class ImplementationHandoffTest {
 
         // 6. Complete Implementation with Scope Verification (Success)
         // Mock manifest for scope verification
-        val approvedFiles = listOf("com/example/data/TasteDna.kt")
+        val approvedFiles = listOf("AISkipEngine.kt")
         repository.completeImplementation(runId, "Done", approvedFiles)
         
         val implementedImp = fakeDao.getImprovementById(improvement.id)!!
@@ -87,7 +89,9 @@ class ImplementationHandoffTest {
 
     @Test
     fun test02_ScopeDeviationDetection() = runTest {
-        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, emptyList())
+        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, listOf(
+            EvidenceRecord(tier = EvidenceTier.PRODUCTION, sampleCount = 100, score = 60.0)
+        ))
         val finding = repository.createFindingFromReport(report, "Scope Test")
         val improvement = repository.proposeImprovement(finding.id, finding.technicalDetails)
         
@@ -117,7 +121,9 @@ class ImplementationHandoffTest {
 
     @Test
     fun test03_ImplementationFailureAndRetry() = runTest {
-        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, emptyList())
+        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, listOf(
+            EvidenceRecord(tier = EvidenceTier.PRODUCTION, sampleCount = 100, score = 60.0)
+        ))
         val finding = repository.createFindingFromReport(report, "Fail Test")
         val improvement = repository.proposeImprovement(finding.id, finding.technicalDetails)
         

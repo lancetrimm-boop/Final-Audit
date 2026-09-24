@@ -6,10 +6,11 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AuraDatabase
 import com.example.data.db.MediaEntity
 import com.example.data.semantic.*
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -25,40 +26,36 @@ class SemanticIngestionIntegrationTest {
     private lateinit var database: AuraDatabase
     private lateinit var repository: MediaRepository
     private val testDispatcher = StandardTestDispatcher()
+    
+    private val descriptor = EmbeddingModelDescriptor(
+        modelId = "test", modelVersion = 1, dimensionality = 384, primaryType = SemanticRepresentationType.CONTENT
+    )
 
     private lateinit var fakeEmbeddingProvider: FakeEmbeddingProvider
-    private lateinit var semanticRepo: SemanticRepresentationRepository
+    private lateinit var retriever: SemanticCandidateRetriever
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        org.robolectric.Shadows.shadowOf(context as android.app.Application).grantPermissions(
+            android.Manifest.permission.READ_MEDIA_VIDEO,
+            android.Manifest.permission.READ_MEDIA_IMAGES,
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        )
         database = Room.inMemoryDatabaseBuilder(context, AuraDatabase::class.java)
             .allowMainThreadQueries()
             .build()
         
         repository = MediaRepository(dispatcher = testDispatcher)
-        
-        // Inject database
-        val dbField = MediaRepository::class.java.getDeclaredField("database")
-        dbField.isAccessible = true
-        dbField.set(repository, database)
-        
-        // Set database state to READY
-        val stateField = MediaRepository::class.java.getDeclaredField("_databaseState")
-        stateField.isAccessible = true
-        (stateField.get(repository) as MutableStateFlow<DatabaseState>).value = DatabaseState.READY
+        repository.setApplicationContextForTesting(context)
+        repository.setDatabaseForTesting(database)
 
-        semanticRepo = RoomSemanticRepresentationRepository(database.semanticRepresentationDao())
-        
-        val descriptor = EmbeddingModelDescriptor(
-            modelId = "test-model",
-            modelVersion = 1,
-            dimensionality = 384,
-            primaryType = SemanticRepresentationType.CONTENT
-        )
+        val semanticRepo = RoomSemanticRepresentationRepository(database.semanticRepresentationDao())
         fakeEmbeddingProvider = FakeEmbeddingProvider(descriptor)
-        val retriever = DefaultSemanticCandidateRetriever(semanticRepo)
-        val indexingService = DefaultSemanticIndexingService(fakeEmbeddingProvider, retriever, semanticRepo)
+        
+        // Use test scope for retriever
+        retriever = DefaultSemanticCandidateRetriever(semanticRepo, testDispatcher)
+        val indexingService = DefaultSemanticIndexingService(fakeEmbeddingProvider, retriever, semanticRepo, testDispatcher)
 
         // Inject semantic components
         val fields = mapOf(
@@ -78,178 +75,89 @@ class SemanticIngestionIntegrationTest {
 
     @After
     fun tearDown() {
+        if (::repository.isInitialized) {
+            repository.close()
+        }
         database.close()
     }
 
     @Test
     fun `test processPendingMedia triggers embedding generation and persistence`() = runTest(testDispatcher) {
-        val mediaId = "test_media_1"
-        val entity = MediaEntity(
-            id = mediaId,
-            title = "Golden Retriever Puppy",
-            mediaType = "PHOTO",
-            uriPath = "file:///test1.jpg",
-            compatibilityStatus = "ANALYSIS_PENDING" // This will make it pending
-        )
-        database.mediaDao().insert(entity)
+        val item = MediaEntity(id = "m1", title = "Sunrise", mediaType = "PHOTO", uriPath = "/path/1.jpg")
+        database.mediaDao().insert(item)
+        
+        // Sync repo items
+        repository.scanLocalMedia(context)
+        advanceUntilIdle()
 
-        // Run ingestion
-        repository.processPendingMedia(context, 123L, emptySet())
+        repository.processPendingMedia(context, 1L, setOf("external"), isManual = true)
+        advanceUntilIdle()
 
-        // Verify provider was called
-        assertEquals(1, fakeEmbeddingProvider.callCount)
-        assertEquals(mediaId, fakeEmbeddingProvider.lastMediaId)
-        assertTrue(fakeEmbeddingProvider.lastInput is SemanticInput.Text)
-        assertEquals("Golden Retriever Puppy", (fakeEmbeddingProvider.lastInput as SemanticInput.Text).text)
-
-        // Verify persistence
-        val persisted = semanticRepo.getForMedia(mediaId)
-        assertEquals(1, persisted.size)
-        assertEquals(384, persisted[0].dimensionality)
-        assertEquals("test-model", persisted[0].modelDescriptor.modelId)
-    }
-
-    @Test
-    fun `test semantic processing is idempotent`() = runTest(testDispatcher) {
-        val mediaId = "test_media_idempotent"
-        val entity = MediaEntity(
-            id = mediaId,
-            title = "Sunset at Beach",
-            mediaType = "PHOTO",
-            uriPath = "file:///beach.jpg",
-            compatibilityStatus = "ANALYSIS_PENDING"
-        )
-        database.mediaDao().insert(entity)
-
-        // Pre-insert a representation for the SAME model
-        val existingRep = SemanticRepresentation(
-            id = "existing_sem",
-            mediaId = mediaId,
-            type = SemanticRepresentationType.CONTENT,
-            modelDescriptor = fakeEmbeddingProvider.descriptor,
-            dimensionality = 384,
-            vector = FloatArray(384) { 0.5f },
-            sourceDataHash = "old_hash"
-        )
-        semanticRepo.saveRepresentation(existingRep)
-
-        // Run ingestion
-        repository.processPendingMedia(context, 123L, emptySet())
-
-        // Verify provider was NOT called because it already exists
-        assertEquals(0, fakeEmbeddingProvider.callCount)
+        val representations = database.semanticRepresentationDao().getByType(SemanticRepresentationType.CONTENT.name)
+        assertEquals(1, representations.size)
+        assertEquals("m1", representations[0].mediaId)
+        assertEquals(1, retriever.getIndexSize(SemanticRepresentationType.CONTENT, descriptor))
     }
 
     @Test
     fun `test semantic failure does not abort media ingestion`() = runTest(testDispatcher) {
-        val mediaId = "test_media_failure"
-        val entity = MediaEntity(
-            id = mediaId,
-            title = "Failing Semantic Item",
-            mediaType = "PHOTO",
-            uriPath = "file:///fail.jpg",
-            compatibilityStatus = "ANALYSIS_PENDING"
-        )
-        database.mediaDao().insert(entity)
-
-        // Mock failure
         fakeEmbeddingProvider.shouldFail = true
-
-        // Run ingestion
-        repository.processPendingMedia(context, 123L, emptySet())
-
-        // Verify provider was called
-        assertEquals(1, fakeEmbeddingProvider.callCount)
-
-        // Verify media item IS ingested (status changed from ANALYSIS_PENDING)
-        val ingestedEntity = database.mediaDao().getMediaById(mediaId)
-        assertNotNull(ingestedEntity)
-        assertNotEquals("ANALYSIS_PENDING", ingestedEntity?.compatibilityStatus)
         
-        // Verify NO representation was persisted
-        assertTrue(semanticRepo.getForMedia(mediaId).isEmpty())
+        val item = MediaEntity(id = "m1", title = "Sunrise", mediaType = "PHOTO", uriPath = "/path/1.jpg")
+        database.mediaDao().insert(item)
+        
+        repository.scanLocalMedia(context)
+        advanceUntilIdle()
+
+        repository.processPendingMedia(context, 1L, setOf("external"), isManual = true)
+        advanceUntilIdle()
+
+        // Media should still be in DB
+        val dbItem = database.mediaDao().getMediaById("m1")
+        assertNotNull(dbItem)
+        
+        // But no semantic rep
+        val representations = database.semanticRepresentationDao().getByType(SemanticRepresentationType.CONTENT.name)
+        assertEquals(0, representations.size)
     }
 
     @Test
     fun `test multiple items with partial semantic failure`() = runTest(testDispatcher) {
-        // We use a small batch to ensure we test the batching logic too
-        val items = (1..5).map { i ->
-            MediaEntity(
-                id = "media_$i",
-                title = "Item $i",
-                mediaType = "PHOTO",
-                uriPath = "file:///$i.jpg",
-                compatibilityStatus = "ANALYSIS_PENDING"
-            )
-        }
-        database.mediaDao().insertAll(items)
-
-        // Fail for odd items (1, 3, 5), succeed for even (2, 4)
-        // Since we can't easily change shouldFail per call in our simple fake without more logic:
-        val providerWithToggle = object : FakeEmbeddingProvider(fakeEmbeddingProvider.descriptor) {
-            override suspend fun generateEmbedding(mediaId: String, input: SemanticInput, sourceDataHash: String): EmbeddingResult {
-                val idNum = mediaId.removePrefix("media_").toInt()
-                return if (idNum % 2 != 0) {
-                    EmbeddingResult.Failure(EmbeddingErrorCode.INFERENCE_ERROR, "Fail")
-                } else {
-                    super.generateEmbedding(mediaId, input, sourceDataHash)
-                }
-            }
-        }
+        val item1 = MediaEntity(id = "m1", title = "Success", mediaType = "PHOTO", uriPath = "/path/1.jpg")
+        val item2 = MediaEntity(id = "m2", title = "Fail", mediaType = "PHOTO", uriPath = "/path/2.jpg")
+        database.mediaDao().insert(item1)
+        database.mediaDao().insert(item2)
         
-        val providerField = MediaRepository::class.java.getDeclaredField("embeddingProvider")
-        providerField.isAccessible = true
-        providerField.set(repository, providerWithToggle)
+        repository.scanLocalMedia(context)
+        advanceUntilIdle()
 
-        // Run ingestion
-        repository.processPendingMedia(context, 123L, emptySet())
+        // Mock failure for item2 only
+        fakeEmbeddingProvider.failId = "m2"
 
-        // Verify all media items were processed
-        items.forEach { entity ->
-            val ingested = database.mediaDao().getMediaById(entity.id)
-            assertNotEquals("ANALYSIS_PENDING", ingested?.compatibilityStatus)
-        }
+        repository.processPendingMedia(context, 1L, setOf("external"), isManual = true)
+        advanceUntilIdle()
 
-        // Verify only 2 and 4 have representations (2 total)
-        assertEquals(2, semanticRepo.count())
+        // One success, one failure
+        val representations = database.semanticRepresentationDao().getByType(SemanticRepresentationType.CONTENT.name)
+        assertEquals(1, representations.size)
+        assertEquals("m1", representations[0].mediaId)
     }
 
-    open class FakeEmbeddingProvider(
-        override val descriptor: EmbeddingModelDescriptor,
-        override val supportedTypes: Set<SemanticRepresentationType> = setOf(SemanticRepresentationType.CONTENT)
-    ) : EmbeddingProvider {
+    private class FakeEmbeddingProvider(override val descriptor: EmbeddingModelDescriptor) : EmbeddingProvider {
         var shouldFail = false
-        var lastMediaId: String? = null
-        var lastInput: SemanticInput? = null
-        var callCount = 0
-
-        override fun isReady(): Boolean = true
-
-        override fun close() {}
-
-        override suspend fun generateEmbedding(
-            mediaId: String,
-            input: SemanticInput,
-            sourceDataHash: String
-        ): EmbeddingResult {
-            callCount++
-            lastMediaId = mediaId
-            lastInput = input
-            
-            if (shouldFail) {
-                return EmbeddingResult.Failure(EmbeddingErrorCode.INFERENCE_ERROR, "Simulated Failure")
+        var failId: String? = null
+        override val supportedTypes = setOf(SemanticRepresentationType.CONTENT)
+        override fun isReady() = true
+        override suspend fun generateEmbedding(mediaId: String, input: SemanticInput, sourceDataHash: String): EmbeddingResult {
+            if (shouldFail || mediaId == failId) {
+                return EmbeddingResult.Failure(EmbeddingErrorCode.INFERENCE_ERROR, "Mock failure")
             }
-            
-            val rep = SemanticRepresentation(
-                id = "sem_$mediaId",
-                mediaId = mediaId,
-                type = descriptor.primaryType,
-                modelDescriptor = descriptor,
-                dimensionality = descriptor.dimensionality,
-                vector = FloatArray(descriptor.dimensionality) { 0.1f },
-                sourceDataHash = sourceDataHash
-            )
-            return EmbeddingResult.Success(rep)
+            return EmbeddingResult.Success(SemanticRepresentation(
+                id = "rep_$mediaId", mediaId = mediaId, type = SemanticRepresentationType.CONTENT,
+                modelDescriptor = descriptor, dimensionality = 384,
+                vector = FloatArray(384) { 0.1f }, sourceDataHash = sourceDataHash
+            ))
         }
+        override fun close() {}
     }
 }

@@ -69,7 +69,8 @@ class CleanupIntelligenceViewModel(
                 
                 val allIds = allItems.map { it.id }
                 val skipCounts = repository.getSkipCounts(allIds)
-                val hashFrequencies = repository.getContentHashFrequencies()
+                val hashFrequenciesList = repository.getContentHashFrequencies()
+                val hashFrequenciesMap = hashFrequenciesList.associate { it.contentHash to it.count }
 
                 val keepScoreResults = allItems.map { item ->
                     val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats)
@@ -79,7 +80,7 @@ class CleanupIntelligenceViewModel(
                     val estimatedWatchDuration = (item.progress * item.durationMs) / 1000f
 
                     // Rarity: 1.0 / frequency of same content hash
-                    val frequency = hashFrequencies[item.contentHash] ?: 1
+                    val frequency = hashFrequenciesMap[item.contentHash ?: ""] ?: 1
                     val rarityScore = 1.0f / frequency
 
                     KeepScoreEngine.calculateScore(

@@ -1,7 +1,6 @@
 package com.example.data.semantic
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -91,7 +90,8 @@ interface SemanticSearchService {
  */
 class DefaultSemanticSearchService(
     private val embeddingProvider: EmbeddingProvider,
-    private val candidateRetriever: SemanticCandidateRetriever
+    private val candidateRetriever: SemanticCandidateRetriever,
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : SemanticSearchService, com.example.data.intelligence.SemanticRetrievalProvider {
 
     override fun isReady(): Boolean = embeddingProvider.isReady()
@@ -131,7 +131,7 @@ class DefaultSemanticSearchService(
         minSimilarity: Float,
         targetType: SemanticRepresentationType,
         expectedDescriptor: EmbeddingModelDescriptor?
-    ): SemanticSearchResult = withContext(Dispatchers.Default) {
+    ): SemanticSearchResult = withContext(dispatcher) {
         val startTime = System.currentTimeMillis()
 
         val trimmedQuery = query.trim()
@@ -276,7 +276,7 @@ class DefaultSemanticSearchService(
         minSimilarity: Float,
         targetType: SemanticRepresentationType,
         expectedDescriptor: EmbeddingModelDescriptor?
-    ): SemanticSearchResult = withContext(Dispatchers.Default) {
+    ): SemanticSearchResult = withContext(dispatcher) {
         val startTime = System.currentTimeMillis()
         val providerDescriptor = embeddingProvider.descriptor
 

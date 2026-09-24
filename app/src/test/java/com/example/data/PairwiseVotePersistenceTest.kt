@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AuraDatabase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
@@ -64,7 +65,7 @@ class PairwiseVotePersistenceTest {
         repository.recordComparisonVote("A")
         
         // 3. Verify persistence
-        val outcomes = database.pairwiseDao().getAllOutcomes().first()
+        val outcomes = database.pairwiseDao().getAllOutcomes().filter { it.isNotEmpty() }.first()
         assertEquals(1, outcomes.size)
         assertEquals("A", outcomes[0].chosenId)
         assertEquals("A", outcomes[0].optionAId)

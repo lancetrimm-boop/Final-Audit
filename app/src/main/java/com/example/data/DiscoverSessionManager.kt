@@ -75,26 +75,22 @@ class DiscoverSessionManager {
         val baseItems = if (isFirstBatch) obsession.previewItems else existingItems
 
         val requestId = "discover_batch_${System.currentTimeMillis()}"
-        val candidateBatch = if (core != null) {
-            val request = com.example.data.intelligence.IntelligenceRequest(
-                requestId = requestId,
-                mode = com.example.data.intelligence.IntelligenceMode.DISCOVER,
-                contextualIntent = com.example.data.intelligence.ContextualIntent.DISCOVER_CATEGORY,
-                limit = 50, // Request larger pool for session filtering
-                tasteDNA = tasteDNA,
-                profile = profile,
-                stats = stats,
-                creatorProfiles = creatorProfiles,
-                sortOption = obsession.strategy.javaClass.simpleName.uppercase() // Map strategy to sortOption
-            )
-            val response = core.processRequest(request)
-            response.candidates
-                .filter { it.item.id !in sessionSeenIds && !isContentSeen(it.item) && it.item.id !in baseItems.map { b -> b.id } }
-                .take(12)
-        } else {
-            // Minimal Fallback
-            emptyList()
-        }
+        
+        val request = com.example.data.intelligence.IntelligenceRequest(
+            requestId = requestId,
+            mode = com.example.data.intelligence.IntelligenceMode.DISCOVER,
+            contextualIntent = com.example.data.intelligence.ContextualIntent.DISCOVER_CATEGORY,
+            limit = 50, // Request larger pool for session filtering
+            tasteDNA = tasteDNA,
+            profile = profile,
+            stats = stats,
+            creatorProfiles = creatorProfiles,
+            sortOption = obsession.strategy.javaClass.simpleName.uppercase() // Map strategy to sortOption
+        )
+        val response = core?.processRequest(request)
+        val candidateBatch = response?.candidates
+            ?.filter { it.item.id !in sessionSeenIds && !isContentSeen(it.item) && it.item.id !in baseItems.map { b -> b.id } }
+            ?.take(12) ?: emptyList()
 
         val items = candidateBatch.map { it.item }
         items.forEach { markUsed(it) }

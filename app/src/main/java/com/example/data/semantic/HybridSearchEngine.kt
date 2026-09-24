@@ -3,6 +3,7 @@ package com.example.data.semantic
 import com.example.data.intelligence.AuraIntelligenceCore
 import com.example.data.intelligence.IntelligenceRequest
 import com.example.data.intelligence.IntelligenceMode
+import com.example.data.intelligence.EvidenceType
 
 /**
  * Adapter interface providing lexical / keyword search candidate items for hybrid fusion.
@@ -55,7 +56,7 @@ class DefaultHybridSearchEngine(
             visualVector = request.visualVector,
             queryVectors = if (request is SearchRequest.MultiVisual) request.visualVectors else null,
             limit = config.topK,
-            useLegacyRanking = true, // Force legacy equivalence during initial migration
+            useLegacyRanking = false, 
             requestId = request.requestId
         )
         
@@ -66,11 +67,28 @@ class DefaultHybridSearchEngine(
             queryType = request.queryType,
             requestId = response.requestId,
             candidates = response.candidates.map { candidate ->
+                val scores = mutableMapOf<SearchChannel, Float>()
+                val ranks = mutableMapOf<SearchChannel, Int>()
+                
+                candidate.evidence.forEach { ev ->
+                    val channel = when(ev.type) {
+                        EvidenceType.LEXICAL_MATCH -> SearchChannel.KEYWORD
+                        EvidenceType.SEMANTIC_RELEVANCE -> SearchChannel.SEMANTIC_CONTENT
+                        EvidenceType.VISUAL_SIMILARITY -> SearchChannel.SEMANTIC_VISUAL
+                        EvidenceType.TASTE_DNA_ALIGNMENT -> SearchChannel.PERSONALIZED
+                        else -> null
+                    }
+                    if (channel != null) {
+                        scores[channel] = ev.score
+                        ev.metadata["channel_rank"]?.toIntOrNull()?.let { ranks[channel] = it }
+                    }
+                }
+
                 HybridCandidate(
                     mediaId = candidate.item.id,
                     rrfScore = candidate.rankScore,
-                    channelRanks = emptyMap(),
-                    channelScores = emptyMap(),
+                    channelRanks = ranks,
+                    channelScores = scores,
                     matchExplanation = candidate.provenance
                 )
             },

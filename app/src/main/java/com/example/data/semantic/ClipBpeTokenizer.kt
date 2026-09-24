@@ -22,7 +22,7 @@ class ClipBpeTokenizer(
     private val cache = mutableMapOf<String, List<String>>()
     
     // Pattern for CLIP pre-tokenization
-    private val pattern = Pattern.compile("<\\|startoftext\\|>|<\\|endoftext\\|>|'s|'t|'re|'ve|'m|'ll|'d|[\\p{L}]+|[\\p{N}]+|[^\\s\\p{L}\\p{N}]+", Pattern.CASE_INSENSITIVE)
+    private val pattern = Pattern.compile("<\\|startoftext\\|>|<\\|endoftext\\|>|'s|'t|'re|'ve|'m|'ll|'d|[\\p{L}\\p{N}]+|[^\\s\\p{L}\\p{N}]+", Pattern.CASE_INSENSITIVE)
 
     companion object {
         const val MAX_SEQ_LENGTH = 77
@@ -119,10 +119,11 @@ class ClipBpeTokenizer(
     private fun bpe(token: String): List<String> {
         if (token in cache) return cache[token]!!
         
-        // Initial split into characters (with end-of-word marked if appropriate? No, CLIP marks with </w>)
-        // Wait, MobileCLIP vocab seems to use </w> as suffix for tokens that end a word.
-        // The standard CLIP logic is: split into characters, and the LAST character gets the </w> suffix.
-        
+        val eowToken = token + "</w>"
+        if (vocab.containsKey(eowToken)) {
+            return listOf(eowToken)
+        }
+
         var word = token.map { it.toString() }.toMutableList()
         word[word.size - 1] = word.last() + "</w>"
         

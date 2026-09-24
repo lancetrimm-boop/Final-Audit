@@ -4,25 +4,30 @@ import com.example.data.db.*
 import com.example.data.blueprint.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import java.util.UUID
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class IntelligenceSynchronizationTest {
 
     private lateinit var repository: IntelligenceRepository
     private lateinit var fakeDao: FakeIntelligenceDao
+    private val testDispatcher = StandardTestDispatcher()
 
     @Before
     fun setup() {
         fakeDao = FakeIntelligenceDao()
-        repository = IntelligenceRepository(fakeDao)
+        // Provide a scope that uses the test dispatcher for deterministic execution
+        repository = IntelligenceRepository(fakeDao, scope = CoroutineScope(testDispatcher + SupervisorJob()))
     }
 
     @Test
-    fun test01_RealTimeFindingPropagation() = runTest {
+    fun test01_RealTimeFindingPropagation() = runTest(testDispatcher) {
         // 1. Observe findings
         val findingsFlow = repository.getAllFindings()
         val results = mutableListOf<List<Finding>>()
@@ -37,27 +42,19 @@ class IntelligenceSynchronizationTest {
         
         repository.onEvidenceAvailable(evidenceId)
         
-        // Wait for event processor (it runs in scope IO + SupervisorJob in repo)
-        // In this test, I might need to use the test scope for the repo too if I want it to be deterministic.
-        // For now, I'll poll the findings.
-        
-        var findingFound = false
-        withTimeout(5000) {
-            while (!findingFound) {
-                if (fakeDao.findings.isNotEmpty()) findingFound = true
-                else delay(100)
-            }
-        }
+        // Wait for all coroutines in the repository's scope to finish
+        advanceUntilIdle()
 
-        assertTrue(fakeDao.findings.isNotEmpty())
+        assertTrue("Finding should be generated and persisted in the DAO", fakeDao.findings.isNotEmpty())
+        assertTrue("Collect should have received the new findings", results.any { it.isNotEmpty() })
         job.cancel()
     }
 
     @Test
-    fun test02_SinceLastReviewReactivity() = runTest {
+    fun test02_SinceLastReviewReactivity() = runTest(testDispatcher) {
         // Setup initial review
         repository.markAllAsReviewed()
-        val lastReview = fakeDao.checkpoints["LAST_REVIEW"]?.timestamp ?: 0L
+        advanceUntilIdle()
         
         // Observe Master Report
         val reportFlow = repository.getMasterReportFlow()
@@ -67,22 +64,22 @@ class IntelligenceSynchronizationTest {
             reportFlow.collect { reports.add(it) }
         }
         
-        // Wait for first emission
-        delay(500)
+        advanceUntilIdle()
         assertTrue(reports.isNotEmpty())
         assertEquals(0, reports.last().sinceLastReview.newFindings)
 
         // Create new finding
-        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, emptyList())
+        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, listOf(
+            EvidenceRecord(tier = EvidenceTier.PRODUCTION, sampleCount = 10, score = 60.0)
+        ))
         repository.createFindingFromReport(report, "New Activity")
         
-        // Wait for reactivity
-        delay(500)
+        advanceUntilIdle()
         assertEquals(1, reports.last().sinceLastReview.newFindings)
         
         // Review again
         repository.markAllAsReviewed()
-        delay(500)
+        advanceUntilIdle()
         assertEquals(0, reports.last().sinceLastReview.newFindings)
         
         job.cancel()

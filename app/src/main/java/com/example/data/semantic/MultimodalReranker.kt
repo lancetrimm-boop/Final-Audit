@@ -57,7 +57,6 @@ class VideoIntelligenceReranker : MultimodalReranker {
         queryVectors: List<FloatArray>?,
         frameVectors: Map<String, List<VideoFrameRepresentation>>
     ): List<HybridCandidate> {
-        android.util.Log.i("RANKING", "RERANK_START: candidates=${candidates.size} hasQueryVector=${queryVector != null} hasMulti=${queryVectors?.size ?: 0} frameBatchSize=${frameVectors.size}")
         if (candidates.isEmpty()) return emptyList()
 
         val results = candidates.map { candidate ->
@@ -135,7 +134,6 @@ class VideoIntelligenceReranker : MultimodalReranker {
                 candidate
             }
         }.sortedByDescending { it.rrfScore }
-        android.util.Log.i("RANKING", "RERANK_COMPLETE: topScore=${results.firstOrNull()?.rrfScore}")
         return results
     }
 

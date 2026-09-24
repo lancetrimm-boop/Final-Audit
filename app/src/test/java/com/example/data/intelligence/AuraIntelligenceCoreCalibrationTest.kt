@@ -31,14 +31,14 @@ class AuraIntelligenceCoreCalibrationTest {
     }
 
     @Test
-    fun testPrecisionGate_Accepts018_ForTextOnlySearch() = runTest {
+    fun testPrecisionGate_Accepts011_ForTextOnlySearch() = runTest {
         val query = "water"
         val request = IntelligenceRequest(
             mode = IntelligenceMode.SEARCH,
             query = query,
             visualVector = FloatArray(512), // Text-derived vector
             limit = 10,
-            requestId = "test-18"
+            requestId = "test-11"
         )
 
         val mediaId = "vid_water"
@@ -46,27 +46,27 @@ class AuraIntelligenceCoreCalibrationTest {
         whenever(repository.getMediaItemById(mediaId)).thenReturn(mockItem)
 
         val channelResults = mapOf(
-            SearchChannel.SEMANTIC_CONTENT to listOf(RankedChannelItem(mediaId, 0.18f, 1))
+            SearchChannel.SEMANTIC_CONTENT to listOf(RankedChannelItem(mediaId, 0.11f, 1))
         )
         whenever(retrievalRouter.retrieve(any())).thenReturn(channelResults)
         
         whenever(reranker.rerank(any(), anyOrNull(), anyOrNull(), any())).thenReturn(listOf(
-            HybridCandidate(mediaId, 1.0, mapOf(SearchChannel.SEMANTIC_CONTENT to 1), mapOf(SearchChannel.SEMANTIC_CONTENT to 0.18f))
+            HybridCandidate(mediaId, 1.0, mapOf(SearchChannel.SEMANTIC_CONTENT to 1), mapOf(SearchChannel.SEMANTIC_CONTENT to 0.11f))
         ))
 
         val response = core.processRequest(request)
-        assertTrue("Candidate with 0.18 should pass for text search", response.candidates.any { it.item.id == mediaId })
+        assertTrue("Candidate with 0.11 should pass for text search", response.candidates.any { it.item.id == mediaId })
     }
 
     @Test
-    fun testPrecisionGate_Rejects017_ForTextOnlySearch() = runTest {
+    fun testPrecisionGate_Rejects009_ForTextOnlySearch() = runTest {
         val query = "water"
         val request = IntelligenceRequest(
             mode = IntelligenceMode.SEARCH,
             query = query,
             visualVector = FloatArray(512),
             limit = 10,
-            requestId = "test-17"
+            requestId = "test-09"
         )
 
         val mediaId = "vid_noise"
@@ -74,16 +74,16 @@ class AuraIntelligenceCoreCalibrationTest {
         whenever(repository.getMediaItemById(mediaId)).thenReturn(mockItem)
 
         val channelResults = mapOf(
-            SearchChannel.SEMANTIC_CONTENT to listOf(RankedChannelItem(mediaId, 0.17f, 1))
+            SearchChannel.SEMANTIC_CONTENT to listOf(RankedChannelItem(mediaId, 0.09f, 1))
         )
         whenever(retrievalRouter.retrieve(any())).thenReturn(channelResults)
         
         whenever(reranker.rerank(any(), anyOrNull(), anyOrNull(), any())).thenReturn(listOf(
-            HybridCandidate(mediaId, 1.0, mapOf(SearchChannel.SEMANTIC_CONTENT to 1), mapOf(SearchChannel.SEMANTIC_CONTENT to 0.17f))
+            HybridCandidate(mediaId, 1.0, mapOf(SearchChannel.SEMANTIC_CONTENT to 1), mapOf(SearchChannel.SEMANTIC_CONTENT to 0.09f))
         ))
 
         val response = core.processRequest(request)
-        assertTrue("Candidate with 0.17 should be rejected for text search", response.candidates.isEmpty())
+        assertTrue("Candidate with 0.09 should be rejected for text search", response.candidates.isEmpty())
     }
 
     @Test
@@ -100,15 +100,15 @@ class AuraIntelligenceCoreCalibrationTest {
         whenever(repository.getMediaItemById(mediaId)).thenReturn(mockItem)
 
         val channelResults = mapOf(
-            SearchChannel.SEMANTIC_VISUAL to listOf(RankedChannelItem(mediaId, 0.25f, 1))
+            SearchChannel.SEMANTIC_VISUAL to listOf(RankedChannelItem(mediaId, 0.34f, 1))
         )
         whenever(retrievalRouter.retrieve(any())).thenReturn(channelResults)
         
         whenever(reranker.rerank(any(), anyOrNull(), anyOrNull(), any())).thenReturn(listOf(
-            HybridCandidate(mediaId, 1.0, mapOf(SearchChannel.SEMANTIC_VISUAL to 1), mapOf(SearchChannel.SEMANTIC_VISUAL to 0.25f))
+            HybridCandidate(mediaId, 1.0, mapOf(SearchChannel.SEMANTIC_VISUAL to 1), mapOf(SearchChannel.SEMANTIC_VISUAL to 0.34f))
         ))
 
         val response = core.processRequest(request)
-        assertTrue("Candidate with 0.25 should still be rejected for pure visual search", response.candidates.isEmpty())
+        assertTrue("Candidate with 0.34 should still be rejected for pure visual search", response.candidates.isEmpty())
     }
 }

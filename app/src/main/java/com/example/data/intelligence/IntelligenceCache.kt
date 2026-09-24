@@ -29,6 +29,15 @@ object IntelligenceCache {
     }
 
     /**
+     * Clears all caches for testing.
+     */
+    @androidx.annotation.VisibleForTesting
+    fun clear() {
+        evidenceCache.clear()
+        responseCache.clear()
+    }
+
+    /**
      * Cache individual media evidence.
      */
     fun putEvidence(mediaId: String, evidence: List<EvidenceItem>) {

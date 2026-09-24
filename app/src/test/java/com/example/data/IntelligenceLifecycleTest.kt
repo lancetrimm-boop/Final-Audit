@@ -56,7 +56,7 @@ class IntelligenceLifecycleTest {
         
         assertTrue(improvement.id.startsWith("IMP-"))
         assertEquals(finding.id, improvement.findingId)
-        assertEquals(IntelligenceLifecycleState.SUGGESTED_IMPROVEMENT, improvement.status)
+        assertEquals(IntelligenceLifecycleState.NEEDS_REVIEW, improvement.status)
         
         val updatedFinding = fakeDao.findings[finding.id]
         assertEquals(IntelligenceLifecycleState.SUGGESTED_IMPROVEMENT, updatedFinding?.lifecycleState)

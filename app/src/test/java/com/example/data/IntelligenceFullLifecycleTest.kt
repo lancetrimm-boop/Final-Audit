@@ -108,9 +108,10 @@ class IntelligenceFullLifecycleTest {
     @Test
     fun test02_RegressionPath_RollbackAndRecovery() = runTest {
         // Setup up to Monitoring
-        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, emptyList())
+        val evidence = listOf(EvidenceRecord(tier = EvidenceTier.PRODUCTION, sampleCount = 10, score = 60.0))
+        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, evidence)
         val finding = repository.createFindingFromReport(report, "Regression Test")
-        val imp = fakeDao.improvements.values.first().toDomain()
+        val imp = repository.getAllImprovements().first { it.isNotEmpty() }.first()
         repository.approveImprovement(imp.id, repository.getArtifactsForImprovement(imp.id).first()[0])
         repository.planImplementation(imp.id)
         val runId = repository.getImplementationRuns(imp.id).first()[0].id
@@ -133,12 +134,12 @@ class IntelligenceFullLifecycleTest {
         repository.executeRollback(rollbackRun.id)
         
         // 3. POST-ROLLBACK MONITORING
+        val sessionId = repository.getMonitoringSessions(imp.id).first().find { it.runId == rollbackRun.id }?.id
+        assertNotNull(sessionId)
         assertEquals(IntelligenceLifecycleState.MONITORING, fakeDao.getImprovementById(imp.id)?.status)
-        val postRollbackSession = repository.getMonitoringSessions(imp.id).first().find { it.runId == runId } // originalRunId used in my completeRollback impl
-        assertNotNull(postRollbackSession)
         
         // 4. RESOLUTION
-        repository.updateMonitoringProgress(postRollbackSession!!.id, 50, 50.0, listOf("EV-RESTORED"))
+        repository.updateMonitoringProgress(sessionId!!, 100, 50.0, listOf("EV-RESTORED"))
         
         assertEquals(IntelligenceLifecycleState.ROLLED_BACK, fakeDao.getImprovementById(imp.id)?.status)
     }
@@ -146,9 +147,10 @@ class IntelligenceFullLifecycleTest {
     @Test
     fun test03_FailurePath_Retry() = runTest {
         // Setup approved
-        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, emptyList())
+        val evidence = listOf(EvidenceRecord(tier = EvidenceTier.PRODUCTION, sampleCount = 10, score = 60.0))
+        val report = ClosedLoopEngine.evaluate(50.0, 60.0, 70.0, evidence)
         val finding = repository.createFindingFromReport(report, "Retry Test")
-        val impId = fakeDao.improvements.values.first().id
+        val impId = repository.getAllImprovements().first { it.isNotEmpty() }.first().id
         repository.approveImprovement(impId, repository.getArtifactsForImprovement(impId).first()[0])
         repository.planImplementation(impId)
         
