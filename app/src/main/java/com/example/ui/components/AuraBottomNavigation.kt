@@ -43,9 +43,8 @@ sealed class NavDestination(
     object LIBRARY : NavDestination("library", "Library", Icons.Default.PhotoLibrary, Icons.Outlined.PhotoLibrary, "nav_library")
     object CHANNELS : NavDestination("channels", "Channels", Icons.Default.Tv, Icons.Outlined.Tv, "nav_channels")
     object COMPARE : NavDestination("compare", "Pairwise", Icons.AutoMirrored.Filled.CompareArrows, Icons.AutoMirrored.Outlined.CompareArrows, "nav_compare")
-    object FINDS : NavDestination("finds", "Finds", Icons.Default.Explore, Icons.Outlined.Explore, "nav_finds")
     object MY_STUFF : NavDestination("my_stuff", "My Stuff", Icons.Default.Person, Icons.Outlined.Person, "nav_my_stuff")
-    object DISCOVER : NavDestination("discover", "Discover", Icons.Default.AutoAwesome, Icons.Outlined.AutoAwesome, "nav_discover")
+    object DISCOVER : NavDestination("discover", "Discover", Icons.Default.Explore, Icons.Outlined.Explore, "nav_discover")
     object COLLECTIONS : NavDestination("collections", "Collections", Icons.Default.CollectionsBookmark, Icons.Outlined.CollectionsBookmark, "nav_collections")
     object PROFILE : NavDestination("profile", "Profile", Icons.Default.Person, Icons.Outlined.Person, "nav_profile")
     object INTELLIGENCE : NavDestination("intelligence", "Intelligence", Icons.AutoMirrored.Filled.Rule, Icons.AutoMirrored.Outlined.Rule, "nav_intelligence")
@@ -89,7 +88,7 @@ fun AuraBottomNavigation(
                     NavDestination.LIBRARY,
                     NavDestination.CHANNELS,
                     NavDestination.COMPARE,
-                    NavDestination.FINDS,
+                    NavDestination.DISCOVER,
                     NavDestination.MY_STUFF
                 )
 

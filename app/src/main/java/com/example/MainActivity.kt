@@ -615,9 +615,8 @@ fun AuraMainContent(repository: MediaRepository) {
                             NavDestination.LIBRARY.route -> 0
                             NavDestination.CHANNELS.route -> 1
                             NavDestination.COMPARE.route -> 2
-                            NavDestination.FINDS.route -> 3
+                            NavDestination.DISCOVER.route -> 3
                             NavDestination.MY_STUFF.route -> 4
-                            NavDestination.DISCOVER.route -> 4
                             NavDestination.COLLECTIONS.route -> 4
                             NavDestination.PROFILE.route -> 4
                             NavDestination.PLAYBACK_DIAGNOSTICS.route -> 4
@@ -631,9 +630,8 @@ fun AuraMainContent(repository: MediaRepository) {
                             NavDestination.LIBRARY.route -> 0
                             NavDestination.CHANNELS.route -> 1
                             NavDestination.COMPARE.route -> 2
-                            NavDestination.FINDS.route -> 3
+                            NavDestination.DISCOVER.route -> 3
                             NavDestination.MY_STUFF.route -> 4
-                            NavDestination.DISCOVER.route -> 4
                             NavDestination.COLLECTIONS.route -> 4
                             NavDestination.PROFILE.route -> 4
                             NavDestination.PLAYBACK_DIAGNOSTICS.route -> 4
@@ -713,9 +711,6 @@ fun AuraMainContent(repository: MediaRepository) {
                                     )
                                 }
                             )
-                        }
-                        NavDestination.FINDS.route -> {
-                            com.example.ui.screens.AuraFindsScreen()
                         }
                         NavDestination.MY_STUFF.route -> {
                             com.example.ui.screens.MyStuffScreen(
