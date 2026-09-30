@@ -17,14 +17,13 @@ import com.example.ui.theme.*
 
 enum class MyStuffTab(val title: String) {
     PROFILE("Profile"),
-    DISCOVER("Discover"),
     COLLECTIONS("Collections")
 }
 
 @Composable
 fun MyStuffScreen(
     repository: MediaRepository,
-    discoverViewModel: DiscoverViewModel,
+    discoverViewModel: DiscoverViewModel? = null,
     mediaItems: List<MediaItem>,
     onNavigateToFavorites: () -> Unit,
     onNavigateToCleanup: () -> Unit,
@@ -110,15 +109,6 @@ fun MyStuffScreen(
                         onNavigateToDiagnostics = onNavigateToDiagnostics,
                         onLaunchAuraMoments = onLaunchAuraMoments,
                         onMediaSelect = onMediaSelect
-                    )
-                }
-                MyStuffTab.DISCOVER -> {
-                    DiscoverScreen(
-                        repository = repository,
-                        viewModel = discoverViewModel,
-                        onMediaSelect = { item -> onMediaSelect(item, listOf(item)) },
-                        onObsessionSelect = {},
-                        onScanAndImport = onScanAndImport
                     )
                 }
                 MyStuffTab.COLLECTIONS -> {

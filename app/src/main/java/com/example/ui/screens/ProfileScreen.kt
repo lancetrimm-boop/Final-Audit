@@ -53,7 +53,6 @@ import android.util.Log
 import java.io.File
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
-import com.example.data.export.AuraPreferenceExporter
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -720,44 +719,6 @@ fun ProfileScreen(
                                     )
                                     HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), color = AuraSubtleBorder.copy(alpha = 0.5f))
                                     SettingsClickRow(
-                                        icon = Icons.Default.FileUpload,
-                                        title = "Export Taste DNA",
-                                        subtitle = "Generate portable preference profile for Aura Scout",
-                                        onClick = {
-                                            scope.launch {
-                                                try {
-                                                    val dna = repository.tasteDNA.value
-                                                    val stats = repository.intelligenceStats.value
-                                                    val items = repository.mediaItems.value
-                                                    val favorites = items.filter { it.isFavorite || it.rating >= 4.0f }
-                                                    val negatives = repository.searchFeedbackRepository?.observeAllFeedback()?.first() ?: emptyList()
-
-                                                    val contract = AuraPreferenceExporter.export(dna, stats, favorites, negatives, items)
-                                                    val json = AuraPreferenceExporter.toJson(contract)
-
-                                                    val file = File(context.cacheDir, "aura_preferences.json")
-                                                    file.writeText(json)
-
-                                                    val uri = androidx.core.content.FileProvider.getUriForFile(
-                                                        context,
-                                                        "${context.packageName}.fileprovider",
-                                                        file
-                                                    )
-                                                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                                        type = "application/json"
-                                                        putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                                                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                    }
-                                                    context.startActivity(android.content.Intent.createChooser(intent, "Export Taste DNA"))
-                                                } catch (e: Exception) {
-                                                    Log.e("Export", "Failed to export preferences", e)
-                                                    Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        }
-                                    )
-                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), color = AuraSubtleBorder.copy(alpha = 0.5f))
-                                    SettingsClickRow(
                                         icon = Icons.Default.PrivacyTip,
                                         title = "Privacy Policy",
                                         subtitle = "How Aura protects your data",
@@ -998,44 +959,6 @@ fun ProfileScreen(
                                 )
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = AuraSpacing.L), color = AuraSubtleBorder.copy(alpha = 0.5f))
                                 SettingsClickRow(
-                                    icon = Icons.Default.FileUpload,
-                                    title = "Export Taste DNA",
-                                    subtitle = "Generate portable preference profile for Aura Scout",
-                                    onClick = {
-                                        scope.launch {
-                                            try {
-                                                val dna = repository.tasteDNA.value
-                                                val stats = repository.intelligenceStats.value
-                                                val items = repository.mediaItems.value
-                                                val favorites = items.filter { it.isFavorite || it.rating >= 4.0f }
-                                                val negatives = repository.searchFeedbackRepository?.observeAllFeedback()?.first() ?: emptyList()
-
-                                                val contract = AuraPreferenceExporter.export(dna, stats, favorites, negatives, items)
-                                                val json = AuraPreferenceExporter.toJson(contract)
-
-                                                val file = File(context.cacheDir, "aura_preferences.json")
-                                                file.writeText(json)
-
-                                                val uri = androidx.core.content.FileProvider.getUriForFile(
-                                                    context,
-                                                    "${context.packageName}.fileprovider",
-                                                    file
-                                                )
-                                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                                    type = "application/json"
-                                                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                }
-                                                context.startActivity(android.content.Intent.createChooser(intent, "Export Taste DNA"))
-                                            } catch (e: Exception) {
-                                                Log.e("Export", "Failed to export preferences", e)
-                                                Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    }
-                                )
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = AuraSpacing.L), color = AuraSubtleBorder.copy(alpha = 0.5f))
-                                SettingsClickRow(
                                     icon = Icons.Default.PrivacyTip,
                                     title = "Privacy Policy",
                                     subtitle = "How Aura protects your data",
@@ -1112,9 +1035,18 @@ fun ProfileScreen(
                     TextButton(
                         onClick = {
                             if (feedbackText.isNotBlank()) {
-                                Toast.makeText(context, "Thank you for your feedback.", Toast.LENGTH_SHORT).show()
-                                showFeedbackDialog = false
-                                feedbackText = ""
+                                val emailIntent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
+                                    data = android.net.Uri.parse("mailto:lancetrimm@gmail.com")
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Aura Media Player Feedback")
+                                    putExtra(android.content.Intent.EXTRA_TEXT, feedbackText)
+                                }
+                                try {
+                                    context.startActivity(emailIntent)
+                                    showFeedbackDialog = false
+                                    feedbackText = ""
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Could not open email application. Please email lancetrimm@gmail.com directly.", Toast.LENGTH_LONG).show()
+                                }
                             }
                         }
                     ) {
