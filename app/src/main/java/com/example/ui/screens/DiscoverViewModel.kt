@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -117,6 +119,8 @@ class DiscoverViewModel(
         // Phase 12: Refresh boundaries - Observe policy/intent changes
         viewModelScope.launch {
             combine(repository.discoveryPolicy, repository.userIntent) { p, i -> p to i }
+                .distinctUntilChanged()
+                .drop(1)
                 .collect {
                     // If policy or intent changes while we have a success state, force a refresh
                     if (_feedState.value is DiscoverFeedState.Success && !isRefreshing) {

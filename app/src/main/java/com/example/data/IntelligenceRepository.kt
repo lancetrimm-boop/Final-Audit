@@ -97,14 +97,12 @@ class IntelligenceRepository(
 
     private fun startEventProcessor() {
         scope.launch {
-            dao.getPendingEvents().collect { events ->
+            dao.getPendingEvents().distinctUntilChanged().collect { events ->
                 events.forEach { event ->
-                    // Attempt to lock event processing
                     try {
-                        val current = dao.getAllIntelligenceEvents().first().find { it.id == event.id }
-                        if (current?.status == "PENDING") {
-                            dao.updateEvent(current.copy(status = "PROCESSING"))
-                            processEvent(current)
+                        if (event.status == "PENDING") {
+                            dao.updateEvent(event.copy(status = "PROCESSING"))
+                            processEvent(event)
                         }
                     } catch (e: Exception) {
                         Log.e("IntelligenceRepository", "Event processor conflict", e)
