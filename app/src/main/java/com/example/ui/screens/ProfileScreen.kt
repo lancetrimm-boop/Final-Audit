@@ -335,76 +335,6 @@ private fun ProfileSectionTitle(title: String) {
 }
 
 @Composable
-private fun PrivacyConsentCard(
-    consentState: com.example.data.contribution.ConsentState,
-    onConsentChange: (com.example.data.contribution.ConsentState) -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp)),
-        color = AuraSubtleSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, AuraSubtleBorder)
-    ) {
-        Column(modifier = Modifier.padding(AuraSpacing.M)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Global Intelligence",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AuraMidnight
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = when (consentState) {
-                            com.example.data.contribution.ConsentState.GRANTED -> "Status: Opted In (Active)"
-                            com.example.data.contribution.ConsentState.REVOKED -> "Status: Opted Out"
-                            else -> "Status: Not Decided"
-                        },
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (consentState == com.example.data.contribution.ConsentState.GRANTED) DiscoveryViolet else AuraMutedSlate
-                    )
-                }
-
-                Switch(
-                    checked = consentState == com.example.data.contribution.ConsentState.GRANTED,
-                    onCheckedChange = { checked ->
-                        val newState = if (checked) {
-                            com.example.data.contribution.ConsentState.GRANTED
-                        } else {
-                            com.example.data.contribution.ConsentState.REVOKED
-                        }
-                        onConsentChange(newState)
-                    },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = AuraCrispWhite,
-                        checkedTrackColor = DiscoveryViolet,
-                        uncheckedThumbColor = AuraMutedSlate,
-                        uncheckedTrackColor = AuraSubtleBorder
-                    ),
-                    modifier = Modifier.scale(0.8f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(AuraSpacing.XS))
-
-            Text(
-                text = "Participation is optional. When enabled, Aura contributes anonymized preference signals to improve models. Your intelligence stays 100% private.",
-                fontSize = 11.sp,
-                color = AuraMutedSlate,
-                lineHeight = 16.sp
-            )
-        }
-    }
-}
-
-@Composable
 private fun VisualTasteLearningCard() {
     Surface(
         color = DiscoveryViolet.copy(alpha = 0.05f),
@@ -461,7 +391,6 @@ fun ProfileScreen(
     val tasteDNA by repository.tasteDNA.collectAsStateWithLifecycle()
     val preferenceProfile by repository.preferenceProfile.collectAsStateWithLifecycle()
     val discoveryPolicy by repository.discoveryPolicy.collectAsStateWithLifecycle()
-    val consentState by repository.consentState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val dashboardViewModel: IntelligenceDashboardViewModel = viewModel(
@@ -699,9 +628,6 @@ fun ProfileScreen(
                                 color = AuraMutedSlate,
                                 modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
                             )
-                            PrivacyConsentCard(consentState) { repository.updateConsentState(it) }
-
-                            Spacer(modifier = Modifier.height(24.dp))
 
                             Surface(
                                 modifier = Modifier
@@ -939,9 +865,6 @@ fun ProfileScreen(
                             color = AuraMutedSlate,
                             modifier = Modifier.padding(bottom = AuraSpacing.M, start = AuraSpacing.XXS)
                         )
-                        PrivacyConsentCard(consentState) { repository.updateConsentState(it) }
-
-                        Spacer(modifier = Modifier.height(AuraSpacing.S))
 
                         Surface(
                             modifier = Modifier
