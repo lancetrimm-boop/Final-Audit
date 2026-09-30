@@ -249,7 +249,8 @@ fun AuraMainContent(repository: MediaRepository) {
                     ?: throw IllegalStateException("PlaybackErrorLogRepository not initialized in READY state")
                 return com.example.ui.screens.PlaybackDiagnosticsViewModel(
                     errorLogRepo,
-                    repository.conversionQueueRepository
+                    repository.conversionQueueRepository,
+                    repository
                 ) as T
             }
         }
@@ -270,6 +271,20 @@ fun AuraMainContent(repository: MediaRepository) {
             }
         }
     )
+
+    LaunchedEffect(channelViewModel) {
+        repository.channelReplenishmentProvider = { channel, filterType, existingIds ->
+            channelViewModel.programNextBlock(
+                channel = channel,
+                filterType = filterType,
+                excludeIds = existingIds.toSet(),
+                limit = 10
+            )
+        }
+        repository.libraryReplenishmentProvider = { existingIds ->
+            repository.loadNextLibraryPage(excludeIds = existingIds.toSet(), limit = 20)
+        }
+    }
 
     var showEngagementDebugger by remember { mutableStateOf(false) }
 

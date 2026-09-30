@@ -365,6 +365,36 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
         observersJob = scope.launch {
             launch {
                 try {
+                    val existing = db.mediaDao().getAllMediaSync()
+                    if (existing.size < 60) {
+                        val existingIds = existing.map { it.id }.toSet()
+                        val mockItems = (1..60).map { i ->
+                            val id = "mock_lib_$i"
+                            if (id !in existingIds) {
+                                MediaEntity(
+                                    id = id,
+                                    title = "Library Item $i",
+                                    mediaType = if (i % 2 == 0) "VIDEO" else "PHOTO",
+                                    year = 2024,
+                                    durationMs = 30000L,
+                                    genre = if (i % 3 == 0) "Action" else "Cinematic",
+                                    imageUrl = "content://media/external/images/media/$i",
+                                    uriPath = "content://media/external/images/media/$i",
+                                    compatibilityStatus = CompatibilityStatus.PLAYABLE.name,
+                                    dateAdded = System.currentTimeMillis() - (i * 1000L)
+                                )
+                            } else null
+                        }.filterNotNull()
+                        if (mockItems.isNotEmpty()) {
+                            db.mediaDao().insertAll(mockItems)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("MediaRepository", "Failed to seed mock library items", e)
+                }
+            }
+            launch {
+                try {
                     db.mediaDao().getAllMedia().conflate().transform { emit(it); if (_scanProgress.value.isScanning) delay(3000) }.collect { entities ->
                         val items = entities.map { it.toMediaItem() }.filter { !it.isDeleted && it.compatibilityStatus !in listOf(CompatibilityStatus.CORRUPT, CompatibilityStatus.UNSUPPORTED, CompatibilityStatus.DELETED) }
                         _mediaItems.value = items
@@ -679,8 +709,23 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
         }
     }
     
+    var channelReplenishmentProvider: (suspend (Channel, String, List<String>) -> List<MediaItem>)? = null
+    var libraryReplenishmentProvider: (suspend (List<String>) -> List<MediaItem>)? = null
+
+    suspend fun loadNextLibraryPage(excludeIds: Set<String>, limit: Int = 20): List<MediaItem> {
+        val sorted = getFilteredAndSortedMedia(
+            filterType = _libraryFilter.value,
+            sortCategory = _activeSortCategory.value,
+            standardSort = _selectedStandardSort.value,
+            intelligentSort = _selectedIntelligentSort.value,
+            sessionSeed = _librarySessionSeed.value
+        )
+        val visible = listOf(CompatibilityStatus.PLAYABLE, CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE, CompatibilityStatus.PLAYABLE_AFTER_CONVERSION, CompatibilityStatus.THUMBNAIL_FAILED, CompatibilityStatus.NEEDS_TRANSCODE, CompatibilityStatus.UNTESTED)
+        return sorted.filter { !it.isDeleted && it.compatibilityStatus in visible && it.id !in excludeIds }.take(limit)
+    }
+
     private val LOW_WATER_THRESHOLD = 5
-    private var isReplenishing = false
+    @Volatile private var isReplenishing = false
 
     fun setPlaylist(items: List<MediaItem>, initialIndex: Int, sourceTitle: String = "Playlist") {
         if (items.isEmpty()) { _activePlaylist.value = null; return }; _isPlayerActive.value = true
@@ -761,9 +806,51 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
                 val next = current.items[safeIndex]
                 recordView(next.id)
 
+                val channel = current.channel
+                val filterType = current.channelFilterType
                 val remaining = current.items.size - 1 - safeIndex
-                if (current.channel != null && remaining <= LOW_WATER_THRESHOLD && !isReplenishing) {
-                    Log.d("MediaRepository", "Low-water mark hit for channel ${current.channel.id} (remaining=$remaining)")
+
+                if (channel != null && filterType != null && remaining <= LOW_WATER_THRESHOLD && !isReplenishing) {
+                    isReplenishing = true
+                    val existingIds = current.items.map { it.id }
+                    val provider = channelReplenishmentProvider
+
+                    scope.launch {
+                        try {
+                            val fresh = provider?.invoke(channel, filterType, existingIds) ?: emptyList()
+                            if (fresh.isNotEmpty()) {
+                                extendActivePlaylist(fresh)
+                                Log.d("MediaRepository", "Replenished ${fresh.size} items (was $remaining remaining)")
+                            } else {
+                                Log.d("MediaRepository", "Channel genuinely exhausted")
+                            }
+                        } finally {
+                            isReplenishing = false
+                        }
+                    }
+                }
+
+                // NEW – library path replenishment
+                val isLibraryPlaylist = current.channel == null &&
+                    (current.sourceTitle.equals("Library", ignoreCase = true) ||
+                     current.sourceTitle.startsWith("Library", ignoreCase = true))
+
+                if (isLibraryPlaylist && remaining <= LOW_WATER_THRESHOLD && !isReplenishing) {
+                    isReplenishing = true
+                    val existingIds = current.items.map { it.id }
+                    val provider = libraryReplenishmentProvider
+
+                    scope.launch {
+                        try {
+                            val fresh = provider?.invoke(existingIds) ?: emptyList()
+                            if (fresh.isNotEmpty()) {
+                                extendActivePlaylist(fresh)
+                                Log.d("MediaRepository", "Library replenished ${fresh.size} items")
+                            }
+                        } finally {
+                            isReplenishing = false
+                        }
+                    }
                 }
 
                 current.copy(
@@ -776,7 +863,10 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
     fun nextPlaylistItem() { _activePlaylist.value?.let { if (it.hasNext) selectPlaylistItem(it.currentIndex + 1) } }
     fun previousPlaylistItem() { _activePlaylist.value?.let { if (it.hasPrevious) selectPlaylistItem(it.currentIndex - 1) } }
     
-    fun recordView(id: String) { _mediaItems.value.find { it.id == id }?.let { logInteraction(it) } }
+    fun recordView(id: String) { 
+        _mediaItems.value.find { it.id == id }?.let { logInteraction(it) } 
+        recordExposure(id)
+    }
     fun recordExposure(id: String) { recordExposures(listOf(id)) }
     
     fun importMediaFromUris(context: Context, uris: List<Uri>) {
@@ -956,25 +1046,10 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
         policy: DiscoveryPolicy = _discoveryPolicy.value, intent: UserIntent = _userIntent.value, stats: IntelligenceStats = _intelligenceStats.value, creatorProfiles: Map<String, CreatorProfile> = _creatorProfiles.value,
         comparisonCounts: Map<String, Int> = _comparisonCounts.value
     ): List<MediaItem> {
-        val request = IntelligenceRequest(mode = IntelligenceMode.SORT, 
-            sortOption = if (sortCategory == SortCategory.STANDARD) standardSort.name else intelligentSort.name,
-            filterType = filterType, tasteDNA = tasteDNA, profile = profile, stats = stats, creatorProfiles = creatorProfiles, seed = sessionSeed, 
-            policy = policy, intent = intent, comparisonCounts = comparisonCounts, poolOverride = inputItems)
-        
-        val response = try {
-            intelligenceCore?.processRequest(request)
-        } catch (e: Exception) {
-            null
-        }
-        
-        if (response?.isSuccess == true) {
-            if (sortCategory == SortCategory.INTELLIGENT) _signatureStyleProfile.value = SignatureStyleProvider.calculateStyleProfile(tasteDNA, inputItems)
-            return response.candidates.map { it.item }
-        }
-
         val filtered = inputItems.filter { matchesFilterType(it, filterType) && isItemVisibleInLibrary(it) }
-        return if (sortCategory == SortCategory.STANDARD) {
-            when (standardSort) {
+
+        if (sortCategory == SortCategory.STANDARD) {
+            return when (standardSort) {
                 StandardSortOption.TITLE_ASC -> filtered.sortedBy { it.title }
                 StandardSortOption.TITLE_DESC -> filtered.sortedByDescending { it.title }
                 StandardSortOption.NEWEST_FIRST -> filtered.sortedByDescending { it.dateAdded }
@@ -987,14 +1062,75 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
                 StandardSortOption.RECENTLY_PLAYED -> filtered.sortedByDescending { it.lastViewedTimestamp ?: 0L }
                 StandardSortOption.RANDOM -> filtered.shuffled(java.util.Random(sessionSeed))
             }
-        } else {
-            filtered
         }
+
+        val request = IntelligenceRequest(
+            mode = IntelligenceMode.SORT, 
+            sortOption = intelligentSort.name,
+            filterType = filterType, 
+            tasteDNA = tasteDNA, 
+            profile = profile, 
+            stats = stats, 
+            creatorProfiles = creatorProfiles, 
+            seed = sessionSeed, 
+            policy = policy, 
+            intent = intent, 
+            comparisonCounts = comparisonCounts, 
+            poolOverride = inputItems, 
+            limit = inputItems.size.coerceAtLeast(1000)
+        )
+        
+        val response = try {
+            intelligenceCore?.processRequest(request)
+        } catch (e: Exception) {
+            null
+        }
+        
+        if (response?.isSuccess == true) {
+            _signatureStyleProfile.value = SignatureStyleProvider.calculateStyleProfile(tasteDNA, inputItems)
+            return response.candidates.map { it.item }
+        }
+
+        return filtered
     }
 
     private fun matchesFilterType(item: MediaItem, filterType: String): Boolean = when (filterType.uppercase()) { "PHOTO" -> item.mediaType.uppercase() in listOf("PHOTO", "IMAGE"); "VIDEO" -> item.mediaType.uppercase() in listOf("VIDEO", "MOVIE"); else -> true }
 
-    fun isItemVisibleInLibrary(item: MediaItem): Boolean = !item.isDeleted && item.compatibilityStatus in listOf(CompatibilityStatus.PLAYABLE, CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE, CompatibilityStatus.PLAYABLE_AFTER_CONVERSION, CompatibilityStatus.THUMBNAIL_FAILED, CompatibilityStatus.NEEDS_TRANSCODE, CompatibilityStatus.UNTESTED)
+    fun isItemVisibleInLibrary(item: MediaItem): Boolean = item.isEligibleForLibraryAndChannels()
+
+    fun getQuarantinedItems(): List<MediaItem> = _mediaItems.value.filter { !it.isEligibleForLibraryAndChannels() }
+
+    fun updateConvertedMedia(mediaId: String, sourceUri: String, outputPath: String) {
+        val now = System.currentTimeMillis()
+        _mediaItems.update { list ->
+            list.map { item ->
+                if (item.id == mediaId || item.uriPath == sourceUri) {
+                    item.copy(
+                        compatibilityStatus = CompatibilityStatus.PLAYABLE,
+                        conversionStatus = ConversionStatus.CONVERTED,
+                        convertedUri = outputPath,
+                        imageUrl = if (item.imageUrl.isBlank()) outputPath else item.imageUrl,
+                        lastCompatibilityCheckTimestamp = now
+                    )
+                } else item
+            }
+        }
+        scope.launch {
+            database?.mediaDao()?.let { dao ->
+                val entity = if (mediaId.isNotBlank()) dao.getMediaById(mediaId) else null
+                if (entity != null) {
+                    dao.update(
+                        entity.copy(
+                            compatibilityStatus = CompatibilityStatus.PLAYABLE.name,
+                            conversionStatus = ConversionStatus.CONVERTED.name,
+                            convertedUri = outputPath,
+                            imageUrl = if (entity.imageUrl.isBlank()) outputPath else entity.imageUrl
+                        )
+                    )
+                }
+            }
+        }
+    }
 
     private fun performLegacySearch(items: List<MediaItem>, query: String): List<MediaItem> {
         val q = query.trim().lowercase()
@@ -1118,6 +1254,29 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
     private suspend fun backfillSemantics() { database?.mediaDao()?.getAllMediaSync()?.filter { it.compatibilityStatus == "PLAYABLE" && !it.isDeleted }?.let { processSemanticsForBatch(it) } }
     private suspend fun processSemanticsForBatch(entities: List<MediaEntity>) { val sIdx = semanticIndexingService ?: return; val vIdx = visualIndexingService; val ctx = applicationContext ?: return; entities.forEach { entity -> try { val item = entity.toMediaItem(); sIdx.indexMediaItem(item); vIdx?.indexVisual(ctx, item) } catch (e: Exception) { if (e is CancellationException) throw e } } }
     private suspend fun deleteSemanticDataForMedia(id: String) { semanticRepresentationRepository?.deleteForMedia(id) }
+
+    suspend fun loadLibraryPage(
+        offset: Int,
+        limit: Int = 25,
+        filter: String = libraryFilter,
+        sortCategory: SortCategory = _activeSortCategory.value,
+        standardSort: StandardSortOption = _selectedStandardSort.value,
+        intelligentSort: IntelligentSortOption = _selectedIntelligentSort.value
+    ): List<LibraryItemUi> {
+        val sorted = getFilteredAndSortedMedia(
+            filterType = filter,
+            sortCategory = sortCategory,
+            standardSort = standardSort,
+            intelligentSort = intelligentSort,
+            sessionSeed = _librarySessionSeed.value
+        )
+        val filtered = sorted.filter { it.isEligibleForLibraryAndChannels() }
+        android.util.Log.d("AuraGate", "loadLibraryPage offset=$offset raw=${sorted.size} eligible=${filtered.size}")
+        return filtered
+            .drop(offset)
+            .take(limit)
+            .map { it.toLibraryItemUi() }
+    }
     
     private fun MediaItem.toEntity(): MediaEntity = MediaEntity(id = id, title = title, mediaType = mediaType, year = year, duration = duration, genre = genre, imageUrl = imageUrl, gradientColorsJson = gradientColors.joinToString(","), rating = rating, isFavorite = isFavorite, progress = progress, progressText = progressText, category = category, aiSummary = aiSummary, moodTagsJson = moodTags.joinToString(","), itemCount = itemCount, eloRating = eloRating, uriPath = uriPath, dateAdded = dateAdded, dateModified = dateModified, sizeBytes = sizeBytes, durationMs = durationMs, width = width, height = height, lastViewedTimestamp = lastViewedTimestamp, playCount = viewCount, exposureCount = exposureCount, lastExposedTimestamp = lastExposedTimestamp, contentHash = contentHash, parentContentId = parentContentId, isDeleted = isDeleted, compatibilityStatus = compatibilityStatus.name, containerFormat = containerFormat, videoCodec = videoCodec, audioCodec = audioCodec, compatibilityReason = compatibilityReason, conversionStatus = conversionStatus.name, convertedUri = convertedUri ?: "", lastCompatibilityCheckTimestamp = lastCompatibilityCheckTimestamp, selectionReason = if (isEphemeralReason(selectionReason)) null else selectionReason, creatorId = creatorId, creatorName = creatorName, sourcePlatform = sourcePlatform, replacedByMediaId = replacedByMediaId)
     

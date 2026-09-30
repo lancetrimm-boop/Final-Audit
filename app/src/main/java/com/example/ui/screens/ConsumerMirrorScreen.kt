@@ -173,6 +173,7 @@ fun ConsumerMirrorScreen(
                     )
                 } else if (surface == MirrorSurface.LIBRARY) {
                     LibraryContent(
+                        repository = repository,
                         state = currentLibraryState,
                         latestSortedItems = currentLibraryState.mediaItems.map { it.toLibraryItemUi() },
                         mediaItemsMap = currentLibraryState.mediaItems.associateBy { it.id },

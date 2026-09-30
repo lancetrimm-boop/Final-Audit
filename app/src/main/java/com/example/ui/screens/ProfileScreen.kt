@@ -480,7 +480,11 @@ fun ProfileScreen(
         factory = object : androidx.lifecycle.ViewModelProvider.Factory {
             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
-                return PlaybackDiagnosticsViewModel(repository.playbackErrorLogRepository!!) as T
+                return PlaybackDiagnosticsViewModel(
+                    repository.playbackErrorLogRepository!!,
+                    repository.conversionQueueRepository,
+                    repository
+                ) as T
             }
         }
     )

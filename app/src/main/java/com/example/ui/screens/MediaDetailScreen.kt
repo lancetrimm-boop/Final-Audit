@@ -253,6 +253,8 @@ fun MediaDetailScreen(
         }
     }
 
+    val isChannelPlaylist = remember(playlistState) { playlistState?.channel != null && playlistState?.sourceTitle != "Library" }
+
     val isAtEndOfPlaylist = remember(playlistState, currentItemIndex) {
         playlistState != null && (currentItemIndex >= playlistState.items.size - 1 || !playlistState.hasNext)
     }
@@ -262,13 +264,13 @@ fun MediaDetailScreen(
     val isPhotoPlaying = !isVideo && !showPlayerMenu && !showDeleteDialog
 
     // Automatic Photo Slideshow advancement for Photo channel playback
-    LaunchedEffect(activeItem.id, isPhotoPlaying, slideshowDelaySec, isVideo, isAtEndOfPlaylist) {
+    LaunchedEffect(activeItem.id, isPhotoPlaying, slideshowDelaySec, isVideo, isAtEndOfPlaylist, isChannelPlaylist) {
         if (isVideo || !isPhotoPlaying) return@LaunchedEffect
         val totalDelayMs = slideshowDelaySec.coerceIn(1, 10) * 1000L
         delay(totalDelayMs)
-        if (isAtEndOfPlaylist) {
+        if (isAtEndOfPlaylist && isChannelPlaylist) {
             showEndOfChannelPrompt = true
-        } else {
+        } else if (!isAtEndOfPlaylist) {
             onNext()
         }
     }
@@ -386,7 +388,7 @@ fun MediaDetailScreen(
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_ENDED) {
-                        if (isAtEndOfPlaylist) {
+                        if (isAtEndOfPlaylist && isChannelPlaylist) {
                             showEndOfChannelPrompt = true
                         }
                         repository.interactionRepository?.let { iRepo ->
@@ -513,37 +515,55 @@ fun MediaDetailScreen(
             val exoIds = List(exoPlayer.mediaItemCount) { exoPlayer.getMediaItemAt(it).mediaId }
             val targetVideoIds = videoOnlyItems.map { it.id }
 
-            // 1. Build and Set the MediaItems list if the playlist structure has changed
-            if (exoIds != targetVideoIds) {
-                val media3Items = videoOnlyItems.map { itm ->
-                    val route = com.example.compatibility.AuraPlaybackRouter.resolveRoute(itm)
-                    val uri = if (route is com.example.compatibility.PlaybackRouteResult.Playable) route.playUri else itm.uriPath
-                    Media3Item.Builder()
-                        .setUri(uri)
-                        .setMediaId(itm.id)
-                        .build()
+            when {
+                // Pure append → seamless addMediaItems without reset or position hitch
+                exoIds.isNotEmpty() &&
+                targetVideoIds.size > exoIds.size &&
+                targetVideoIds.take(exoIds.size) == exoIds -> {
+                    val newMedia3Items = videoOnlyItems.drop(exoIds.size).map { itm ->
+                        val route = com.example.compatibility.AuraPlaybackRouter.resolveRoute(itm)
+                        val uri = if (route is com.example.compatibility.PlaybackRouteResult.Playable) route.playUri else itm.uriPath
+                        Media3Item.Builder()
+                            .setUri(uri)
+                            .setMediaId(itm.id)
+                            .build()
+                    }
+                    exoPlayer.addMediaItems(newMedia3Items)
+                    Log.d("MediaDetail", "Seamlessly appended ${newMedia3Items.size} items to ExoPlayer")
                 }
+                // Playlist structure changed (Initial load, channel switch, or reload)
+                exoIds != targetVideoIds -> {
+                    val media3Items = videoOnlyItems.map { itm ->
+                        val route = com.example.compatibility.AuraPlaybackRouter.resolveRoute(itm)
+                        val uri = if (route is com.example.compatibility.PlaybackRouteResult.Playable) route.playUri else itm.uriPath
+                        Media3Item.Builder()
+                            .setUri(uri)
+                            .setMediaId(itm.id)
+                            .build()
+                    }
 
-                // AURA PHASE 2: Check if we are resuming to determine initial seek and playWhenReady
-                val isResuming = repository.isResumingFromBackground || !isFirstLaunch
-                val startPos = if (isResuming) repository.lastPlaybackPositionMs else 0L
-                val targetVideoIndex = videoOnlyItems.indexOfFirst { it.id == activeItem.id }.coerceAtLeast(0)
-                
-                exoPlayer.setMediaItems(media3Items, targetVideoIndex, startPos)
-                exoPlayer.prepare()
-                
-                // Requirements: Do NOT autoplay on background resume, but preserve state on rotation
-                exoPlayer.playWhenReady = if (isFirstLaunch) true else wasPlayingBeforeRotation
-                
-                // Reset flags once handled
-                wasPlayingBeforeRotation = false
-                isFirstLaunch = false
-            } else {
-                // 2. Just synchronize index if playlist is already correctly loaded
-                val targetVideoIndex = videoOnlyItems.indexOfFirst { it.id == activeItem.id }
-                if (targetVideoIndex != -1 && exoPlayer.currentMediaItemIndex != targetVideoIndex) {
-                    exoPlayer.seekTo(targetVideoIndex, 0L)
-                    repository.updatePlaybackPosition(0L)
+                    // AURA PHASE 2: Check if we are resuming to determine initial seek and playWhenReady
+                    val isResuming = repository.isResumingFromBackground || !isFirstLaunch
+                    val startPos = if (isResuming) repository.lastPlaybackPositionMs else 0L
+                    val targetVideoIndex = videoOnlyItems.indexOfFirst { it.id == activeItem.id }.coerceAtLeast(0)
+                    
+                    exoPlayer.setMediaItems(media3Items, targetVideoIndex, startPos)
+                    exoPlayer.prepare()
+                    
+                    // Requirements: Do NOT autoplay on background resume, but preserve state on rotation
+                    exoPlayer.playWhenReady = if (isFirstLaunch) true else wasPlayingBeforeRotation
+                    
+                    // Reset flags once handled
+                    wasPlayingBeforeRotation = false
+                    isFirstLaunch = false
+                }
+                else -> {
+                    // 2. Just synchronize index if playlist is already correctly loaded
+                    val targetVideoIndex = videoOnlyItems.indexOfFirst { it.id == activeItem.id }
+                    if (targetVideoIndex != -1 && exoPlayer.currentMediaItemIndex != targetVideoIndex) {
+                        exoPlayer.seekTo(targetVideoIndex, 0L)
+                        repository.updatePlaybackPosition(0L)
+                    }
                 }
             }
         } else {
@@ -1107,10 +1127,10 @@ fun MediaDetailScreen(
                         }
 
                         // 5. Next Button
-                        val isNextButtonEnabled = playlistState == null || playlistState.hasNext || isAtEndOfPlaylist
+                        val isNextButtonEnabled = playlistState == null || playlistState.hasNext || (isAtEndOfPlaylist && isChannelPlaylist)
                         IconButton(
                             onClick = {
-                                if (isAtEndOfPlaylist) {
+                                if (isAtEndOfPlaylist && isChannelPlaylist) {
                                     showEndOfChannelPrompt = true
                                 } else {
                                     onNext()
@@ -1702,7 +1722,7 @@ fun MediaDetailScreen(
         }
     }
 
-    if (showEndOfChannelPrompt) {
+    if (showEndOfChannelPrompt && isChannelPlaylist) {
         AlertDialog(
             onDismissRequest = { },
             title = {

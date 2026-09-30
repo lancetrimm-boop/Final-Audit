@@ -90,6 +90,25 @@ data class MediaItem(
     val enrichmentFailureCount: Int = 0
 )
 
+fun MediaItem.isEligibleForLibraryAndChannels(): Boolean {
+    if (isDeleted) return false
+    val isPlayable = compatibilityStatus == CompatibilityStatus.PLAYABLE ||
+                     compatibilityStatus == CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE ||
+                     (compatibilityStatus == CompatibilityStatus.PLAYABLE_AFTER_CONVERSION && !convertedUri.isNullOrBlank()) ||
+                     conversionStatus == ConversionStatus.CONVERTED
+    val hasPreview = compatibilityStatus != CompatibilityStatus.THUMBNAIL_FAILED &&
+                     (imageUrl.isNotBlank() || uriPath.isNotBlank() || !convertedUri.isNullOrBlank())
+    val eligible = isPlayable && hasPreview
+    if (!eligible) {
+        android.util.Log.d(
+            "AuraGate",
+            "REJECT id=$id title=$title status=$compatibilityStatus conversionStatus=$conversionStatus " +
+            "isPlayable=$isPlayable hasPreview=$hasPreview uri=$uriPath convertedUri=$convertedUri"
+        )
+    }
+    return eligible
+}
+
 data class PairwiseComparison(
     val id: String,
     val roundNumber: Int,

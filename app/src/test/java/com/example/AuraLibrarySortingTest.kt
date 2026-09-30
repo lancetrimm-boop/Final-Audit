@@ -50,6 +50,8 @@ class AuraLibrarySortingTest {
         id = id,
         title = title,
         mediaType = "VIDEO",
+        uriPath = "test_$id.mp4",
+        imageUrl = "test_$id.jpg",
         dateAdded = dateAdded,
         lastViewedTimestamp = lastViewed,
         viewCount = viewCount,
@@ -96,5 +98,44 @@ class AuraLibrarySortingTest {
         assertEquals("Short", sortedShort[0].title)
         assertEquals("Medium", sortedShort[1].title)
         assertEquals("Long", sortedShort[2].title)
+    }
+
+    @Test
+    fun testLoadNextLibraryPage_ExcludesAndPaginates() = runBlocking {
+        val items = (1..50).map { createItem("$it", "Item $it") }
+        repository.setMediaItemsForTesting(items)
+
+        val page1 = repository.loadNextLibraryPage(emptySet(), limit = 20)
+        assertEquals(20, page1.size)
+
+        val excludeIds = page1.map { it.id }.toSet()
+        val page2 = repository.loadNextLibraryPage(excludeIds, limit = 20)
+        assertEquals(20, page2.size)
+        assertTrue(page2.none { it.id in excludeIds })
+    }
+
+    @Test
+    fun testQuarantineGate_ExcludesUnplayableAndNoPreviewItems() = runBlocking {
+        val playable = createItem("1", "Playable Video").copy(imageUrl = "thumb.jpg", uriPath = "video1.mp4")
+        val badMkv = createItem("2", "Bad MKV").copy(compatibilityStatus = CompatibilityStatus.UNSUPPORTED, imageUrl = "thumb2.jpg", uriPath = "bad.mkv")
+        val corrupt = createItem("3", "Corrupt File").copy(compatibilityStatus = CompatibilityStatus.CORRUPT, uriPath = "corrupt.mp4")
+        
+        repository.setMediaItemsForTesting(listOf(playable, badMkv, corrupt))
+
+        val page = repository.loadLibraryPage(offset = 0, limit = 10)
+        assertEquals(1, page.size)
+        assertEquals("1", page[0].id)
+
+        val quarantined = repository.getQuarantinedItems()
+        assertEquals(2, quarantined.size)
+        assertTrue(quarantined.any { it.id == "2" })
+        assertTrue(quarantined.any { it.id == "3" })
+
+        // Convert the bad MKV
+        repository.updateConvertedMedia("2", "bad.mkv", "converted.mp4")
+
+        val pageAfterConvert = repository.loadLibraryPage(offset = 0, limit = 10)
+        assertEquals(2, pageAfterConvert.size)
+        assertTrue(pageAfterConvert.any { it.id == "2" })
     }
 }

@@ -16,7 +16,8 @@ import kotlinx.coroutines.launch
 
 class PlaybackDiagnosticsViewModel(
     private val repository: PlaybackErrorLogRepository,
-    private val queueRepository: ConversionQueueRepository? = null
+    private val queueRepository: ConversionQueueRepository? = null,
+    private val mediaRepository: MediaRepository? = null
 ) : ViewModel() {
 
     // Conversion state for the active single-file prototype
@@ -187,15 +188,26 @@ class PlaybackDiagnosticsViewModel(
     fun startConversion(context: Context, error: PlaybackErrorLogEntity) {
         val uriStr = error.mediaUri ?: return
         val uri = Uri.parse(uriStr)
+        val mediaId = error.mediaItemId ?: ""
         
+        android.util.Log.d("AuraConversion", "Convert started for id=$mediaId, uri=$uriStr")
         _lastResult.value = null
+        _conversionStage.value = ConversionStage.PREPARING
+        _conversionProgress.value = 0
         
         viewModelScope.launch {
             val result = AuraMediaTranscoder.transcodeAndValidate(context, uri) { stage, progress ->
                 _conversionStage.value = stage
                 _conversionProgress.value = progress
+                android.util.Log.d("AuraConversion", "Convert progress for id=$mediaId stage=$stage progress=$progress%")
             }
             _lastResult.value = result
+            if (result.status == ConversionStatus.CONVERTED && !result.outputPath.isNullOrBlank()) {
+                android.util.Log.d("AuraConversion", "Convert success for id=$mediaId output=${result.outputPath}")
+                mediaRepository?.updateConvertedMedia(mediaId, uriStr, result.outputPath)
+            } else {
+                android.util.Log.e("AuraConversion", "Convert failed for id=$mediaId error=${result.errorMessage}")
+            }
         }
     }
 

@@ -7,6 +7,7 @@ import java.util.Random
 /**
  * Main Programmer for Aura Channels.
  * Maps channel definitions to their respective Lane Strategies and enforces 100% media-type homogeneity.
+ * Respects app-wide session and persistent exposure signals with strong repetition penalties.
  */
 class ChannelProgrammer(
     private val meTvEngine: MeTVProgrammingEngine = MeTVProgrammingEngine()
@@ -27,7 +28,7 @@ class ChannelProgrammer(
     )
 
     /**
-     * Programs a block of media for the given channel.
+     * Programs a block of media for the given channel, respecting exposure signals.
      */
     fun programChannel(
         channel: Channel,
@@ -52,6 +53,7 @@ class ChannelProgrammer(
         fun filterPool(pool: List<MediaItem>, filterType: String): List<MediaItem> {
             val isVideoFilter = filterType.equals("VIDEO", ignoreCase = true) || filterType.equals("VIDEOS", ignoreCase = true) || filterType.equals("MOVIE", ignoreCase = true) || filterType.equals("MOVIES", ignoreCase = true)
             return pool.filter { item ->
+                if (!item.isEligibleForLibraryAndChannels()) return@filter false
                 val isVid = item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("MOVIE", ignoreCase = true) || item.mediaType.startsWith("VIDEO", ignoreCase = true) || item.mediaType.startsWith("MOVIE", ignoreCase = true)
                 if (isVideoFilter) isVid else !isVid
             }
@@ -62,7 +64,7 @@ class ChannelProgrammer(
 // --- LANE STRATEGY IMPLEMENTATIONS ---
 
 /**
- * 1. Me TV Strategy — Delegates directly to existing authoritative MeTVProgrammingEngine.
+ * 1. Me TV Strategy — Delegates directly to existing authoritative MeTVProgrammingEngine with session exposure integration.
  */
 class MeTvLaneStrategy(
     private val meTvEngine: MeTVProgrammingEngine
@@ -88,7 +90,7 @@ class MeTvLaneStrategy(
 /**
  * 2. Unified Rediscover Strategy — Discovery + Rediscovery.
  * Combines low-exposure / unseen discovery candidates (Pool A) and forgotten previously-viewed candidates (>30 days unwatched, Pool B).
- * Interleaves candidates deterministically so neither pool suppresses the other when both contain viable media.
+ * Respects both persistent exposure and short-term session exposure penalties.
  */
 class RediscoverLaneStrategy : LaneStrategy {
     private val REDISCOVER_THRESHOLD_MS = 30L * 24 * 60 * 60 * 1000
@@ -99,21 +101,23 @@ class RediscoverLaneStrategy : LaneStrategy {
 
         val skipCounts = context.skipEvents.groupingBy { it.mediaId }.eachCount()
 
-        // Pool A: Unseen & Low-Exposure Candidates (Novelty Discovery)
+        // Pool A: Unseen & Low-Exposure Candidates (Novelty Discovery) with Session + Persistent Exposure Penalty
         val poolA = pool.map { item ->
             val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
             val skips = skipCounts[item.id] ?: 0
-            val totalExp = exp + skips
+            val totalExp = exp + (sessionExp * 2) + skips
             val score = 1.0f / (1.0f + totalExp)
             item to score
         }.sortedWith(compareByDescending<Pair<MediaItem, Float>> { it.second }.thenBy { it.first.id })
             .map { it.first }
 
-        // Pool B: Forgotten Candidates (Exposed items viewed > 30 days ago)
+        // Pool B: Forgotten Candidates (Exposed items viewed > 30 days ago, penalizing active session exposure)
         val poolB = pool.filter { item ->
             val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
             val lastViewed = item.lastViewedTimestamp ?: 0L
-            exp > 0 && (lastViewed == 0L || (context.currentTimeMs - lastViewed) > REDISCOVER_THRESHOLD_MS)
+            sessionExp == 0 && exp > 0 && (lastViewed == 0L || (context.currentTimeMs - lastViewed) > REDISCOVER_THRESHOLD_MS)
         }.sortedWith(compareBy<MediaItem> { it.lastViewedTimestamp ?: 0L }.thenBy { it.id })
 
         // Unified Composition: Interleave Pool B (Forgotten) and Pool A (Unseen/Low Exposure)
@@ -145,7 +149,7 @@ class RediscoverLaneStrategy : LaneStrategy {
 }
 
 /**
- * 3. Favorites Strategy — Favorited media with unwatched-first priority.
+ * 3. Favorites Strategy — Favorited media with unwatched-first priority and strong exposure dampening.
  */
 class FavoritesLaneStrategy : LaneStrategy {
     override fun programBlock(channel: Channel, context: ChannelProgrammingContext, limit: Int): List<MediaItem> {
@@ -156,8 +160,11 @@ class FavoritesLaneStrategy : LaneStrategy {
         val skipCounts = context.skipEvents.groupingBy { it.mediaId }.eachCount()
 
         return favorites.map { item ->
-            val exp = (context.exposureMap[item.id] ?: 0) + (skipCounts[item.id] ?: 0) + (context.sessionExposures[item.id] ?: 0)
-            val score = if (exp == 0) 3.0f else 2.0f - (exp * 0.10f)
+            val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
+            val skips = skipCounts[item.id] ?: 0
+            val totalExp = exp + (sessionExp * 2) + skips
+            val score = if (totalExp == 0) 3.0f else 2.0f - (totalExp * 0.15f)
             item to score
         }.sortedWith(
             compareByDescending<Pair<MediaItem, Float>> { it.second }
@@ -169,7 +176,7 @@ class FavoritesLaneStrategy : LaneStrategy {
 }
 
 /**
- * 4. Mood Strategy — Evaluates TasteDNA visual dimensions + ExperienceRequest mood steering.
+ * 4. Mood Strategy — Evaluates TasteDNA visual dimensions + ExperienceRequest mood steering with exposure penalties.
  */
 class MoodLaneStrategy : LaneStrategy {
     override fun programBlock(channel: Channel, context: ChannelProgrammingContext, limit: Int): List<MediaItem> {
@@ -178,8 +185,11 @@ class MoodLaneStrategy : LaneStrategy {
         val skipCounts = context.skipEvents.groupingBy { it.mediaId }.eachCount()
 
         return pool.map { item ->
-            val exp = (context.exposureMap[item.id] ?: 0) + (skipCounts[item.id] ?: 0) + (context.sessionExposures[item.id] ?: 0)
-            var score = 0.5f + (item.rating / 10.0f) - (exp * 0.08f)
+            val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
+            val skips = skipCounts[item.id] ?: 0
+            val totalExp = exp + (sessionExp * 2) + skips
+            var score = 0.5f + (item.rating / 10.0f) - (totalExp * 0.1f)
             if (nudge.contains("energetic") && (item.genre.contains("Action", ignoreCase = true) || item.title.contains("Dynamic", ignoreCase = true))) {
                 score += 0.3f
             } else if (nudge.contains("serene") && (item.genre.contains("Atmospheric", ignoreCase = true) || item.title.contains("Serene", ignoreCase = true))) {
@@ -198,7 +208,7 @@ class MoodLaneStrategy : LaneStrategy {
 }
 
 /**
- * 5. Continue Strategy — Serialized series continue, selecting oldest unwatched episode in order.
+ * 5. Continue Strategy — Serialized series continue, selecting oldest unwatched episode with zero session/persistent exposure.
  */
 class ContinueLaneStrategy : LaneStrategy {
     override fun programBlock(channel: Channel, context: ChannelProgrammingContext, limit: Int): List<MediaItem> {
@@ -207,9 +217,16 @@ class ContinueLaneStrategy : LaneStrategy {
 
         val result = mutableListOf<MediaItem>()
         serializedGroups.forEach { (_, group) ->
-            val oldestUnwatched = group.filter { (context.exposureMap[it.id] ?: 0) == 0 }
-                .sortedWith(compareBy<MediaItem> { it.selectionReason ?: "" }.thenBy { it.id })
-                .firstOrNull() ?: group.sortedWith(compareBy<MediaItem> { it.selectionReason ?: "" }.thenBy { it.id }).firstOrNull()
+            val oldestUnwatched = group.filter { 
+                val exp = (context.exposureMap[it.id] ?: 0) + (context.sessionExposures[it.id] ?: 0)
+                exp == 0 
+            }.sortedWith(compareBy<MediaItem> { it.selectionReason ?: "" }.thenBy { it.id })
+                .firstOrNull() ?: group.filter {
+                    val sessionExp = context.sessionExposures[it.id] ?: 0
+                    sessionExp == 0
+                }.sortedWith(compareBy<MediaItem> { it.selectionReason ?: "" }.thenBy { it.id }).firstOrNull()
+                ?: group.sortedWith(compareBy<MediaItem> { it.selectionReason ?: "" }.thenBy { it.id }).firstOrNull()
+
             if (oldestUnwatched != null) {
                 result.add(oldestUnwatched)
             }
@@ -219,7 +236,7 @@ class ContinueLaneStrategy : LaneStrategy {
 }
 
 /**
- * Obsolete Strategy implementations retained for internal fallback/backwards-compatibility testing.
+ * Novelty Strategy — Strongest preference for zero exposure items.
  */
 class NoveltyLaneStrategy : LaneStrategy {
     override fun programBlock(channel: Channel, context: ChannelProgrammingContext, limit: Int): List<MediaItem> {
@@ -228,8 +245,9 @@ class NoveltyLaneStrategy : LaneStrategy {
 
         return pool.map { item ->
             val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
             val skips = skipCounts[item.id] ?: 0
-            val totalExp = exp + skips
+            val totalExp = exp + (sessionExp * 2) + skips
             val score = 1.0f / (1.0f + totalExp)
             item to score
         }.sortedWith(compareByDescending<Pair<MediaItem, Float>> { it.second }.thenBy { it.first.id })
@@ -241,7 +259,14 @@ class NoveltyLaneStrategy : LaneStrategy {
 class EraLaneStrategy : LaneStrategy {
     override fun programBlock(channel: Channel, context: ChannelProgrammingContext, limit: Int): List<MediaItem> {
         val pool = ChannelProgrammer.filterPool(context.availableMedia, context.filterType)
-        return pool.sortedWith(compareByDescending<MediaItem> { it.year }.thenBy { it.id })
+        return pool.map { item ->
+            val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
+            val totalExp = exp + (sessionExp * 2)
+            val score = item.year.toFloat() - (totalExp * 2.0f)
+            item to score
+        }.sortedWith(compareByDescending<Pair<MediaItem, Float>> { it.second }.thenBy { it.first.id })
+            .map { it.first }
             .take(limit)
     }
 }
@@ -259,12 +284,16 @@ class DaypartsLaneStrategy : LaneStrategy {
         }
 
         return pool.map { item ->
+            val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
+            val totalExp = exp + (sessionExp * 2)
             val boost = when (daypart) {
                 "EVENING", "NIGHT" -> if (item.genre.contains("Cinematic", ignoreCase = true) || item.genre.contains("Action", ignoreCase = true)) 0.2f else 0.0f
                 "MORNING" -> if (item.genre.contains("Atmospheric", ignoreCase = true) || item.genre.contains("Serene", ignoreCase = true)) 0.2f else 0.0f
                 else -> 0.1f
             }
-            item to (0.5f + boost)
+            val score = (0.5f + boost) - (totalExp * 0.1f)
+            item to score
         }.sortedWith(compareByDescending<Pair<MediaItem, Float>> { it.second }.thenBy { it.first.id })
             .map { it.first }
             .take(limit)
@@ -274,7 +303,14 @@ class DaypartsLaneStrategy : LaneStrategy {
 class SeasonalPopupsLaneStrategy : LaneStrategy {
     override fun programBlock(channel: Channel, context: ChannelProgrammingContext, limit: Int): List<MediaItem> {
         val pool = ChannelProgrammer.filterPool(context.availableMedia, context.filterType)
-        return pool.sortedWith(compareByDescending<MediaItem> { it.rating }.thenBy { it.id })
+        return pool.map { item ->
+            val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
+            val totalExp = exp + (sessionExp * 2)
+            val score = item.rating - (totalExp * 0.2f)
+            item to score
+        }.sortedWith(compareByDescending<Pair<MediaItem, Float>> { it.second }.thenBy { it.first.id })
+            .map { it.first }
             .take(limit)
     }
 }
@@ -282,14 +318,19 @@ class SeasonalPopupsLaneStrategy : LaneStrategy {
 class ScopedRandomLaneStrategy : LaneStrategy {
     override fun programBlock(channel: Channel, context: ChannelProgrammingContext, limit: Int): List<MediaItem> {
         val pool = ChannelProgrammer.filterPool(context.availableMedia, context.filterType)
-        val seed = context.currentTimeMs + channel.id.hashCode()
+        val seed = context.currentTimeMs + channel.id.hashCode() + context.refreshEpoch
         val random = Random(seed)
-        return pool.shuffled(random).take(limit)
+        return pool.sortedBy { item ->
+            val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
+            val totalExp = exp + (sessionExp * 3)
+            (totalExp * 10f) + (random.nextFloat() * 5f)
+        }.take(limit)
     }
 }
 
 /**
- * Search-Seeded Strategy — Dynamic block programming from saved search seeds (text query + visual references).
+ * Search-Seeded Strategy — Dynamic block programming from saved search seeds respecting exposure penalties.
  */
 class SearchSeededLaneStrategy : LaneStrategy {
     override fun programBlock(channel: Channel, context: ChannelProgrammingContext, limit: Int): List<MediaItem> {
@@ -301,8 +342,11 @@ class SearchSeededLaneStrategy : LaneStrategy {
         val skipCounts = context.skipEvents.groupingBy { it.mediaId }.eachCount()
 
         val scored = pool.map { item ->
-            val exp = (context.exposureMap[item.id] ?: 0) + (skipCounts[item.id] ?: 0) + (context.sessionExposures[item.id] ?: 0)
-            var score = 0.5f - (exp * 0.08f)
+            val exp = context.exposureMap[item.id] ?: 0
+            val sessionExp = context.sessionExposures[item.id] ?: 0
+            val skips = skipCounts[item.id] ?: 0
+            val totalExp = exp + (sessionExp * 2) + skips
+            var score = 0.5f - (totalExp * 0.1f)
             if (query.isNotEmpty()) {
                 if (item.title.lowercase().contains(query)) score += 0.4f
                 if (item.genre.lowercase().contains(query)) score += 0.3f

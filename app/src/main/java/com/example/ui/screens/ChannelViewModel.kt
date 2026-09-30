@@ -110,6 +110,16 @@ class ChannelViewModel(
         onComplete: (List<MediaItem>) -> Unit
     ) {
         viewModelScope.launch {
+            refreshEpoch++
+            // Record currently presented items in sessionExposures to depress them on reload
+            val currentState = channelPreviews.value.find { it.channel.id == channel.id }
+            currentState?.candidateItem?.let { currentCandidate ->
+                sessionExposures[currentCandidate.id] = (sessionExposures[currentCandidate.id] ?: 0) + 1
+            }
+            currentState?.fullItems?.forEach { fullItem ->
+                sessionExposures[fullItem.id] = (sessionExposures[fullItem.id] ?: 0) + 1
+            }
+
             val available = repository.mediaItems.value
             val db = repository.getDatabase()
             val feedback = db?.programmingFeedbackDao()?.getAllFeedback() ?: emptyList()
@@ -130,8 +140,46 @@ class ChannelViewModel(
                 context = context,
                 limit = 20
             )
+
+            items.forEach { item ->
+                sessionExposures[item.id] = (sessionExposures[item.id] ?: 0) + 1
+            }
+
             onComplete(items)
         }
+    }
+
+    suspend fun programNextBlock(
+        channel: Channel,
+        filterType: String,
+        excludeIds: Set<String>,
+        limit: Int = 10
+    ): List<MediaItem> {
+        val available = repository.mediaItems.value
+        val db = repository.getDatabase()
+        val feedback = db?.programmingFeedbackDao()?.getAllFeedback() ?: emptyList()
+        val skipEvents = db?.aiSkipDao()?.observeAllEvents()?.firstOrNull() ?: emptyList()
+
+        val context = ChannelProgrammingContext(
+            availableMedia = available,
+            filterType = filterType,
+            tasteDNA = repository.tasteDNA.value,
+            programmingFeedback = feedback,
+            exposureMap = available.associate { it.id to it.exposureCount },
+            skipEvents = skipEvents,
+            refreshEpoch = refreshEpoch,
+            sessionExposures = sessionExposures.toMap()
+        )
+        val candidates = programmer.programChannel(
+            channel = channel,
+            context = context,
+            limit = limit + excludeIds.size
+        )
+        val freshItems = candidates.filter { it.id !in excludeIds }.take(limit)
+        freshItems.forEach { item ->
+            sessionExposures[item.id] = (sessionExposures[item.id] ?: 0) + 1
+        }
+        return freshItems
     }
 
     fun setFilterType(filterType: String) {

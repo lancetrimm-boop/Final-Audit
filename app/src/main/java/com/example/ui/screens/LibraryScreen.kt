@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.*
 import com.example.data.semantic.SearchRequest
 import com.example.ui.models.LibraryItemUi
+import com.example.ui.models.toLibraryItemUi
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
@@ -107,6 +108,7 @@ fun LibraryScreen(
     )
 
     LibraryContent(
+        repository = repository,
         state = uiState,
         latestSortedItems = latestSortedItemsFromRepo,
         mediaItemsMap = mediaItemsMap,
@@ -178,6 +180,7 @@ fun LibraryScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryContent(
+    repository: MediaRepository? = null,
     state: LibraryPresentationState,
     latestSortedItems: List<LibraryItemUi>,
     mediaItemsMap: Map<String, MediaItem>,
@@ -302,25 +305,51 @@ fun LibraryContent(
         derivedStateOf { gridState.firstVisibleItemIndex > 8 }
     }
 
-    // AURA STABILITY FIX: UI-side list stability to prevent items from jumping while viewing.
-    // In unstable modes (Discover), we lock the list and only update it on manual refresh or sort change.
-    var stableItems by remember { mutableStateOf<List<LibraryItemUi>>(emptyList()) }
-    val isUnstableMode = state.activeCategory == SortCategory.INTELLIGENT && state.intelligentSort == IntelligentSortOption.DISCOVER
-
-    LaunchedEffect(latestSortedItems) {
-        if (!isUnstableMode || stableItems.isEmpty() || latestSortedItems.size != stableItems.size) {
-            stableItems = latestSortedItems
+    val libraryViewModel: LibraryViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                return LibraryViewModel(repository) as T
+            }
         }
+    )
+
+    val displayedItems by libraryViewModel.displayedItems.collectAsStateWithLifecycle()
+    val isLoadingMore by libraryViewModel.isLoadingMore.collectAsStateWithLifecycle()
+    val endReached by libraryViewModel.endReached.collectAsStateWithLifecycle()
+
+    val effectiveDisplayedItems = if (repository == null && state.mediaItems.isNotEmpty()) {
+        remember(state.mediaItems) { state.mediaItems.map { it.toLibraryItemUi() } }
+    } else {
+        displayedItems
     }
 
-    LaunchedEffect(state.activeCategory, state.intelligentSort, state.selectedFilter, state.searchRequest) {
-        // Sort/Filter change acts as a "thaw" signal
-        stableItems = latestSortedItems
+    LaunchedEffect(state.selectedFilter, state.activeCategory, state.standardSort, state.intelligentSort, state.searchRequest) {
+        libraryViewModel.refreshLibrary()
     }
 
-    // Filter out deleted items from the stable snapshot to ensure they disappear immediately
-    val displayItems = remember(stableItems, mediaItemsMap) {
-        stableItems.filter { mediaItemsMap.containsKey(it.id) }
+    // Filter out deleted items from the displayed items snapshot to ensure they disappear immediately
+    val displayItems = remember(effectiveDisplayedItems, mediaItemsMap) {
+        effectiveDisplayedItems.filter { mediaItemsMap.containsKey(it.id) }
+    }
+
+    LaunchedEffect(gridState, displayItems.size, isLoadingMore, endReached) {
+        snapshotFlow {
+            val info = gridState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val total = info.totalItemsCount
+            lastVisible to total
+        }.collect { pair ->
+            val lastVisible = pair.first
+            val total = pair.second
+            if (!isLoadingMore &&
+                !endReached &&
+                total > 0 &&
+                lastVisible >= total - 20
+            ) {
+                android.util.Log.d("LibraryPaging", "Load more triggered – lastVisible=$lastVisible total=$total")
+                libraryViewModel.loadMore()
+            }
+        }
     }
 
     LaunchedEffect(gridState, displayItems) {
@@ -639,7 +668,7 @@ fun LibraryContent(
                 isRefreshing = state.scanProgress.isScanning && state.scanProgress.isManual,
                 onRefresh = { 
                     onRefresh()
-                    stableItems = emptyList() // Force reload on manual refresh
+                    libraryViewModel.refreshLibrary()
                     if (state.dbState == com.example.data.DatabaseState.READY) {
                         scanPermissionLauncher.launch(permissionsToRequest)
                     }
