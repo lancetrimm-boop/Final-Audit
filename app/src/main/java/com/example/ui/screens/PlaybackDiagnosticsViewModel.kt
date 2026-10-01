@@ -186,6 +186,11 @@ class PlaybackDiagnosticsViewModel(
     }
 
     fun startConversion(context: Context, error: PlaybackErrorLogEntity) {
+        if (_conversionStage.value != ConversionStage.IDLE && _conversionStage.value != ConversionStage.COMPLETE) {
+            android.util.Log.d("AuraConversion", "Conversion already active in stage ${_conversionStage.value}. Ignoring duplicate request.")
+            return
+        }
+
         val uriStr = error.mediaUri ?: return
         val uri = Uri.parse(uriStr)
         val mediaId = error.mediaItemId ?: ""

@@ -138,4 +138,38 @@ class AuraLibrarySortingTest {
         assertEquals(2, pageAfterConvert.size)
         assertTrue(pageAfterConvert.any { it.id == "2" })
     }
+
+    @Test
+    fun testUpdateConvertedMedia_BlankMediaId_PersistsByUriFallback() = runBlocking {
+        val badMkvEntity = com.example.data.db.MediaEntity(
+            id = "known_mkv_id",
+            title = "Unplayable MKV",
+            mediaType = "VIDEO",
+            uriPath = "unplayable.mkv",
+            compatibilityStatus = CompatibilityStatus.UNSUPPORTED.name
+        )
+        database.mediaDao().insert(badMkvEntity)
+
+        val badMkvItem = badMkvEntity.toMediaItem()
+        repository.setMediaItemsForTesting(listOf(badMkvItem))
+
+        // Call updateConvertedMedia with blank mediaId ("")
+        repository.updateConvertedMedia(
+            mediaId = "",
+            sourceUri = "unplayable.mkv",
+            outputPath = "converted_mkv.mp4"
+        )
+
+        // Verify in-memory state updated
+        val page = repository.loadLibraryPage(offset = 0, limit = 10)
+        assertEquals(1, page.size)
+        assertEquals("known_mkv_id", page[0].id)
+
+        // Verify Room database entity updated via getMediaByUri
+        val persistedEntity = database.mediaDao().getMediaByUri("unplayable.mkv")
+        assertNotNull(persistedEntity)
+        assertEquals("PLAYABLE", persistedEntity?.compatibilityStatus)
+        assertEquals("CONVERTED", persistedEntity?.conversionStatus)
+        assertEquals("converted_mkv.mp4", persistedEntity?.convertedUri)
+    }
 }

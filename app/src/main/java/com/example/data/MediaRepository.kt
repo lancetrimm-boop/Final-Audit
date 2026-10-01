@@ -1117,7 +1117,11 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
         }
         scope.launch {
             database?.mediaDao()?.let { dao ->
-                val entity = if (mediaId.isNotBlank()) dao.getMediaById(mediaId) else null
+                val entity = if (mediaId.isNotBlank()) {
+                    dao.getMediaById(mediaId) ?: dao.getMediaByUri(sourceUri)
+                } else {
+                    dao.getMediaByUri(sourceUri)
+                }
                 if (entity != null) {
                     dao.update(
                         entity.copy(

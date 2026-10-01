@@ -21,6 +21,9 @@ interface MediaDao {
     @Query("SELECT * FROM media_items WHERE id = :id")
     suspend fun getMediaById(id: String): MediaEntity?
 
+    @Query("SELECT * FROM media_items WHERE uriPath = :uriPath LIMIT 1")
+    suspend fun getMediaByUri(uriPath: String): MediaEntity?
+
     @Query("SELECT * FROM media_items WHERE compatibilityStatus = 'ANALYSIS_PENDING'")
     suspend fun getPendingAnalysis(): List<MediaEntity>
 
