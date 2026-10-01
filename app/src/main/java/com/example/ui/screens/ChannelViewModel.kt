@@ -72,9 +72,14 @@ class ChannelViewModel(
 
             val states = allChannels.map { channel ->
                 val programmed = programmer.programChannel(channel, context, limit = 20)
-                val candidate = programmed.firstOrNull { it.id !in usedPreviewIds }
-                if (candidate != null) {
-                    usedPreviewIds.add(candidate.id)
+                val candidate = if (channel.channelKind == ChannelKind.SEARCH_SEEDED && channel.referenceMediaIds.isNotEmpty()) {
+                    val firstRefId = channel.referenceMediaIds.first()
+                    val availableMap = available.associateBy { it.id }
+                    availableMap[firstRefId] ?: programmed.firstOrNull()
+                } else {
+                    val found = programmed.firstOrNull { it.id !in usedPreviewIds } ?: programmed.firstOrNull()
+                    found?.also { usedPreviewIds.add(it.id) }
+                    found
                 }
 
                 val adjustedFullItems = if (candidate != null) {
@@ -88,6 +93,17 @@ class ChannelViewModel(
                 )
             }
             _channelPreviews.value = states
+        }
+    }
+
+    fun deleteChannel(channel: Channel) {
+        if (channel.channelKind != ChannelKind.SEARCH_SEEDED) return
+        viewModelScope.launch {
+            repository.deleteSearchSeededChannel(channel.id)
+            loadChannelPreviews()
+            if (_selectedChannel.value.id == channel.id) {
+                selectChannel(ChannelRegistry.defaultChannel())
+            }
         }
     }
 

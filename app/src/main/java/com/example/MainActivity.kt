@@ -608,6 +608,7 @@ fun AuraMainContent(repository: MediaRepository) {
                     },
                     onNavigateToLibrary = {
                         currentRoute = NavDestination.LIBRARY.route
+                        repository.clearPlaylist()
                     }
                 )
             } else {
@@ -687,6 +688,34 @@ fun AuraMainContent(repository: MediaRepository) {
                                 },
                                 onScanDevice = {
                                     repository.scanLocalMedia(context, isManual = true)
+                                },
+                                onCreateSearchSeededChannel = { newChannel ->
+                                    coroutineScope.launch {
+                                        repository.saveSearchSeededChannel(newChannel)
+                                        channelViewModel.loadChannelPreviews()
+                                        channelViewModel.selectChannel(newChannel)
+
+                                        val programmedItems = channelViewModel.programNextBlock(newChannel, channelViewModel.selectedFilterType.value, emptySet(), 20)
+                                        val firstRefId = newChannel.referenceMediaIds.firstOrNull()
+                                        val initialIndex = if (firstRefId != null) {
+                                            programmedItems.indexOfFirst { it.id == firstRefId }.coerceAtLeast(0)
+                                        } else {
+                                            0
+                                        }
+                                        val firstItem = programmedItems.getOrNull(initialIndex)
+                                        val isPhoto = firstItem != null && !firstItem.mediaType.equals("VIDEO", ignoreCase = true) && !firstItem.mediaType.equals("MOVIE", ignoreCase = true)
+                                        val sourceTitle = if (isPhoto) "Aura Moments" else "Aura Channel — ${newChannel.title}"
+
+                                        repository.setChannelPlaylist(
+                                            channel = newChannel,
+                                            filterType = channelViewModel.selectedFilterType.value,
+                                            items = if (programmedItems.isNotEmpty()) programmedItems else mediaItems,
+                                            initialIndex = initialIndex,
+                                            sourceTitle = sourceTitle
+                                        )
+
+                                        currentRoute = NavDestination.CHANNELS.route
+                                    }
                                 },
                                 onSyncClick = {
                                     if (com.example.BuildConfig.ENABLE_DEVELOPER_TOOLS) {

@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tv
@@ -58,6 +59,7 @@ fun AuraChannelsScreen(
     val previews by viewModel.channelPreviews.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val slideshowDelaySec by viewModel.slideshowDelaySeconds.collectAsStateWithLifecycle()
+    var channelToDelete by remember { mutableStateOf<Channel?>(null) }
 
     Column(
         modifier = modifier
@@ -215,11 +217,35 @@ fun AuraChannelsScreen(
                                 if (previewItem != null && fullList.isNotEmpty()) {
                                     onMediaSelect(previewItem, fullList)
                                 }
-                            }
+                            },
+                            onDelete = { channelToDelete = it }
                         )
                     }
                 }
             }
+        }
+
+        if (channelToDelete != null) {
+            AlertDialog(
+                onDismissRequest = { channelToDelete = null },
+                title = { Text("Delete Channel") },
+                text = { Text("Delete this channel?\n\nThis will remove the channel from your channels.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            channelToDelete?.let { viewModel.deleteChannel(it) }
+                            channelToDelete = null
+                        }
+                    ) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { channelToDelete = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }
@@ -312,6 +338,7 @@ fun ChannelPreviewCard(
     isSelected: Boolean,
     isVisibleInViewport: Boolean,
     onClick: (Channel, MediaItem?, List<MediaItem>) -> Unit,
+    onDelete: ((Channel) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val channel = channelPreview.channel
@@ -404,18 +431,37 @@ fun ChannelPreviewCard(
                     )
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = DiscoveryViolet.copy(alpha = 0.85f),
-                    modifier = Modifier.height(26.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(modifier = Modifier.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = if (channel.channelKind == ChannelKind.SEARCH_SEEDED) "Search Seeded" else "Station",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = DiscoveryViolet.copy(alpha = 0.85f),
+                        modifier = Modifier.height(26.dp)
+                    ) {
+                        Box(modifier = Modifier.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = if (channel.channelKind == ChannelKind.SEARCH_SEEDED) "Search Seeded" else "Station",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    if (channel.channelKind == ChannelKind.SEARCH_SEEDED && onDelete != null) {
+                        IconButton(
+                            onClick = { onDelete(channel) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete Channel",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }

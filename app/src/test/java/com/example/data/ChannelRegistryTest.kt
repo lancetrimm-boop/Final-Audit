@@ -119,4 +119,36 @@ class ChannelRegistryTest {
         assertNotNull(ChannelRegistry.get("seeded_123"))
         assertEquals(6, ChannelRegistry.allChannels().size)
     }
+
+    @Test
+    fun testMultipleUserGeneratedChannelsCoexist_AndSelectiveDeletionWorks() {
+        val ch1 = Channel("channel_search_1", "Visual Search", query = "query 1", channelKind = ChannelKind.SEARCH_SEEDED, strategyId = "SEARCH_SEEDED")
+        val ch2 = Channel("channel_search_2", "Visual Search", query = "query 2", channelKind = ChannelKind.SEARCH_SEEDED, strategyId = "SEARCH_SEEDED")
+        val ch3 = Channel("channel_search_3", "Visual Search", query = "query 3", channelKind = ChannelKind.SEARCH_SEEDED, strategyId = "SEARCH_SEEDED")
+
+        ChannelRegistry.addSearchSeededChannel(ch1)
+        ChannelRegistry.addSearchSeededChannel(ch2)
+        ChannelRegistry.addSearchSeededChannel(ch3)
+
+        assertEquals(8, ChannelRegistry.allChannels().size) // 5 fixed + 3 custom
+        assertEquals(5, ChannelRegistry.allFixedChannels().size) // fixed registry strictly 5
+
+        // Remove channel 2
+        ChannelRegistry.removeSearchSeededChannel("channel_search_2")
+
+        assertEquals(7, ChannelRegistry.allChannels().size) // 5 fixed + 2 custom
+        assertNotNull(ChannelRegistry.get("channel_search_1"))
+        assertNull(ChannelRegistry.get("channel_search_2"))
+        assertNotNull(ChannelRegistry.get("channel_search_3"))
+    }
+
+    @Test
+    fun testChannelKindDistinguishesDeletableUserChannelsFromBuiltInChannels() {
+        val fixedChannels = ChannelRegistry.allFixedChannels()
+        assertTrue(fixedChannels.all { it.channelKind == ChannelKind.FIXED })
+
+        val customChannel = Channel("custom_1", "User Channel", channelKind = ChannelKind.SEARCH_SEEDED, strategyId = "SEARCH_SEEDED")
+        assertEquals(ChannelKind.SEARCH_SEEDED, customChannel.channelKind)
+        assertFalse(customChannel.channelKind == ChannelKind.FIXED)
+    }
 }

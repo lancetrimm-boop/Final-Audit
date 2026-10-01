@@ -67,6 +67,7 @@ fun LibraryScreen(
     onImportUris: ((List<Uri>) -> Unit)? = null,
     onScanDevice: (suspend () -> Unit)? = null,
     onSyncClick: (() -> Unit)? = null,
+    onCreateSearchSeededChannel: ((Channel) -> Unit)? = null,
     deleteLauncher: androidx.activity.result.ActivityResultLauncher<androidx.activity.result.IntentSenderRequest>? = null,
     modifier: Modifier = Modifier
 ) {
@@ -160,6 +161,7 @@ fun LibraryScreen(
         onSearchByImage = { bitmap, uri -> repository.searchByImage(bitmap, uri) },
         onSearchByMultipleImages = { items -> repository.searchByMultipleImages(items) },
         onSaveSearchAsChannel = { channel -> scope.launch { repository.saveSearchSeededChannel(channel) } },
+        onCreateSearchSeededChannel = onCreateSearchSeededChannel,
         onTriggerScan = {
             scope.launch {
                 onScanDevice?.invoke()
@@ -206,6 +208,7 @@ fun LibraryContent(
     onSearchByImage: (Bitmap, String) -> Unit,
     onSearchByMultipleImages: (List<MediaItem>) -> Unit,
     onSaveSearchAsChannel: (Channel) -> Unit = {},
+    onCreateSearchSeededChannel: ((Channel) -> Unit)? = null,
     deletionStateFlow: kotlinx.coroutines.flow.StateFlow<com.example.data.cleanup.DeletionState>,
     libraryScrollIndex: Int,
     libraryScrollOffset: Int,
@@ -522,8 +525,11 @@ fun LibraryContent(
                                             strategyId = "SEARCH_SEEDED",
                                             isProGated = true
                                         )
-                                        onSaveSearchAsChannel(channel)
-                                        android.widget.Toast.makeText(context, "Saved as Channel: $title", android.widget.Toast.LENGTH_SHORT).show()
+                                        if (onCreateSearchSeededChannel != null) {
+                                            onCreateSearchSeededChannel(channel)
+                                        } else {
+                                            onSaveSearchAsChannel(channel)
+                                        }
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = DiscoveryViolet),
                                     contentPadding = PaddingValues(horizontal = AuraSpacing.M, vertical = 4.dp),

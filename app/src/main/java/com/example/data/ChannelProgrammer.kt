@@ -39,7 +39,8 @@ class ChannelProgrammer(
         val rawItems = strategy.programBlock(channel, context, limit)
 
         // Enforce strict media-type homogeneity
-        val isVideoFilter = context.filterType.equals("VIDEO", ignoreCase = true) || context.filterType.equals("VIDEOS", ignoreCase = true) || context.filterType.equals("MOVIE", ignoreCase = true) || context.filterType.equals("MOVIES", ignoreCase = true)
+        val effectiveFilter = resolveSeedFilterType(channel, context)
+        val isVideoFilter = effectiveFilter.equals("VIDEO", ignoreCase = true) || effectiveFilter.equals("VIDEOS", ignoreCase = true) || effectiveFilter.equals("MOVIE", ignoreCase = true) || effectiveFilter.equals("MOVIES", ignoreCase = true)
         return rawItems.filter { item ->
             val isVid = item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("MOVIE", ignoreCase = true) || item.mediaType.startsWith("VIDEO", ignoreCase = true) || item.mediaType.startsWith("MOVIE", ignoreCase = true)
             if (isVideoFilter) isVid else !isVid
@@ -50,6 +51,21 @@ class ChannelProgrammer(
      * Helper to filter pool by media type.
      */
     internal companion object {
+        fun resolveSeedFilterType(channel: Channel, context: ChannelProgrammingContext): String {
+            if (channel.channelKind == ChannelKind.SEARCH_SEEDED && channel.referenceMediaIds.isNotEmpty()) {
+                val firstRefId = channel.referenceMediaIds.first()
+                val seedItem = context.availableMedia.find { it.id == firstRefId }
+                if (seedItem != null) {
+                    val isVid = seedItem.mediaType.equals("VIDEO", ignoreCase = true) ||
+                            seedItem.mediaType.equals("MOVIE", ignoreCase = true) ||
+                            seedItem.mediaType.startsWith("VIDEO", ignoreCase = true) ||
+                            seedItem.mediaType.startsWith("MOVIE", ignoreCase = true)
+                    return if (isVid) "VIDEOS" else "PHOTOS"
+                }
+            }
+            return context.filterType
+        }
+
         fun filterPool(pool: List<MediaItem>, filterType: String): List<MediaItem> {
             val isVideoFilter = filterType.equals("VIDEO", ignoreCase = true) || filterType.equals("VIDEOS", ignoreCase = true) || filterType.equals("MOVIE", ignoreCase = true) || filterType.equals("MOVIES", ignoreCase = true)
             return pool.filter { item ->
@@ -334,7 +350,8 @@ class ScopedRandomLaneStrategy : LaneStrategy {
  */
 class SearchSeededLaneStrategy : LaneStrategy {
     override fun programBlock(channel: Channel, context: ChannelProgrammingContext, limit: Int): List<MediaItem> {
-        val pool = ChannelProgrammer.filterPool(context.availableMedia, context.filterType)
+        val effectiveFilter = ChannelProgrammer.resolveSeedFilterType(channel, context)
+        val pool = ChannelProgrammer.filterPool(context.availableMedia, effectiveFilter)
         if (pool.isEmpty()) return emptyList()
 
         val query = channel.query.lowercase().trim()

@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import android.widget.Toast
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -23,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import java.util.Locale
 import com.example.data.MediaItem
 import com.example.ui.theme.*
@@ -57,6 +60,28 @@ fun SwipeMenuSheet(
     var localRating by remember(activeItem.id) { mutableFloatStateOf(activeItem.rating) }
     var showSpeedMenu by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val isFav = activeItem.isFavorite
+    var prevFavState by remember(activeItem.id) { mutableStateOf(isFav) }
+    var heartScale by remember { mutableFloatStateOf(1f) }
+
+    val animatedHeartScale by animateFloatAsState(
+        targetValue = heartScale,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "heart_pulse_scale"
+    )
+
+    LaunchedEffect(activeItem.id, isFav) {
+        if (prevFavState != isFav) {
+            prevFavState = isFav
+            heartScale = 1.35f
+            delay(120)
+            heartScale = 1.0f
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -239,11 +264,15 @@ fun SwipeMenuSheet(
 
                     // Favorite / Like
                     Icon(
-                        imageVector = if (activeItem.isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                        imageVector = if (isFav) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
                         contentDescription = "Favorite",
-                        tint = if (activeItem.isFavorite) AuraMagenta else AuraCrispWhite,
+                        tint = if (isFav) Color(0xFFEF4444) else AuraCrispWhite,
                         modifier = Modifier
                             .size(18.dp)
+                            .graphicsLayer {
+                                scaleX = animatedHeartScale
+                                scaleY = animatedHeartScale
+                            }
                             .clickable { onFavoriteToggle(activeItem.id) }
                     )
 

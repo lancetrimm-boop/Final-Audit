@@ -210,6 +210,9 @@ fun MediaDetailScreen(
         playlistState?.items?.getOrNull(currentItemIndex) ?: item
     }
 
+    val mediaItemsMap by repository.mediaItemsMap.collectAsStateWithLifecycle()
+    val resolvedActiveItem = mediaItemsMap[activeItem.id] ?: activeItem
+
     var isAbRepeatActive by remember(activeItem.id) { mutableStateOf(false) }
     var abPointA by remember(activeItem.id) { mutableStateOf<Long?>(null) }
     var abPointB by remember(activeItem.id) { mutableStateOf<Long?>(null) }
@@ -1267,7 +1270,7 @@ fun MediaDetailScreen(
     // Player Menu Modal Sheet (Swipe Up or Info Button)
     if (showPlayerMenu) {
         SwipeMenuSheet(
-            activeItem = activeItem,
+            activeItem = resolvedActiveItem,
             isVideo = isVideo,
             currentPositionMs = currentPositionMs.toLong(),
             playbackSpeed = playbackSpeed,
@@ -1280,6 +1283,7 @@ fun MediaDetailScreen(
             onFavoriteToggle = onFavoriteToggle,
             onDeleteRequest = { showDeleteDialog = true },
             onBeginVisualSearch = { item ->
+                showPlayerMenu = false
                 onAddVisualReference?.invoke(item)
                 if (onNavigateToLibrary != null) {
                     onNavigateToLibrary()

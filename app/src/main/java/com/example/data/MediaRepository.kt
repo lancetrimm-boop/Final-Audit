@@ -152,6 +152,20 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
             } catch (e: Exception) {}
         }
     }
+
+    suspend fun deleteSearchSeededChannel(channelId: String) {
+        val current = _searchSeededChannels.value.filterNot { it.id == channelId }
+        _searchSeededChannels.value = current
+        ChannelRegistry.removeSearchSeededChannel(channelId)
+        try {
+            val adapter = moshi.adapter<List<Channel>>(
+                com.squareup.moshi.Types.newParameterizedType(List::class.java, Channel::class.java)
+            )
+            database?.userPreferenceDao()?.insertPreference(
+                UserPreferenceEntity("search_seeded_channels", adapter.toJson(current))
+            )
+        } catch (e: Exception) {}
+    }
     private val _databaseState = MutableStateFlow(DatabaseState.NOT_INITIALIZED); val databaseState = _databaseState.asStateFlow()
     private val _aiState = MutableStateFlow(AIState.NOT_INITIALIZED); val aiState = _aiState.asStateFlow()
     private val _initializationDetail = MutableStateFlow("Pending..."); val initializationDetail = _initializationDetail.asStateFlow()
@@ -886,12 +900,23 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
     fun recordExposures(ids: List<String>) { if (ids.isEmpty()) return; synchronized(exposureBuffer) { exposureBuffer.addAll(ids) }; if (exposureFlushJob?.isActive != true) exposureFlushJob = scope.launch { delay(5000); flushExposures() } }
     private suspend fun flushExposures() { val ids = synchronized(exposureBuffer) { val copy = exposureBuffer.toList(); exposureBuffer.clear(); copy }; if (ids.isEmpty()) return; database?.mediaDao()?.let { dao -> val entities = ids.mapNotNull { id -> dao.getMediaById(id)?.let { it.copy(exposureCount = it.exposureCount + 1) } }; if (entities.isNotEmpty()) dao.updateAll(entities) } }
     
-    fun updateRating(id: String, rating: Float) { scope.launch { _mediaItems.update { items -> items.map { if (it.id == id) it.copy(rating = rating) else it } }; database?.mediaDao()?.getMediaById(id)?.let { database?.mediaDao()?.update(it.copy(rating = rating)) } } }
+    fun updateRating(id: String, rating: Float) {
+        _mediaItems.update { items -> items.map { if (it.id == id) it.copy(rating = rating) else it } }
+        _activePlaylist.update { p ->
+            if (p == null) null
+            else p.copy(items = p.items.map { if (it.id == id) it.copy(rating = rating) else it })
+        }
+        scope.launch { database?.mediaDao()?.getMediaById(id)?.let { database?.mediaDao()?.update(it.copy(rating = rating)) } }
+    }
     fun toggleFavorite(id: String) {
         val item = getMediaItemById(id) ?: return
         val becomingFavorite = !item.isFavorite
         val updated = item.copy(isFavorite = becomingFavorite)
         _mediaItems.update { list -> list.map { if (it.id == id) updated else it } }
+        _activePlaylist.update { p ->
+            if (p == null) null
+            else p.copy(items = p.items.map { if (it.id == id) updated else it })
+        }
         
         scope.launch {
             database?.mediaDao()?.update(updated.toEntity())
@@ -1267,15 +1292,21 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
         standardSort: StandardSortOption = _selectedStandardSort.value,
         intelligentSort: IntelligentSortOption = _selectedIntelligentSort.value
     ): List<LibraryItemUi> {
-        val sorted = getFilteredAndSortedMedia(
-            filterType = filter,
-            sortCategory = sortCategory,
-            standardSort = standardSort,
-            intelligentSort = intelligentSort,
-            sessionSeed = _librarySessionSeed.value
-        )
+        val search = _librarySearchRequest.value
+        val isSearchActive = (search !is SearchRequest.Text || !search.query.isNullOrBlank()) || _activeVisualReferences.value.isNotEmpty()
+        val sorted = if (isSearchActive) {
+            latestSortedFullItemsFlow.value
+        } else {
+            getFilteredAndSortedMedia(
+                filterType = filter,
+                sortCategory = sortCategory,
+                standardSort = standardSort,
+                intelligentSort = intelligentSort,
+                sessionSeed = _librarySessionSeed.value
+            )
+        }
         val filtered = sorted.filter { it.isEligibleForLibraryAndChannels() }
-        android.util.Log.d("AuraGate", "loadLibraryPage offset=$offset raw=${sorted.size} eligible=${filtered.size}")
+        android.util.Log.d("AuraGate", "loadLibraryPage offset=$offset raw=${sorted.size} eligible=${filtered.size} searchActive=$isSearchActive")
         return filtered
             .drop(offset)
             .take(limit)

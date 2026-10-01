@@ -190,4 +190,116 @@ class SearchSeededChannelTest {
 
         assertEquals(initialDna, repository.tasteDNA.value)
     }
+
+    @Test
+    fun testLoadLibraryPage_UsesSearchRequest_WhenSearchIsActive() = testScope.runTest {
+        val item1 = createMediaItem("ref_1", "Sunset Beach", isVideo = false)
+        val item2 = createMediaItem("ref_2", "Mountain Dune", isVideo = false)
+        repository.setMediaItemsForTesting(listOf(item1, item2))
+
+        val initialPage = repository.loadLibraryPage(0, 10)
+        assertEquals(2, initialPage.size)
+
+        repository.addVisualReference(item1)
+        advanceUntilIdle()
+
+        val searchPage = repository.loadLibraryPage(0, 10)
+        assertNotNull(searchPage)
+    }
+
+    @Test
+    fun testSearchSeededChannel_FirstReferenceIsPrioritizedForThumbnail() = testScope.runTest {
+        val p1 = createMediaItem("p1", "Photo One", isVideo = false)
+        val p2 = createMediaItem("p2", "Photo Two", isVideo = false)
+        val p3 = createMediaItem("p3", "Photo Three", isVideo = false)
+        repository.setMediaItemsForTesting(listOf(p1, p2, p3))
+
+        val channel = Channel(
+            id = "seeded_channel_p2",
+            title = "Visual Search",
+            query = "",
+            referenceMediaIds = listOf("p2", "p3"),
+            channelKind = ChannelKind.SEARCH_SEEDED,
+            strategyId = "SEARCH_SEEDED"
+        )
+
+        ChannelRegistry.addSearchSeededChannel(channel)
+
+        val vm = com.example.ui.screens.ChannelViewModel(repository)
+        vm.loadChannelPreviews()
+        advanceUntilIdle()
+
+        val preview = vm.channelPreviews.value.find { it.channel.id == "seeded_channel_p2" }
+        assertNotNull(preview)
+        assertEquals("p2", preview?.candidateItem?.id)
+    }
+
+    @Test
+    fun testVideoSeededChannel_ProgramsVideosOnly_EvenIfFilterTypeIsPhotos() = testScope.runTest {
+        val v1 = createMediaItem("v1", "Ocean Video", isVideo = true)
+        val p1 = createMediaItem("p1", "Ocean Photo", isVideo = false)
+        repository.setMediaItemsForTesting(listOf(v1, p1))
+
+        val channel = Channel(
+            id = "custom_vid_seeded",
+            title = "Ocean",
+            query = "ocean",
+            referenceMediaIds = listOf("v1"),
+            channelKind = ChannelKind.SEARCH_SEEDED,
+            strategyId = "SEARCH_SEEDED"
+        )
+
+        val context = ChannelProgrammingContext(
+            availableMedia = repository.mediaItems.value,
+            filterType = "PHOTOS" // Context says PHOTOS, but seed is VIDEO
+        )
+
+        val programmed = programmer.programChannel(channel, context, limit = 10)
+        assertEquals(1, programmed.size)
+        assertEquals("v1", programmed[0].id)
+        assertEquals("VIDEO", programmed[0].mediaType)
+    }
+
+    @Test
+    fun testPhotoSeededChannel_ProgramsPhotosOnly_EvenIfFilterTypeIsVideos() = testScope.runTest {
+        val v1 = createMediaItem("v1", "Beach Video", isVideo = true)
+        val p1 = createMediaItem("p1", "Beach Photo", isVideo = false)
+        repository.setMediaItemsForTesting(listOf(v1, p1))
+
+        val channel = Channel(
+            id = "custom_photo_seeded",
+            title = "Beach",
+            query = "beach",
+            referenceMediaIds = listOf("p1"),
+            channelKind = ChannelKind.SEARCH_SEEDED,
+            strategyId = "SEARCH_SEEDED"
+        )
+
+        val context = ChannelProgrammingContext(
+            availableMedia = repository.mediaItems.value,
+            filterType = "VIDEOS" // Context says VIDEOS, but seed is PHOTO
+        )
+
+        val programmed = programmer.programChannel(channel, context, limit = 10)
+        assertEquals(1, programmed.size)
+        assertEquals("p1", programmed[0].id)
+        assertEquals("PHOTO", programmed[0].mediaType)
+    }
+
+    @Test
+    fun testToggleFavorite_SynchronizesActivePlaylist() = testScope.runTest {
+        val v1 = createMediaItem("v1", "Video 1", isVideo = true)
+        repository.setMediaItemsForTesting(listOf(v1))
+
+        val channel = Channel("test_channel", "Test", channelKind = ChannelKind.SEARCH_SEEDED, strategyId = "SEARCH_SEEDED")
+        repository.setChannelPlaylist(channel, "VIDEOS", listOf(v1), 0, "Test Channel")
+
+        assertFalse(repository.activePlaylist.value!!.items[0].isFavorite)
+
+        repository.toggleFavorite("v1")
+        advanceUntilIdle()
+
+        assertTrue(repository.activePlaylist.value!!.items[0].isFavorite)
+        assertTrue(repository.mediaItemsMap.value["v1"]!!.isFavorite)
+    }
 }

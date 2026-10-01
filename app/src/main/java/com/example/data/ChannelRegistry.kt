@@ -86,6 +86,14 @@ object ChannelRegistry {
     }
 
     /**
+     * Removes a search-seeded channel by ID.
+     */
+    fun removeSearchSeededChannel(channelId: String) {
+        val current = customChannelsState.value
+        customChannelsState.value = current.filterNot { it.id == channelId }
+    }
+
+    /**
      * Sets custom channels list (e.g. loaded from persistence).
      */
     fun setCustomChannels(channels: List<Channel>) {
