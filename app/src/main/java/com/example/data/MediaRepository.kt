@@ -967,7 +967,7 @@ class MediaRepository(private val dispatcher: CoroutineDispatcher = Dispatchers.
     private var activeVisualSearchJob: Job? = null
 
     fun addVisualReference(item: MediaItem) { 
-        val newList = (_activeVisualReferences.value + item).distinctBy { it.id }
+        val newList = (listOf(item) + _activeVisualReferences.value).distinctBy { it.id }
         _activeVisualReferences.value = newList
         triggerVisualSearchForReferences(newList)
     }

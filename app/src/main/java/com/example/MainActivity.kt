@@ -605,6 +605,9 @@ fun AuraMainContent(repository: MediaRepository) {
                     },
                     onAddVisualReference = { item ->
                         repository.addVisualReference(item)
+                    },
+                    onNavigateToLibrary = {
+                        currentRoute = NavDestination.LIBRARY.route
                     }
                 )
             } else {

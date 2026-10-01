@@ -107,6 +107,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import com.example.ui.components.SwipeMenuSheet
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -176,6 +177,7 @@ fun MediaDetailScreen(
     onAISkipEvent: ((String, String, Long, Long) -> Unit)? = null,
     onAddVisualReference: ((MediaItem) -> Unit)? = null,
     onReloadChannel: (() -> Unit)? = null,
+    onNavigateToLibrary: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -1264,335 +1266,62 @@ fun MediaDetailScreen(
 
     // Player Menu Modal Sheet (Swipe Up or Info Button)
     if (showPlayerMenu) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
-            onDismissRequest = { showPlayerMenu = false },
-            sheetState = sheetState,
-            containerColor = AuraCrispWhite,
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-            dragHandle = {
-                Box(
-                    modifier = Modifier
-                        .padding(top = 10.dp, bottom = 6.dp)
-                        .width(36.dp)
-                        .height(4.dp)
-                        .clip(CircleShape)
-                        .background(AuraSubtleBorder)
-                )
-            }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // 1. Media Title Row
-                val displayFilename = if (activeItem.title.contains(".")) activeItem.title else "${activeItem.title}.${if (isVideo) "mp4" else "jpg"}"
-                Text(
-                    text = displayFilename,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AuraMidnight,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 3. Rating & Playback Control Row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(AuraSubtleSurface)
-                        .border(1.dp, AuraSubtleBorder, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Five-Star Rating
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        for (i in 1..5) {
-                            val isStarred = i <= currentRating.toInt()
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = "Rate $i stars",
-                                tint = if (isStarred) AuraStarGold else AuraSubtleBorder,
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clickable {
-                                        currentRating = i.toFloat()
-                                        onUpdateRating?.invoke(activeItem.id, currentRating)
-                                        Toast.makeText(context, "Rated $i stars", Toast.LENGTH_SHORT).show()
-                                    }
-                            )
-                        }
-                    }
-
-                    // Controls: A/B, Camera, Speed, Favorite, Delete
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 3-Step A/B Repeat Button
-                        val abLabel = when {
-                            abPointA == null -> "A/B"
-                            abPointB == null -> "A: ${formatTimeMs(abPointA!!.toFloat())}"
-                            else -> "A-B Loop"
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = abLabel,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isAbRepeatActive || abPointA != null) DiscoveryViolet else AuraMidnight,
-                                modifier = Modifier
-                                    .testTag("ab_repeat_button")
-                                    .clickable {
-                                        if (abPointA == null) {
-                                            abPointA = currentPositionMs.toLong()
-                                            Toast.makeText(context, "A/B: Point A set at ${formatTimeMs(abPointA!!.toFloat())}", Toast.LENGTH_SHORT).show()
-                                        } else if (abPointB == null) {
-                                            val targetB = currentPositionMs.toLong()
-                                            abPointB = if (targetB <= abPointA!!) abPointA!! + 1000L else targetB
-                                            isAbRepeatActive = true
-                                            Toast.makeText(context, "A/B: Point B set at ${formatTimeMs(abPointB!!.toFloat())}. Looping A-B", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            abPointA = null
-                                            abPointB = null
-                                            isAbRepeatActive = false
-                                            Toast.makeText(context, "A/B Repeat cleared", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                            )
-
-                            // AB Export Action
-                            if (abPointA != null && abPointB != null) {
-                                IconButton(
-                                    onClick = {
-                                        if (abPointB!! > abPointA!!) {
-                                            val clip = com.example.data.ClipCandidate(
-                                                title = "AB Clip ${System.currentTimeMillis()}",
-                                                startTimeMs = abPointA!!,
-                                                endTimeMs = abPointB!!,
-                                                durationSec = ((abPointB!! - abPointA!!) / 1000).toInt(),
-                                                relevanceScorePercent = 100,
-                                                selectionReason = "User defined AB segment"
-                                            )
-                                            exportClip(context, activeItem, clip)
-                                            showPlayerMenu = false
-                                        } else {
-                                            Toast.makeText(context, "Point B must be after Point A", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ContentCut,
-                                        contentDescription = "Export AB Clip",
-                                        tint = DiscoveryViolet,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // Camera / Screenshot
-                        Icon(
-                            imageVector = Icons.Default.PhotoCamera,
-                            contentDescription = "Capture Screenshot",
-                            tint = AuraMidnight,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .testTag("capture_frame_button")
-                                .clickable { captureAndSaveScreenshot(context, activeItem, currentPositionMs.toLong()) }
-                        )
-
-                        // Playback Speed Dropdown Trigger
-                        Box {
-                            Text(
-                                text = "${playbackSpeed}x",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = AuraMidnight,
-                                modifier = Modifier
-                                    .testTag("playback_speed_button")
-                                    .clickable { showSpeedMenu = true }
-                            )
-
-                            DropdownMenu(
-                                expanded = showSpeedMenu,
-                                onDismissRequest = { showSpeedMenu = false },
-                                modifier = Modifier.background(AuraCrispWhite)
-                            ) {
-                                listOf(0.25f, 0.5f, 1.0f, 2.0f, 4.0f).forEach { speed ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = "${speed}x ${if (playbackSpeed == speed) "✓" else ""}",
-                                                color = AuraMidnight,
-                                                fontWeight = if (playbackSpeed == speed) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                        },
-                                        onClick = {
-                                            playbackSpeed = speed
-                                            exoPlayer.setPlaybackSpeed(speed)
-                                            showSpeedMenu = false
-                                            Toast.makeText(context, "Playback speed: ${speed}x", Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        // Favorite / Like
-                        Icon(
-                            imageVector = if (activeItem.isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = "Favorite",
-                            tint = if (activeItem.isFavorite) AuraMagenta else AuraMidnight,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .clickable { onFavoriteToggle(activeItem.id) }
-                        )
-
-                        // Delete Trash Icon -> Trigger Dialog
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Delete Media",
-                            tint = Color(0xFFEF4444),
-                            modifier = Modifier
-                                .size(18.dp)
-                                .testTag("delete_media_button")
-                                .clickable {
-                                    showPlayerMenu = false
-                                    showDeleteDialog = true
-                                }
-                        )
-                    }
+        SwipeMenuSheet(
+            activeItem = activeItem,
+            isVideo = isVideo,
+            currentPositionMs = currentPositionMs.toLong(),
+            playbackSpeed = playbackSpeed,
+            isLoopEnabled = isLoopEnabled,
+            abPointA = abPointA,
+            abPointB = abPointB,
+            isAbRepeatActive = isAbRepeatActive,
+            onDismiss = { showPlayerMenu = false },
+            onUpdateRating = onUpdateRating,
+            onFavoriteToggle = onFavoriteToggle,
+            onDeleteRequest = { showDeleteDialog = true },
+            onBeginVisualSearch = { item ->
+                onAddVisualReference?.invoke(item)
+                if (onNavigateToLibrary != null) {
+                    onNavigateToLibrary()
+                } else {
+                    onBack()
                 }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // 3. Action Button Grid (3x2)
-                val activeReferences by repository.activeVisualReferences.collectAsStateWithLifecycle()
-                val isVisualSearchActive = activeReferences.isNotEmpty()
-
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        PlayerActionButton(
-                            label = "See Similar",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                Log.d("SeeSimilarTrace", "STAGE=UI sourceId=${activeItem.id} title=\"${activeItem.title}\" uri=${activeItem.uriPath}")
-                                onMicroMoment?.invoke(activeItem.id, 5)
-                                onSeeSimilar?.invoke(activeItem)
-                                showPlayerMenu = false
-                            }
-                        )
-                        
-                        if (isVisualSearchActive) {
-                            PlayerActionButton(
-                                label = "Add to Search",
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    onAddVisualReference?.invoke(activeItem)
-                                    Toast.makeText(context, "Added to current search", Toast.LENGTH_SHORT).show()
-                                    showPlayerMenu = false
-                                    onBack() // AURA REPAIR: Return to library to see combined results
-                                }
-                            )
-                        } else {
-                            PlayerActionButton(
-                                label = "More Like This",
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    onMicroMoment?.invoke(activeItem.id, 3)
-                                    Toast.makeText(context, "Increased recommendation weight", Toast.LENGTH_SHORT).show()
-                                    showPlayerMenu = false
-                                }
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        if (isVisualSearchActive) {
-                            PlayerActionButton(
-                                label = "More Like This",
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    onMicroMoment?.invoke(activeItem.id, 3)
-                                    Toast.makeText(context, "Increased recommendation weight", Toast.LENGTH_SHORT).show()
-                                    showPlayerMenu = false
-                                }
-                            )
-                        }
-                        
-                        PlayerActionButton(
-                            label = "Less Like This",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onMicroMoment?.invoke(activeItem.id, -2)
-                                Toast.makeText(context, "Adjusted recommendations", Toast.LENGTH_SHORT).show()
-                                showPlayerMenu = false
-                            }
-                        )
-                        
-                        if (!isVisualSearchActive) {
-                            PlayerActionButton(
-                                label = "Generate Clips",
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    onMicroMoment?.invoke(activeItem.id, 4)
-                                    showPlayerMenu = false
-                                    val clips = generateClipCandidates(activeItem, durationMs)
-                                    generatedClips = clips
-                                    showClipsSheet = true
-                                }
-                            )
-                        }
-                    }
-                    
-                    if (isVisualSearchActive) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            PlayerActionButton(
-                                label = "Generate Clips",
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    onMicroMoment?.invoke(activeItem.id, 4)
-                                    showPlayerMenu = false
-                                    val clips = generateClipCandidates(activeItem, durationMs)
-                                    generatedClips = clips
-                                    showClipsSheet = true
-                                }
-                            )
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
+            },
+            onSeeSimilar = { item ->
+                Log.d("SeeSimilarTrace", "STAGE=UI sourceId=${item.id} title=\"${item.title}\" uri=${item.uriPath}")
+                onMicroMoment?.invoke(item.id, 5)
+                onSeeSimilar?.invoke(item)
+            },
+            onGenerateClips = { item ->
+                onMicroMoment?.invoke(item.id, 4)
+                val clips = generateClipCandidates(item, durationMs)
+                generatedClips = clips
+                showClipsSheet = true
+            },
+            onSetPlaybackSpeed = { speed ->
+                playbackSpeed = speed
+                exoPlayer.setPlaybackSpeed(speed)
+            },
+            onSetAbPointA = { pointA -> abPointA = pointA },
+            onSetAbPointB = { pointB -> abPointB = pointB },
+            onSetAbRepeatActive = { active -> isAbRepeatActive = active },
+            onCaptureScreenshot = { captureAndSaveScreenshot(context, activeItem, currentPositionMs.toLong()) },
+            onExportAbClip = {
+                if (abPointA != null && abPointB != null && abPointB!! > abPointA!!) {
+                    val clip = com.example.data.ClipCandidate(
+                        title = "AB Clip ${System.currentTimeMillis()}",
+                        startTimeMs = abPointA!!,
+                        endTimeMs = abPointB!!,
+                        durationSec = ((abPointB!! - abPointA!!) / 1000).toInt(),
+                        relevanceScorePercent = 100,
+                        selectionReason = "User defined AB segment"
+                    )
+                    exportClip(context, activeItem, clip)
+                } else {
+                    Toast.makeText(context, "Point B must be after Point A", Toast.LENGTH_SHORT).show()
                 }
             }
-        }
+        )
     }
 
     // Delete Confirmation Dialog
